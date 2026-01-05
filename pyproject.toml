@@ -5,6 +5,7 @@ description = "An app service for MetaHub project"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.17.2",
     "fastapi>=0.120.1",
     "gunicorn>=23.0.0",
     "loguru>=0.7.3",

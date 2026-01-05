@@ -8,7 +8,7 @@ from app.db.session import get_db
 from app.schema.event import PingEventRequest
 from app.db.model.event import Event
 
-router = APIRouter(prefix="/event")
+router = APIRouter(prefix="/events")
 
 
 @router.post("/ping")
@@ -34,3 +34,14 @@ def ping_event(request: PingEventRequest, db: Session = Depends(get_db)):
     
     logger.info(f"Created event: id={event.id}, type={event.type}")
     return {"type": event.type, "data": event.data, "id": event.id}
+
+@router.get("")
+def get_events(db: Session = Depends(get_db)):
+    '''
+    获取所有事件记录
+    
+    :param db: 说明
+    :type db: Session
+    '''
+    events = db.query(Event).all()
+    return [{"id": event.id, "type": event.type, "data": event.data, "created_at": event.created_at} for event in events]

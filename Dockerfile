@@ -64,6 +64,9 @@ COPY app ./app
 COPY main.py ./
 COPY pyproject.toml uv.lock ./
 
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
+
 # Copy frontend build from frontend-builder
 COPY --from=frontend-builder /frontend/dist ./frontend/dist
 
