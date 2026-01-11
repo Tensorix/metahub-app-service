@@ -5,6 +5,9 @@ FROM oven/bun:1.2-alpine AS frontend-builder
 
 WORKDIR /frontend
 
+# Configure Bun to use China mirror
+RUN printf '[install]\nregistry = "https://registry.npmmirror.com"' > bunfig.toml
+
 # Copy frontend package files
 COPY frontend/package.json frontend/bun.lock* ./
 
@@ -31,6 +34,9 @@ WORKDIR /app
 # Copy Python dependency files
 COPY pyproject.toml uv.lock ./
 
+# Configure uv to use China PyPI mirror
+ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
 # Install Python dependencies into a virtual environment
 RUN uv sync --frozen --no-dev
 
@@ -43,7 +49,11 @@ FROM python:3.14-slim AS runtime
 # Set Python environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/app/.venv/bin:$PATH"
+    PATH="/app/.venv/bin:$PATH" \
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
+# Configure apt to use China mirror
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources
 
 # Apply OS security updates
 RUN apt-get update && \
@@ -84,4 +94,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:8000/health', timeout=5)" || exit 1
 
 # Start application with gunicorn
-CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-w", "4", "--bind", "0.0.0.0:8000", "app:api"]
+CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-w", "1", "--bind", "0.0.0.0:8000", "app:api"]
