@@ -21,7 +21,7 @@ RUN bun run build
 # ============================================
 # Stage 2: Python Builder
 # ============================================
-FROM python:3.13-slim AS python-builder
+FROM python:3.14-slim AS python-builder
 
 # Install uv for fast Python package management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
@@ -38,7 +38,7 @@ RUN uv sync --frozen --no-dev
 # ============================================
 # Stage 3: Runtime
 # ============================================
-FROM python:3.13-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 # Set Python environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \

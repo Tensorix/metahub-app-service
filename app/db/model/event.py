@@ -1,16 +1,17 @@
+from datetime import datetime
+from uuid import UUID, uuid7
+
 from app.db.model import Base
 from sqlalchemy import DateTime, String, JSON, func
 from sqlalchemy.orm import Mapped, mapped_column
-
-from datetime import datetime
 
 
 class Event(Base):
     __tablename__ = "event"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid7)
     type: Mapped[str] = mapped_column(String, nullable=False)
-    data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
