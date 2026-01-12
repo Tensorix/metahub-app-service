@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from loguru import logger
 
 from app.db.init_db import init_db
 from app.router import api_router
@@ -41,12 +42,13 @@ app.include_router(api_router, prefix=f"/api")
 def health():
     # return {"status": "ok"}
     try:
-        from app.db import engine
+        from app.db.session import engine
         from sqlalchemy import text
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         return {"status": "ok", "database": "connected"}
-    except:
+    except Exception as e:
+        logger.error(e)
         return {"status": "degraded", "database": "disconnected"}
 
 
