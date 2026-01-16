@@ -12,6 +12,7 @@ dependencies = [
     "nanoid>=2.0.0",
     "psycopg[binary]>=3.2.12",
     "pydantic-settings>=2.11.0",
+    "requests>=2.32.5",
     "sqlalchemy>=2.0.44",
     "uvicorn>=0.38.0",
 ]
