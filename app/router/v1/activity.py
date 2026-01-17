@@ -5,6 +5,8 @@ from uuid import UUID
 from math import ceil
 
 from app.db.session import get_db
+from app.db.model.user import User
+from app.deps import get_current_user
 from app.service.activity import ActivityService
 from app.schema.activity import (
     ActivityCreate, 
@@ -21,7 +23,8 @@ router = APIRouter(prefix="/activities", tags=["activities"])
 @router.post("", response_model=BaseResponse[ActivityResponse], summary="创建活动")
 def create_activity(
     activity_data: ActivityCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user)
 ):
     """创建新的活动"""
     try:
@@ -38,7 +41,8 @@ def create_activity(
 @router.get("/{activity_id}", response_model=BaseResponse[ActivityResponse], summary="获取活动详情")
 def get_activity(
     activity_id: UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user)
 ):
     """根据ID获取活动详情"""
     activity = ActivityService.get_activity(db, activity_id)
@@ -61,7 +65,8 @@ def get_activities(
     priority_max: Optional[int] = Query(None, description="最大优先级"),
     tags: Optional[list[str]] = Query(None, description="按标签筛选（数组，匹配任意标签）"),
     is_deleted: bool = Query(False, description="是否包含已删除的记录"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user)
 ):
     """获取活动列表，支持分页和筛选"""
     query_params = ActivityListQuery(
@@ -94,7 +99,8 @@ def get_activities(
 def update_activity(
     activity_id: UUID,
     activity_data: ActivityUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user)
 ):
     """更新活动信息"""
     activity = ActivityService.update_activity(db, activity_id, activity_data)
@@ -112,7 +118,8 @@ def update_activity(
 def delete_activity(
     activity_id: UUID,
     hard_delete: bool = Query(False, description="是否硬删除"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user)
 ):
     """删除活动（默认软删除）"""
     success = ActivityService.delete_activity(db, activity_id, soft_delete=not hard_delete)
@@ -128,7 +135,8 @@ def delete_activity(
 @router.post("/{activity_id}/restore", response_model=BaseResponse[ActivityResponse], summary="恢复已删除的活动")
 def restore_activity(
     activity_id: UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user)
 ):
     """恢复已删除的活动"""
     activity = ActivityService.restore_activity(db, activity_id)

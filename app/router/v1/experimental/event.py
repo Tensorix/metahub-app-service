@@ -5,6 +5,8 @@ from loguru import logger
 
 from fastapi import Depends
 from app.db.session import get_db
+from app.db.model.user import User
+from app.deps import get_current_user
 from app.schema.event import PingEventRequest
 from app.db.model.event import Event
 from app.service.activity import ActivityService
@@ -13,7 +15,7 @@ router = APIRouter(prefix="/events")
 
 
 @router.post("/ping")
-def ping_event(request: PingEventRequest, db: Session = Depends(get_db)):
+def ping_event(request: PingEventRequest, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
     '''
     Ping Event 接口，用于发送测试事件
     当创建 ping event 时，会自动创建一个对应的 ping 类型的 activity
@@ -64,7 +66,7 @@ def ping_event(request: PingEventRequest, db: Session = Depends(get_db)):
     }
 
 @router.get("")
-def get_events(db: Session = Depends(get_db)):
+def get_events(db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
     '''
     获取所有事件记录
     

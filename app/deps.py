@@ -7,15 +7,39 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.db.model.user import User
 from app.service.auth import TokenService, AuthService
+from app.config import config
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
+
+# DEBUG 模式下使用的固定用户
+DEBUG_USER = User(
+    id=UUID("00000000-0000-0000-0000-000000000000"),
+    username="debug_user",
+    email="debug@example.com",
+    phone=None,
+    password_hash="",
+    is_active=True,
+    is_superuser=True,
+)
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
-) -> User:
-    """获取当前登录用户"""
+) -> User | None:
+    """获取当前登录用户，DEBUG 模式下返回固定的 debug 用户"""
+    
+    # DEBUG 模式下返回固定的 debug 用户
+    if config.DEBUG:
+        return DEBUG_USER
+    
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="缺少认证凭据",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
     token = credentials.credentials
     payload = TokenService.decode_token(token)
 
@@ -61,9 +85,20 @@ def get_current_user(
 
 
 def get_current_active_superuser(
-    current_user: User = Depends(get_current_user),
-) -> User:
-    """获取当前超级用户"""
+    current_user: User | None = Depends(get_current_user),
+) -> User | None:
+    """获取当前超级用户，DEBUG 模式下返回 debug 用户"""
+    
+    # DEBUG 模式下返回 debug 用户
+    if config.DEBUG:
+        return DEBUG_USER
+    
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="未认证",
+        )
+    
     if not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
