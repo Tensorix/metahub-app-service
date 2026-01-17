@@ -28,14 +28,14 @@ class Settings(BaseSettings):
     POSTGRES_MAX_OVERFLOW: int = 10
     POSTGRES_TIMEZONE: str = "UTC"
 
-    LOGTO_INTROSPECTION_ENDPOINT: str = (
-        "https://example.com/oidc/token/introspection"
-    )
-    LOGTO_CLIENT_ID: str = ""
-    LOGTO_CLIENT_SECRET: str = ""
+    # JWT 配置
+    JWT_SECRET_KEY: str = "change-me-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    VITE_LOGTO_ENDPOINT: str = ""
-    VITE_LOGTO_APP_ID: str = ""
+    # 密码策略
+    PASSWORD_STRENGTH_CHECK: bool = False
 
     @computed_field
     @property
