@@ -3,8 +3,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+import bcrypt
 from jose import jwt, JWTError
-from passlib.context import CryptContext
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -12,21 +12,31 @@ from app.config import config
 from app.db.model.user import User, UserToken
 from app.schema.auth import RegisterRequest, LoginRequest
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 class PasswordService:
     """密码处理服务"""
 
     @staticmethod
     def hash_password(sha256_password: str) -> str:
-        """对 SHA256 哈希后的密码进行 bcrypt 哈希"""
-        return pwd_context.hash(sha256_password)
+        """
+        对 SHA256 哈希后的密码进行 bcrypt 哈希
+        
+        使用 bcrypt 直接哈希，不再依赖 passlib
+        """
+        # 将 SHA256 哈希转换为字节
+        password_bytes = sha256_password.encode('utf-8')
+        # 生成盐并哈希
+        salt = bcrypt.gensalt()
+        hashed = bcrypt.hashpw(password_bytes, salt)
+        # 返回字符串形式
+        return hashed.decode('utf-8')
 
     @staticmethod
     def verify_password(sha256_password: str, hashed_password: str) -> bool:
         """验证密码"""
-        return pwd_context.verify(sha256_password, hashed_password)
+        password_bytes = sha256_password.encode('utf-8')
+        hashed_bytes = hashed_password.encode('utf-8')
+        return bcrypt.checkpw(password_bytes, hashed_bytes)
 
     @staticmethod
     def check_password_strength(password: str) -> tuple[bool, str | None]:
