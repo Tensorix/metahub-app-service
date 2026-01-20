@@ -1,7 +1,4 @@
-from .base import BaseRequest, BaseResponse
+# Schema 包
+# 不再使用信封格式，直接返回数据
 
-
-__all__ = [
-    "BaseRequest",
-    "BaseResponse",
-]
+__all__ = []

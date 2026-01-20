@@ -37,12 +37,10 @@ api.interceptors.response.use(
             refresh_token: refreshToken,
           });
 
-          if (data.code === '200') {
-            localStorage.setItem('access_token', data.data.access_token);
-            localStorage.setItem('refresh_token', data.data.refresh_token);
-            originalRequest.headers.Authorization = `Bearer ${data.data.access_token}`;
-            return api(originalRequest);
-          }
+          localStorage.setItem('access_token', data.access_token);
+          localStorage.setItem('refresh_token', data.refresh_token);
+          originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
+          return api(originalRequest);
         } catch (refreshError) {
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
@@ -103,15 +101,9 @@ export interface TokenResponse {
   expires_in: number;
 }
 
-export interface ApiResponse<T> {
-  code: string;
-  message: string;
-  data: T;
-}
-
 // Auth API
 export const authApi = {
-  async register(data: RegisterData): Promise<ApiResponse<User>> {
+  async register(data: RegisterData): Promise<User> {
     const hashedPassword = await sha256(data.password);
     const response = await api.post('/api/v1/auth/register', {
       ...data,
@@ -120,7 +112,7 @@ export const authApi = {
     return response.data;
   },
 
-  async login(data: LoginData): Promise<ApiResponse<TokenResponse>> {
+  async login(data: LoginData): Promise<TokenResponse> {
     const hashedPassword = await sha256(data.password);
     const response = await api.post('/api/v1/auth/login', {
       ...data,
@@ -130,19 +122,18 @@ export const authApi = {
     return response.data;
   },
 
-  async logout(refreshToken?: string): Promise<ApiResponse<null>> {
-    const response = await api.post('/api/v1/auth/logout', {
+  async logout(refreshToken?: string): Promise<void> {
+    await api.post('/api/v1/auth/logout', {
       refresh_token: refreshToken,
     });
-    return response.data;
   },
 
-  async getMe(): Promise<ApiResponse<User>> {
+  async getMe(): Promise<User> {
     const response = await api.get('/api/v1/auth/me');
     return response.data;
   },
 
-  async refresh(refreshToken: string): Promise<ApiResponse<TokenResponse>> {
+  async refresh(refreshToken: string): Promise<TokenResponse> {
     const response = await api.post('/api/v1/auth/refresh', {
       refresh_token: refreshToken,
     });

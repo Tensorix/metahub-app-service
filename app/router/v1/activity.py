@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from typing import Optional
 from uuid import UUID
@@ -15,12 +15,11 @@ from app.schema.activity import (
     ActivityListQuery,
     ActivityListResponse
 )
-from app.schema.base import BaseResponse
 
 router = APIRouter(prefix="/activities", tags=["activities"])
 
 
-@router.post("", response_model=BaseResponse[ActivityResponse], summary="创建活动")
+@router.post("", response_model=ActivityResponse, status_code=status.HTTP_201_CREATED, summary="创建活动")
 def create_activity(
     activity_data: ActivityCreate,
     db: Session = Depends(get_db),
@@ -29,16 +28,12 @@ def create_activity(
     """创建新的活动"""
     try:
         activity = ActivityService.create_activity(db, activity_data)
-        return BaseResponse(
-            code="200",
-            message="活动创建成功",
-            data=ActivityResponse.model_validate(activity)
-        )
+        return ActivityResponse.model_validate(activity)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建活动失败: {str(e)}")
 
 
-@router.get("/{activity_id}", response_model=BaseResponse[ActivityResponse], summary="获取活动详情")
+@router.get("/{activity_id}", response_model=ActivityResponse, summary="获取活动详情")
 def get_activity(
     activity_id: UUID,
     db: Session = Depends(get_db),
@@ -49,14 +44,10 @@ def get_activity(
     if not activity:
         raise HTTPException(status_code=404, detail="活动不存在")
     
-    return BaseResponse(
-        code="200",
-        message="获取成功",
-        data=ActivityResponse.model_validate(activity)
-    )
+    return ActivityResponse.model_validate(activity)
 
 
-@router.get("", response_model=BaseResponse[ActivityListResponse], summary="获取活动列表")
+@router.get("", response_model=ActivityListResponse, summary="获取活动列表")
 def get_activities(
     page: int = Query(1, ge=1, description="页码"),
     size: int = Query(10, ge=1, le=100, description="每页数量"),
@@ -82,20 +73,16 @@ def get_activities(
     activities, total = ActivityService.get_activities(db, query_params)
     pages = ceil(total / size) if total > 0 else 0
     
-    return BaseResponse(
-        code="200",
-        message="获取成功",
-        data=ActivityListResponse(
-            items=[ActivityResponse.model_validate(activity) for activity in activities],
-            total=total,
-            page=page,
-            size=size,
-            pages=pages
-        )
+    return ActivityListResponse(
+        items=[ActivityResponse.model_validate(activity) for activity in activities],
+        total=total,
+        page=page,
+        size=size,
+        pages=pages
     )
 
 
-@router.put("/{activity_id}", response_model=BaseResponse[ActivityResponse], summary="更新活动")
+@router.put("/{activity_id}", response_model=ActivityResponse, summary="更新活动")
 def update_activity(
     activity_id: UUID,
     activity_data: ActivityUpdate,
@@ -107,14 +94,10 @@ def update_activity(
     if not activity:
         raise HTTPException(status_code=404, detail="活动不存在")
     
-    return BaseResponse(
-        code="200",
-        message="更新成功",
-        data=ActivityResponse.model_validate(activity)
-    )
+    return ActivityResponse.model_validate(activity)
 
 
-@router.delete("/{activity_id}", response_model=BaseResponse[None], summary="删除活动")
+@router.delete("/{activity_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除活动")
 def delete_activity(
     activity_id: UUID,
     hard_delete: bool = Query(False, description="是否硬删除"),
@@ -125,14 +108,9 @@ def delete_activity(
     success = ActivityService.delete_activity(db, activity_id, soft_delete=not hard_delete)
     if not success:
         raise HTTPException(status_code=404, detail="活动不存在")
-    
-    return BaseResponse(
-        code="200",
-        message="删除成功"
-    )
 
 
-@router.post("/{activity_id}/restore", response_model=BaseResponse[ActivityResponse], summary="恢复已删除的活动")
+@router.post("/{activity_id}/restore", response_model=ActivityResponse, summary="恢复已删除的活动")
 def restore_activity(
     activity_id: UUID,
     db: Session = Depends(get_db),
@@ -143,8 +121,4 @@ def restore_activity(
     if not activity:
         raise HTTPException(status_code=404, detail="活动不存在或未被删除")
     
-    return BaseResponse(
-        code="200",
-        message="恢复成功",
-        data=ActivityResponse.model_validate(activity)
-    )
+    return ActivityResponse.model_validate(activity)

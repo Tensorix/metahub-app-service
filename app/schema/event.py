@@ -2,16 +2,12 @@ from typing import Any
 from datetime import datetime
 from uuid import UUID
 
-from app.schema import BaseRequest
-
 from pydantic import BaseModel, ConfigDict
 
 
 class PingEventRequest(BaseModel):
-    # ...
-    model_config = ConfigDict(extra='allow')
-    
     # 允许接收任意 JSON 字段
+    model_config = ConfigDict(extra='allow')
 
 
 class EventResponse(BaseModel):
