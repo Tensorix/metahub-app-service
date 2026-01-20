@@ -55,9 +55,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Configure apt to use China mirror
 RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources
 
-# Apply OS security updates
+# Apply OS security updates and install gettext for envsubst
 RUN apt-get update && \
     apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends gettext-base && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -80,9 +81,13 @@ COPY alembic.ini ./alembic.ini
 # Copy frontend build from frontend-builder
 COPY --from=frontend-builder /frontend/dist ./frontend/dist
 
+# Copy entrypoint script for runtime config injection
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app && \
+    chmod +x /docker-entrypoint.sh
 
 USER appuser
 
@@ -92,6 +97,9 @@ EXPOSE 8000
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:8000/health', timeout=5)" || exit 1
+
+# Use entrypoint script for runtime config injection
+ENTRYPOINT ["/docker-entrypoint.sh"]
 
 # Start application with gunicorn
 CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-w", "1", "--bind", "0.0.0.0:8000", "app:api"]

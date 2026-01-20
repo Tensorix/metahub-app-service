@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { useAuthStore } from '../store/auth';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { isPasswordStrengthCheckEnabled } from '@/config/env';
 
 export function Register() {
   const navigate = useNavigate();
@@ -21,8 +22,8 @@ export function Register() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 从环境变量读取密码强度检查配置
-  const enablePasswordStrengthCheck = import.meta.env.VITE_PASSWORD_STRENGTH_CHECK === 'true';
+  // 从配置读取密码强度检查设置
+  const enablePasswordStrengthCheck = isPasswordStrengthCheckEnabled();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -47,9 +48,7 @@ export function Register() {
       return false;
     }
 
-    // 密码强度检查（可通过环境变量控制）
-    const enablePasswordStrengthCheck = import.meta.env.VITE_PASSWORD_STRENGTH_CHECK === 'true';
-    
+    // 密码强度检查（可通过配置控制）
     if (enablePasswordStrengthCheck) {
       const hasUpperCase = /[A-Z]/.test(formData.password);
       const hasLowerCase = /[a-z]/.test(formData.password);

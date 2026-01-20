@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库
+  db:
+    image: postgres:16-alpine
+    container_name: metahub-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-metahub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-metahub_password}
+      POSTGRES_DB: ${POSTGRES_DB:-metahub}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-metahub}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis 缓存（可选）
+  redis:
+    image: redis:7-alpine
+    container_name: metahub-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # 应用服务（后端 + 前端）
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: metahub-app
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      # 数据库配置
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-metahub}:${POSTGRES_PASSWORD:-metahub_password}@db:5432/${POSTGRES_DB:-metahub}
+      
+      # Redis 配置
+      - REDIS_URL=redis://redis:6379/0
+      
+      # 应用配置
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - DEBUG=${DEBUG:-false}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-*}
+      
+      # 前端运行时配置
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000}
+      - VITE_PASSWORD_STRENGTH_CHECK=${VITE_PASSWORD_STRENGTH_CHECK:-false}
+      
+      # 数据库迁移
+      - RUN_MIGRATIONS=${RUN_MIGRATIONS:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local

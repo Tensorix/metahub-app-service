@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment files (keep .env.example)
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+.env.development

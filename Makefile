@@ -118,6 +118,22 @@ docker-logs: ## Show Docker container logs
 docker-shell: ## Open shell in running Docker container
 	docker exec -it $(DOCKER_CONTAINER) /bin/bash
 
+docker-compose-up: ## Start all services with docker-compose
+	@echo "$(BLUE)Starting services with docker-compose...$(NC)"
+	docker-compose up -d
+	@echo "$(GREEN)Services started! Access at http://localhost:8000$(NC)"
+
+docker-compose-down: ## Stop all services with docker-compose
+	@echo "$(BLUE)Stopping services...$(NC)"
+	docker-compose down
+
+docker-compose-logs: ## Show docker-compose logs
+	docker-compose logs -f
+
+docker-compose-restart: ## Restart docker-compose services
+	@echo "$(BLUE)Restarting services...$(NC)"
+	docker-compose restart
+
 # Cleanup commands
 clean: ## Clean all generated files and dependencies
 	@echo "$(BLUE)Cleaning up...$(NC)"
