@@ -139,11 +139,11 @@ def delete_topic(topic_id: UUID, hard_delete: bool = Query(False), db: Session =
 
 # ============ Message APIs ============
 @router.post("/sessions/{session_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED, summary="添加消息")
-def create_message(session_id: UUID, data: MessageCreate, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
+def create_message(session_id: UUID, data: MessageCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if data.session_id != session_id:
         raise HTTPException(status_code=400, detail="session_id 不匹配")
     
-    session = SessionService.get_session(db, session_id)
+    session = SessionService.get_session(db, session_id, current_user.id)
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     
@@ -160,8 +160,13 @@ def get_messages(
     role: Optional[str] = Query(None),
     is_deleted: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
+    # 验证会话所有权
+    session = SessionService.get_session(db, session_id, current_user.id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    
     query = MessageListQuery(page=page, size=size, topic_id=topic_id, role=role, is_deleted=is_deleted)
     messages, total = MessageService.get_messages(db, session_id, query)
     pages = ceil(total / size) if total > 0 else 0
@@ -173,7 +178,7 @@ def get_messages(
 
 
 @router.delete("/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除消息")
-def delete_message(message_id: UUID, hard_delete: bool = Query(False), db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
+def delete_message(message_id: UUID, hard_delete: bool = Query(False), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     success = MessageService.delete_message(db, message_id, soft_delete=not hard_delete)
     if not success:
         raise HTTPException(status_code=404, detail="消息不存在")
@@ -181,13 +186,13 @@ def delete_message(message_id: UUID, hard_delete: bool = Query(False), db: Sessi
 
 # ============ Agent APIs ============
 @router.post("/agents", response_model=AgentResponse, status_code=status.HTTP_201_CREATED, summary="创建 Agent")
-def create_agent(data: AgentCreate, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
+def create_agent(data: AgentCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     agent = AgentService.create_agent(db, data)
     return AgentResponse.model_validate(agent)
 
 
 @router.get("/agents/{agent_id}", response_model=AgentResponse, summary="获取 Agent 详情")
-def get_agent(agent_id: UUID, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
+def get_agent(agent_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     agent = AgentService.get_agent(db, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent 不存在")
@@ -199,14 +204,14 @@ def get_agents(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     agents, _ = AgentService.get_agents(db, page, size)
     return [AgentResponse.model_validate(a) for a in agents]
 
 
 @router.put("/agents/{agent_id}", response_model=AgentResponse, summary="更新 Agent")
-def update_agent(agent_id: UUID, data: AgentUpdate, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
+def update_agent(agent_id: UUID, data: AgentUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     agent = AgentService.update_agent(db, agent_id, data)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent 不存在")
@@ -214,7 +219,7 @@ def update_agent(agent_id: UUID, data: AgentUpdate, db: Session = Depends(get_db
 
 
 @router.delete("/agents/{agent_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除 Agent")
-def delete_agent(agent_id: UUID, hard_delete: bool = Query(False), db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
+def delete_agent(agent_id: UUID, hard_delete: bool = Query(False), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     success = AgentService.delete_agent(db, agent_id, soft_delete=not hard_delete)
     if not success:
         raise HTTPException(status_code=404, detail="Agent 不存在")

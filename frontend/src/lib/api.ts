@@ -169,3 +169,188 @@ export const apiKeyApi = {
     return response.data;
   },
 };
+
+// Session API
+export interface Session {
+  id: string;
+  name?: string;
+  type: string;
+  agent_id?: string;
+  metadata?: Record<string, any>;
+  source?: string;
+  last_visited_at?: string;
+  created_at: string;
+  updated_at: string;
+  is_deleted: boolean;
+  unread_count: number;
+}
+
+export interface SessionCreate {
+  name?: string;
+  type: string;
+  agent_id?: string;
+  metadata?: Record<string, any>;
+  source?: string;
+}
+
+export interface SessionUpdate {
+  name?: string;
+  type?: string;
+  agent_id?: string;
+  metadata?: Record<string, any>;
+  source?: string;
+  last_visited_at?: string;
+}
+
+export interface SessionListResponse {
+  items: Session[];
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+}
+
+export interface Topic {
+  id: string;
+  name?: string;
+  session_id: string;
+  created_at: string;
+  updated_at: string;
+  is_deleted: boolean;
+}
+
+export interface TopicCreate {
+  name?: string;
+  session_id: string;
+}
+
+export interface TopicUpdate {
+  name?: string;
+}
+
+export interface MessagePart {
+  id: string;
+  message_id: string;
+  type: string;
+  content: string;
+  metadata?: Record<string, any>;
+  event_id?: string;
+  raw_data?: Record<string, any>;
+  created_at: string;
+}
+
+export interface Message {
+  id: string;
+  session_id: string;
+  topic_id?: string;
+  role: string;
+  sender_id?: string;
+  created_at: string;
+  updated_at: string;
+  is_deleted: boolean;
+  parts: MessagePart[];
+}
+
+export interface MessageCreate {
+  session_id: string;
+  topic_id?: string;
+  role: string;
+  sender_id?: string;
+  parts: {
+    type: string;
+    content: string;
+    metadata?: Record<string, any>;
+    event_id?: string;
+    raw_data?: Record<string, any>;
+  }[];
+}
+
+export interface MessageListResponse {
+  items: Message[];
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+}
+
+export const sessionApi = {
+  async getSessions(params?: {
+    page?: number;
+    size?: number;
+    type?: string;
+    source?: string;
+    is_deleted?: boolean;
+  }): Promise<SessionListResponse> {
+    const response = await api.get('/api/v1/sessions', { params });
+    return response.data;
+  },
+
+  async getSession(sessionId: string): Promise<Session> {
+    const response = await api.get(`/api/v1/sessions/${sessionId}`);
+    return response.data;
+  },
+
+  async createSession(data: SessionCreate): Promise<Session> {
+    const response = await api.post('/api/v1/sessions', data);
+    return response.data;
+  },
+
+  async updateSession(sessionId: string, data: SessionUpdate): Promise<Session> {
+    const response = await api.put(`/api/v1/sessions/${sessionId}`, data);
+    return response.data;
+  },
+
+  async deleteSession(sessionId: string, hardDelete = false): Promise<void> {
+    await api.delete(`/api/v1/sessions/${sessionId}`, {
+      params: { hard_delete: hardDelete },
+    });
+  },
+
+  async markSessionRead(sessionId: string): Promise<Session> {
+    const response = await api.post(`/api/v1/sessions/${sessionId}/read`);
+    return response.data;
+  },
+
+  async getTopics(sessionId: string): Promise<Topic[]> {
+    const response = await api.get(`/api/v1/sessions/${sessionId}/topics`);
+    return response.data;
+  },
+
+  async createTopic(sessionId: string, data: TopicCreate): Promise<Topic> {
+    const response = await api.post(`/api/v1/sessions/${sessionId}/topics`, data);
+    return response.data;
+  },
+
+  async updateTopic(topicId: string, data: TopicUpdate): Promise<Topic> {
+    const response = await api.put(`/api/v1/topics/${topicId}`, data);
+    return response.data;
+  },
+
+  async deleteTopic(topicId: string, hardDelete = false): Promise<void> {
+    await api.delete(`/api/v1/topics/${topicId}`, {
+      params: { hard_delete: hardDelete },
+    });
+  },
+
+  async getMessages(sessionId: string, params?: {
+    page?: number;
+    size?: number;
+    topic_id?: string;
+    role?: string;
+    is_deleted?: boolean;
+  }): Promise<MessageListResponse> {
+    const response = await api.get(`/api/v1/sessions/${sessionId}/messages`, { params });
+    return response.data;
+  },
+
+  async createMessage(sessionId: string, data: MessageCreate): Promise<Message> {
+    const response = await api.post(`/api/v1/sessions/${sessionId}/messages`, data);
+    return response.data;
+  },
+
+  async deleteMessage(messageId: string, hardDelete = false): Promise<void> {
+    await api.delete(`/api/v1/messages/${messageId}`, {
+      params: { hard_delete: hardDelete },
+    });
+  },
+};
