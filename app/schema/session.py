@@ -9,7 +9,7 @@ class SessionBase(BaseModel):
     name: Optional[str] = Field(None, description="会话名称", max_length=255)
     type: str = Field(..., description="会话类型: pm/group/ai/<plugin_type>", max_length=50)
     agent_id: Optional[UUID] = Field(None, description="关联的 Agent ID")
-    metadata: Optional[dict] = Field(None, description="扩展元数据")
+    metadata: Optional[dict] = Field(None, description="扩展元数据", validation_alias="metadata_")
     source: Optional[str] = Field(None, description="来源: null/astr_wechat/astr_qq/manual_upload", max_length=50)
 
 
@@ -21,7 +21,7 @@ class SessionUpdate(BaseModel):
     name: Optional[str] = Field(None, description="会话名称", max_length=255)
     type: Optional[str] = Field(None, description="会话类型", max_length=50)
     agent_id: Optional[UUID] = Field(None, description="关联的 Agent ID")
-    metadata: Optional[dict] = Field(None, description="扩展元数据")
+    metadata: Optional[dict] = Field(None, description="扩展元数据", validation_alias="metadata_")
     source: Optional[str] = Field(None, description="来源", max_length=50)
     last_visited_at: Optional[datetime] = Field(None, description="最后访问时间")
 
@@ -82,7 +82,7 @@ class TopicResponse(BaseModel):
 class MessagePartBase(BaseModel):
     type: str = Field(..., description="内容类型: text/plain/image/url/json", max_length=50)
     content: str = Field(..., description="内容")
-    metadata: Optional[dict] = Field(None, description="扩展元数据")
+    metadata: Optional[dict] = Field(None, description="扩展元数据", validation_alias="metadata_")
     event_id: Optional[str] = Field(None, description="关联事件ID", max_length=255)
     raw_data: Optional[dict] = Field(None, description="原始数据")
 
@@ -154,7 +154,7 @@ class MessageSenderResponse(BaseModel):
 class AgentBase(BaseModel):
     name: str = Field(..., description="Agent 名称", max_length=255)
     system_prompt: Optional[str] = Field(None, description="系统提示词")
-    metadata: Optional[dict] = Field(None, description="扩展元数据")
+    metadata: Optional[dict] = Field(None, description="扩展元数据", validation_alias="metadata_")
 
 
 class AgentCreate(AgentBase):
@@ -164,7 +164,7 @@ class AgentCreate(AgentBase):
 class AgentUpdate(BaseModel):
     name: Optional[str] = Field(None, description="Agent 名称", max_length=255)
     system_prompt: Optional[str] = Field(None, description="系统提示词")
-    metadata: Optional[dict] = Field(None, description="扩展元数据")
+    metadata: Optional[dict] = Field(None, description="扩展元数据", validation_alias="metadata_")
 
 
 class AgentResponse(AgentBase):
