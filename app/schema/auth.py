@@ -41,6 +41,7 @@ class UserResponse(BaseModel):
     phone: str | None = Field(None, description="手机号")
     is_active: bool = Field(..., description="是否激活")
     is_superuser: bool = Field(..., description="是否超级用户")
+    api_key: str | None = Field(None, description="API Key")
     created_at: datetime = Field(..., description="创建时间")
     updated_at: datetime = Field(..., description="更新时间")
 

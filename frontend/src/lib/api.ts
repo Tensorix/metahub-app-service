@@ -91,6 +91,7 @@ export interface User {
   phone?: string;
   is_active: boolean;
   is_superuser: boolean;
+  api_key?: string;
   created_at: string;
   updated_at: string;
 }
@@ -138,6 +139,33 @@ export const authApi = {
     const response = await api.post('/api/v1/auth/refresh', {
       refresh_token: refreshToken,
     });
+    return response.data;
+  },
+};
+
+// API Key API
+export interface ApiKeyResponse {
+  api_key: string;
+}
+
+export interface ApiKeyResetResponse {
+  api_key: string;
+  message: string;
+}
+
+export const apiKeyApi = {
+  async generate(): Promise<ApiKeyResponse> {
+    const response = await api.post('/api/v1/api-key/generate');
+    return response.data;
+  },
+
+  async reset(): Promise<ApiKeyResetResponse> {
+    const response = await api.post('/api/v1/api-key/reset');
+    return response.data;
+  },
+
+  async get(): Promise<ApiKeyResponse> {
+    const response = await api.get('/api/v1/api-key');
     return response.data;
   },
 };
