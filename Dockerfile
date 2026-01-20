@@ -6,7 +6,7 @@ FROM oven/bun:1.2-alpine AS frontend-builder
 WORKDIR /frontend
 
 # Configure Bun to use China mirror
-RUN printf '[install]\nregistry = "https://registry.npmmirror.com"' > bunfig.toml
+# RUN printf '[install]\nregistry = "https://registry.npmmirror.com"' > bunfig.toml
 
 # Copy frontend package files
 COPY frontend/package.json frontend/bun.lock* ./
@@ -35,7 +35,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 # Configure uv to use China PyPI mirror
-ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+# ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 # Install Python dependencies into a virtual environment
 RUN uv sync --frozen --no-dev
@@ -53,7 +53,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 # Configure apt to use China mirror
-RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources
+# RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources
 
 # Apply OS security updates and install gettext for envsubst
 RUN apt-get update && \
