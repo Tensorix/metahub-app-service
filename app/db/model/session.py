@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
     func,
@@ -20,6 +21,15 @@ class Session(Base):
     __tablename__ = "session"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid7)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="所属用户ID"
+    )
+    version: Mapped[int] = mapped_column(
+        Integer, default=1, nullable=False, comment="版本号，每次更新递增"
+    )
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="会话名称")
     type: Mapped[str] = mapped_column(
         String(50), nullable=False, comment="会话类型: pm/group/ai/<plugin_type>"

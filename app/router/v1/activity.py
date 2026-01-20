@@ -23,11 +23,11 @@ router = APIRouter(prefix="/activities", tags=["activities"])
 def create_activity(
     activity_data: ActivityCreate,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """创建新的活动"""
     try:
-        activity = ActivityService.create_activity(db, activity_data)
+        activity = ActivityService.create_activity(db, activity_data, current_user.id)
         return ActivityResponse.model_validate(activity)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建活动失败: {str(e)}")
@@ -37,10 +37,10 @@ def create_activity(
 def get_activity(
     activity_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """根据ID获取活动详情"""
-    activity = ActivityService.get_activity(db, activity_id)
+    activity = ActivityService.get_activity(db, activity_id, current_user.id)
     if not activity:
         raise HTTPException(status_code=404, detail="活动不存在")
     
@@ -57,7 +57,7 @@ def get_activities(
     tags: Optional[list[str]] = Query(None, description="按标签筛选（数组，匹配任意标签）"),
     is_deleted: bool = Query(False, description="是否包含已删除的记录"),
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """获取活动列表，支持分页和筛选"""
     query_params = ActivityListQuery(
@@ -70,7 +70,7 @@ def get_activities(
         is_deleted=is_deleted
     )
     
-    activities, total = ActivityService.get_activities(db, query_params)
+    activities, total = ActivityService.get_activities(db, query_params, current_user.id)
     pages = ceil(total / size) if total > 0 else 0
     
     return ActivityListResponse(
@@ -87,10 +87,10 @@ def update_activity(
     activity_id: UUID,
     activity_data: ActivityUpdate,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """更新活动信息"""
-    activity = ActivityService.update_activity(db, activity_id, activity_data)
+    activity = ActivityService.update_activity(db, activity_id, activity_data, current_user.id)
     if not activity:
         raise HTTPException(status_code=404, detail="活动不存在")
     
@@ -102,10 +102,10 @@ def delete_activity(
     activity_id: UUID,
     hard_delete: bool = Query(False, description="是否硬删除"),
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """删除活动（默认软删除）"""
-    success = ActivityService.delete_activity(db, activity_id, soft_delete=not hard_delete)
+    success = ActivityService.delete_activity(db, activity_id, current_user.id, soft_delete=not hard_delete)
     if not success:
         raise HTTPException(status_code=404, detail="活动不存在")
 
@@ -114,10 +114,10 @@ def delete_activity(
 def restore_activity(
     activity_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """恢复已删除的活动"""
-    activity = ActivityService.restore_activity(db, activity_id)
+    activity = ActivityService.restore_activity(db, activity_id, current_user.id)
     if not activity:
         raise HTTPException(status_code=404, detail="活动不存在或未被删除")
     

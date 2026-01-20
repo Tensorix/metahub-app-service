@@ -24,9 +24,9 @@ router = APIRouter()
 
 # ============ Session APIs ============
 @router.post("/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED, summary="创建会话")
-def create_session(data: SessionCreate, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
+def create_session(data: SessionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
-        session = SessionService.create_session(db, data)
+        session = SessionService.create_session(db, data, current_user.id)
         resp = SessionResponse.model_validate(session)
         resp.unread_count = 0
         return resp
@@ -35,13 +35,13 @@ def create_session(data: SessionCreate, db: Session = Depends(get_db), current_u
 
 
 @router.get("/sessions/{session_id}", response_model=SessionResponse, summary="获取会话详情")
-def get_session(session_id: UUID, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
-    session = SessionService.get_session(db, session_id)
+def get_session(session_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    session = SessionService.get_session(db, session_id, current_user.id)
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     
     resp = SessionResponse.model_validate(session)
-    resp.unread_count = SessionService.get_unread_count(db, session_id)
+    resp.unread_count = SessionService.get_unread_count(db, session_id, current_user.id)
     return resp
 
 
@@ -53,29 +53,29 @@ def get_sessions(
     source: Optional[str] = Query(None),
     is_deleted: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     query = SessionListQuery(page=page, size=size, type=type, source=source, is_deleted=is_deleted)
-    sessions, total = SessionService.get_sessions(db, query)
+    sessions, total = SessionService.get_sessions(db, query, current_user.id)
     pages = ceil(total / size) if total > 0 else 0
     
     items = []
     for s in sessions:
         resp = SessionResponse.model_validate(s)
-        resp.unread_count = SessionService.get_unread_count(db, s.id)
+        resp.unread_count = SessionService.get_unread_count(db, s.id, current_user.id)
         items.append(resp)
     
     return SessionListResponse(items=items, total=total, page=page, size=size, pages=pages)
 
 
 @router.put("/sessions/{session_id}", response_model=SessionResponse, summary="更新会话")
-def update_session(session_id: UUID, data: SessionUpdate, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
-    session = SessionService.update_session(db, session_id, data)
+def update_session(session_id: UUID, data: SessionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    session = SessionService.update_session(db, session_id, data, current_user.id)
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     
     resp = SessionResponse.model_validate(session)
-    resp.unread_count = SessionService.get_unread_count(db, session_id)
+    resp.unread_count = SessionService.get_unread_count(db, session_id, current_user.id)
     return resp
 
 
@@ -84,16 +84,16 @@ def delete_session(
     session_id: UUID,
     hard_delete: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
-    success = SessionService.delete_session(db, session_id, soft_delete=not hard_delete)
+    success = SessionService.delete_session(db, session_id, current_user.id, soft_delete=not hard_delete)
     if not success:
         raise HTTPException(status_code=404, detail="会话不存在")
 
 
 @router.post("/sessions/{session_id}/read", response_model=SessionResponse, summary="标记会话已读")
-def mark_session_read(session_id: UUID, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
-    session = SessionService.mark_as_read(db, session_id)
+def mark_session_read(session_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    session = SessionService.mark_as_read(db, session_id, current_user.id)
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     
@@ -104,35 +104,35 @@ def mark_session_read(session_id: UUID, db: Session = Depends(get_db), current_u
 
 # ============ Topic APIs ============
 @router.post("/sessions/{session_id}/topics", response_model=TopicResponse, status_code=status.HTTP_201_CREATED, summary="创建话题")
-def create_topic(session_id: UUID, data: TopicCreate, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
+def create_topic(session_id: UUID, data: TopicCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if data.session_id != session_id:
         raise HTTPException(status_code=400, detail="session_id 不匹配")
     
-    session = SessionService.get_session(db, session_id)
+    session = SessionService.get_session(db, session_id, current_user.id)
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     
-    topic = TopicService.create_topic(db, data)
+    topic = TopicService.create_topic(db, data, current_user.id)
     return TopicResponse.model_validate(topic)
 
 
 @router.get("/sessions/{session_id}/topics", response_model=list[TopicResponse], summary="获取会话话题列表")
-def get_topics(session_id: UUID, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
-    topics = TopicService.get_topics_by_session(db, session_id)
+def get_topics(session_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    topics = TopicService.get_topics_by_session(db, session_id, current_user.id)
     return [TopicResponse.model_validate(t) for t in topics]
 
 
 @router.put("/topics/{topic_id}", response_model=TopicResponse, summary="更新话题")
-def update_topic(topic_id: UUID, data: TopicUpdate, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
-    topic = TopicService.update_topic(db, topic_id, data)
+def update_topic(topic_id: UUID, data: TopicUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    topic = TopicService.update_topic(db, topic_id, data, current_user.id)
     if not topic:
         raise HTTPException(status_code=404, detail="话题不存在")
     return TopicResponse.model_validate(topic)
 
 
 @router.delete("/topics/{topic_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除话题")
-def delete_topic(topic_id: UUID, hard_delete: bool = Query(False), db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)):
-    success = TopicService.delete_topic(db, topic_id, soft_delete=not hard_delete)
+def delete_topic(topic_id: UUID, hard_delete: bool = Query(False), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    success = TopicService.delete_topic(db, topic_id, current_user.id, soft_delete=not hard_delete)
     if not success:
         raise HTTPException(status_code=404, detail="话题不存在")
 

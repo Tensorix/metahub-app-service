@@ -7,6 +7,7 @@ from sqlalchemy import (
     ARRAY,
     Boolean,
     DateTime,
+    ForeignKey,
     Integer,
     String,
     Text,
@@ -20,6 +21,15 @@ class Activity(Base):
     __tablename__ = "activity"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid7)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="所属用户ID"
+    )
+    version: Mapped[int] = mapped_column(
+        Integer, default=1, nullable=False, comment="版本号，每次更新递增"
+    )
     type: Mapped[str] = mapped_column(String(100), nullable=False, comment="活动类型")
     name: Mapped[str] = mapped_column(String(255), nullable=False, comment="活动名称")
     priority: Mapped[int] = mapped_column(

@@ -22,8 +22,9 @@ class SessionService:
     """Session 服务"""
 
     @staticmethod
-    def create_session(db: Session, data: SessionCreate) -> SessionModel:
+    def create_session(db: Session, data: SessionCreate, user_id: UUID) -> SessionModel:
         session = SessionModel(
+            user_id=user_id,
             name=data.name,
             type=data.type,
             agent_id=data.agent_id,
@@ -36,15 +37,19 @@ class SessionService:
         return session
 
     @staticmethod
-    def get_session(db: Session, session_id: UUID) -> Optional[SessionModel]:
+    def get_session(db: Session, session_id: UUID, user_id: UUID) -> Optional[SessionModel]:
         return db.query(SessionModel).filter(
             SessionModel.id == session_id,
+            SessionModel.user_id == user_id,
             SessionModel.is_deleted == False
         ).first()
 
     @staticmethod
-    def get_sessions(db: Session, query: SessionListQuery) -> tuple[list[SessionModel], int]:
-        q = db.query(SessionModel).filter(SessionModel.is_deleted == query.is_deleted)
+    def get_sessions(db: Session, query: SessionListQuery, user_id: UUID) -> tuple[list[SessionModel], int]:
+        q = db.query(SessionModel).filter(
+            SessionModel.user_id == user_id,
+            SessionModel.is_deleted == query.is_deleted
+        )
         
         if query.type:
             q = q.filter(SessionModel.type == query.type)
@@ -58,8 +63,8 @@ class SessionService:
         return sessions, total
 
     @staticmethod
-    def update_session(db: Session, session_id: UUID, data: SessionUpdate) -> Optional[SessionModel]:
-        session = SessionService.get_session(db, session_id)
+    def update_session(db: Session, session_id: UUID, data: SessionUpdate, user_id: UUID) -> Optional[SessionModel]:
+        session = SessionService.get_session(db, session_id, user_id)
         if not session:
             return None
         
@@ -70,18 +75,25 @@ class SessionService:
         for key, value in update_data.items():
             setattr(session, key, value)
         
+        # 版本号递增
+        session.version += 1
+        
         db.commit()
         db.refresh(session)
         return session
 
     @staticmethod
-    def delete_session(db: Session, session_id: UUID, soft_delete: bool = True) -> bool:
-        session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    def delete_session(db: Session, session_id: UUID, user_id: UUID, soft_delete: bool = True) -> bool:
+        session = db.query(SessionModel).filter(
+            SessionModel.id == session_id,
+            SessionModel.user_id == user_id
+        ).first()
         if not session:
             return False
         
         if soft_delete:
             session.is_deleted = True
+            session.version += 1
             db.commit()
         else:
             db.delete(session)
@@ -89,9 +101,9 @@ class SessionService:
         return True
 
     @staticmethod
-    def mark_as_read(db: Session, session_id: UUID) -> Optional[SessionModel]:
+    def mark_as_read(db: Session, session_id: UUID, user_id: UUID) -> Optional[SessionModel]:
         """标记会话为已读"""
-        session = SessionService.get_session(db, session_id)
+        session = SessionService.get_session(db, session_id, user_id)
         if not session:
             return None
         
@@ -101,9 +113,9 @@ class SessionService:
         return session
 
     @staticmethod
-    def get_unread_count(db: Session, session_id: UUID) -> int:
+    def get_unread_count(db: Session, session_id: UUID, user_id: UUID) -> int:
         """获取未读消息数"""
-        session = SessionService.get_session(db, session_id)
+        session = SessionService.get_session(db, session_id, user_id)
         if not session:
             return 0
         
@@ -122,48 +134,57 @@ class TopicService:
     """Topic 服务"""
 
     @staticmethod
-    def create_topic(db: Session, data: TopicCreate) -> Topic:
-        topic = Topic(name=data.name, session_id=data.session_id)
+    def create_topic(db: Session, data: TopicCreate, user_id: UUID) -> Topic:
+        topic = Topic(user_id=user_id, name=data.name, session_id=data.session_id)
         db.add(topic)
         db.commit()
         db.refresh(topic)
         return topic
 
     @staticmethod
-    def get_topic(db: Session, topic_id: UUID) -> Optional[Topic]:
+    def get_topic(db: Session, topic_id: UUID, user_id: UUID) -> Optional[Topic]:
         return db.query(Topic).filter(
             Topic.id == topic_id,
+            Topic.user_id == user_id,
             Topic.is_deleted == False
         ).first()
 
     @staticmethod
-    def get_topics_by_session(db: Session, session_id: UUID) -> list[Topic]:
+    def get_topics_by_session(db: Session, session_id: UUID, user_id: UUID) -> list[Topic]:
         return db.query(Topic).filter(
             Topic.session_id == session_id,
+            Topic.user_id == user_id,
             Topic.is_deleted == False
         ).order_by(Topic.created_at.desc()).all()
 
     @staticmethod
-    def update_topic(db: Session, topic_id: UUID, data: TopicUpdate) -> Optional[Topic]:
-        topic = TopicService.get_topic(db, topic_id)
+    def update_topic(db: Session, topic_id: UUID, data: TopicUpdate, user_id: UUID) -> Optional[Topic]:
+        topic = TopicService.get_topic(db, topic_id, user_id)
         if not topic:
             return None
         
         for key, value in data.model_dump(exclude_unset=True).items():
             setattr(topic, key, value)
         
+        # 版本号递增
+        topic.version += 1
+        
         db.commit()
         db.refresh(topic)
         return topic
 
     @staticmethod
-    def delete_topic(db: Session, topic_id: UUID, soft_delete: bool = True) -> bool:
-        topic = db.query(Topic).filter(Topic.id == topic_id).first()
+    def delete_topic(db: Session, topic_id: UUID, user_id: UUID, soft_delete: bool = True) -> bool:
+        topic = db.query(Topic).filter(
+            Topic.id == topic_id,
+            Topic.user_id == user_id
+        ).first()
         if not topic:
             return False
         
         if soft_delete:
             topic.is_deleted = True
+            topic.version += 1
         else:
             db.delete(topic)
         db.commit()
