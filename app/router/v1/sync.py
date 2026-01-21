@@ -13,14 +13,14 @@ from app.schema.sync import (
 router = APIRouter(prefix="/sync", tags=["sync"])
 
 
-@router.post("/batch", response_model=SyncResponse, summary="批量同步 Activity/Session/Topic")
+@router.post("/batch", response_model=SyncResponse, summary="批量同步 Activity/Session/Topic/Message")
 def sync_batch(
     request: SyncRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    批量同步 Activity、Session、Topic 的创建、更新、删除操作
+    批量同步 Activity、Session、Topic、Message 的创建、更新、删除操作
     
     支持的操作：
     - create: 创建新记录
@@ -41,26 +41,44 @@ def sync_batch(
     - 所有操作自动限制在当前登录用户的数据范围内
     - 无法访问或修改其他用户的数据
     
+    Message 特殊说明：
+    - Message 包含 MessagePart 子对象（消息内容部分）
+    - 创建 Message 时必须提供 parts 数组
+    - 更新 Message 时如果提供 parts，会替换所有现有的 parts
+    - Message 会自动关联到 user_id（通过 session 验证）
+    
     示例请求：
     ```json
     {
-      "activities": [
+      "activities": [...],
+      "sessions": [...],
+      "topics": [...],
+      "messages": [
         {
           "operation": "create",
-          "type": "task",
-          "name": "新任务",
-          "priority": 5
+          "session_id": "uuid-here",
+          "topic_id": "uuid-here",
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "content": "消息内容"
+            }
+          ]
         },
         {
           "operation": "update",
           "id": "uuid-here",
-          "name": "更新后的名称",
-          "version": 3,
-          "client_updated_at": "2024-01-01T00:00:00Z"
+          "role": "assistant",
+          "version": 2,
+          "parts": [
+            {
+              "type": "text",
+              "content": "更新后的内容"
+            }
+          ]
         }
       ],
-      "sessions": [...],
-      "topics": [...],
       "conflict_strategy": "server_wins"
     }
     ```
@@ -99,6 +117,7 @@ def pull_changes(
       "include_activities": true,
       "include_sessions": true,
       "include_topics": true,
+      "include_messages": true,
       "limit": 1000
     }
     ```
@@ -106,6 +125,7 @@ def pull_changes(
     响应包含：
     - 变更的数据列表（包括新增、更新、删除）
     - 每条数据的 version 字段
+    - Message 包含完整的 parts 数组
     - has_more: 是否还有更多数据
     - next_cursor: 下次拉取的时间游标
     """

@@ -99,12 +99,52 @@ class TopicSyncResult(BaseModel):
     server_updated_at: Optional[datetime] = Field(None, description="服务器更新时间")
 
 
+# ============ Message Sync Schemas ============
+class MessagePartSyncItem(BaseModel):
+    """MessagePart 同步项（嵌套在 Message 中）"""
+    id: Optional[UUID] = Field(None, description="MessagePart ID（更新时使用）")
+    type: str = Field(..., description="内容类型: text/plain/image/url/json", max_length=50)
+    content: str = Field(..., description="内容")
+    metadata: Optional[dict] = Field(None, description="扩展元数据")
+    event_id: Optional[str] = Field(None, description="关联事件ID", max_length=255)
+    raw_data: Optional[dict] = Field(None, description="原始数据")
+
+
+class MessageSyncItem(BaseModel):
+    """Message 同步项"""
+    operation: SyncOperation = Field(..., description="操作类型: create/update/delete")
+    id: Optional[UUID] = Field(None, description="Message ID (update/delete 时必填)")
+    
+    # Message 字段
+    session_id: Optional[UUID] = Field(None, description="所属会话ID")
+    topic_id: Optional[UUID] = Field(None, description="所属话题ID")
+    role: Optional[str] = Field(None, description="角色: user/assistant/system", max_length=50)
+    sender_id: Optional[UUID] = Field(None, description="发送者ID")
+    parts: Optional[list[MessagePartSyncItem]] = Field(None, description="消息内容部分")
+    
+    # 版本控制
+    version: Optional[int] = Field(None, description="客户端版本号，用于乐观锁")
+    client_updated_at: Optional[datetime] = Field(None, description="客户端更新时间")
+
+
+class MessageSyncResult(BaseModel):
+    """Message 同步结果"""
+    id: UUID = Field(..., description="Message ID")
+    operation: SyncOperation = Field(..., description="执行的操作")
+    success: bool = Field(..., description="是否成功")
+    error: Optional[str] = Field(None, description="错误信息")
+    conflict: bool = Field(False, description="是否存在冲突")
+    version: Optional[int] = Field(None, description="服务器端版本号")
+    server_updated_at: Optional[datetime] = Field(None, description="服务器更新时间")
+
+
 # ============ Batch Sync Request/Response ============
 class SyncRequest(BaseModel):
     """批量同步请求"""
     activities: Optional[list[ActivitySyncItem]] = Field(default_factory=list, description="Activity 同步项列表")
     sessions: Optional[list[SessionSyncItem]] = Field(default_factory=list, description="Session 同步项列表")
     topics: Optional[list[TopicSyncItem]] = Field(default_factory=list, description="Topic 同步项列表")
+    messages: Optional[list[MessageSyncItem]] = Field(default_factory=list, description="Message 同步项列表")
     
     # 同步策略
     conflict_strategy: Literal["server_wins", "client_wins", "fail"] = Field(
@@ -118,6 +158,7 @@ class SyncResponse(BaseModel):
     activities: list[ActivitySyncResult] = Field(default_factory=list, description="Activity 同步结果")
     sessions: list[SessionSyncResult] = Field(default_factory=list, description="Session 同步结果")
     topics: list[TopicSyncResult] = Field(default_factory=list, description="Topic 同步结果")
+    messages: list[MessageSyncResult] = Field(default_factory=list, description="Message 同步结果")
     
     # 统计信息
     total_operations: int = Field(..., description="总操作数")
@@ -137,6 +178,7 @@ class PullSyncRequest(BaseModel):
     include_activities: bool = Field(True, description="是否包含 activities")
     include_sessions: bool = Field(True, description="是否包含 sessions")
     include_topics: bool = Field(True, description="是否包含 topics")
+    include_messages: bool = Field(True, description="是否包含 messages")
     
     # 分页参数
     limit: int = Field(1000, ge=1, le=5000, description="每次拉取的最大记录数")
@@ -147,6 +189,7 @@ class PullSyncResponse(BaseModel):
     activities: list[dict] = Field(default_factory=list, description="Activity 变更列表")
     sessions: list[dict] = Field(default_factory=list, description="Session 变更列表")
     topics: list[dict] = Field(default_factory=list, description="Topic 变更列表")
+    messages: list[dict] = Field(default_factory=list, description="Message 变更列表")
     
     has_more: bool = Field(..., description="是否还有更多数据")
     sync_timestamp: datetime = Field(..., description="本次同步时间戳")
