@@ -16,10 +16,10 @@ router = APIRouter(prefix="/events", tags=["events"])
 def get_event(
     event_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
-    """根据event_id获取事件详情"""
-    event = EventService.get_event(db, event_id)
+    """根据event_id获取事件详情（带用户隔离）"""
+    event = EventService.get_event(db, event_id, current_user.id)
     if not event:
         raise HTTPException(status_code=404, detail="事件不存在")
     
@@ -30,9 +30,9 @@ def get_event(
 def get_events(
     include_deleted: bool = Query(False, description="是否包含已删除的事件"),
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
-    """获取所有事件列表"""
-    events = EventService.get_all_events(db, include_deleted=include_deleted)
+    """获取所有事件列表（带用户隔离）"""
+    events = EventService.get_all_events(db, current_user.id, include_deleted=include_deleted)
     
     return [EventResponse.model_validate(event) for event in events]
