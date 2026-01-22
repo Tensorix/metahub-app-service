@@ -45,6 +45,9 @@ class Session(Base):
     source: Mapped[Optional[str]] = mapped_column(
         String(50), nullable=True, comment="来源: null/astr_wechat/astr_qq/manual_upload"
     )
+    external_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True, comment="外部系统的会话ID"
+    )
     last_visited_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="最后访问时间，用于已读未读"
     )

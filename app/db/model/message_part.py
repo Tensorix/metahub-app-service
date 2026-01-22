@@ -25,7 +25,7 @@ class MessagePart(Base):
         comment="所属消息ID"
     )
     type: Mapped[str] = mapped_column(
-        String(50), nullable=False, comment="内容类型: text/plain/image/url/json"
+        String(50), nullable=False, comment="内容类型: text/image/at/url/json"
     )
     content: Mapped[str] = mapped_column(
         Text, nullable=False, comment="内容: string/jsonstr/base64/url"

@@ -103,7 +103,7 @@ class TopicSyncResult(BaseModel):
 class MessagePartSyncItem(BaseModel):
     """MessagePart 同步项（嵌套在 Message 中）"""
     id: Optional[UUID] = Field(None, description="MessagePart ID（更新时使用）")
-    type: str = Field(..., description="内容类型: text/plain/image/url/json", max_length=50)
+    type: str = Field(..., description="内容类型: text/image/at/url/json", max_length=50)
     content: str = Field(..., description="内容")
     metadata: Optional[dict] = Field(None, description="扩展元数据")
     event_id: Optional[str] = Field(None, description="关联事件ID", max_length=255)

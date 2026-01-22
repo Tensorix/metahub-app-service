@@ -46,6 +46,9 @@ class Message(Base):
         nullable=True,
         comment="发送者ID"
     )
+    external_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True, comment="外部系统的消息ID"
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

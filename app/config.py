@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # 密码策略
     PASSWORD_STRENGTH_CHECK: bool = False
 
+    # OpenAI 配置（用于 LangChain Agent）
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+
     @computed_field
     @property
     def sqlalchemy_database_uri(self) -> str:

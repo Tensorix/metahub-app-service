@@ -53,6 +53,8 @@ export function MessageList({ messages, onDelete }: MessageListProps) {
         return <ImageIcon className="h-3 w-3" />;
       case 'url':
         return <LinkIcon className="h-3 w-3" />;
+      case 'at':
+        return <User className="h-3 w-3" />;
       default:
         return <FileText className="h-3 w-3" />;
     }
@@ -101,6 +103,9 @@ export function MessageList({ messages, onDelete }: MessageListProps) {
             {JSON.stringify(JSON.parse(part.content), null, 2)}
           </pre>
         );
+      case 'at':
+        return <p className="whitespace-pre-wrap break-words text-primary">{part.content}</p>;
+      case 'text':
       default:
         return <p className="whitespace-pre-wrap break-words">{part.content}</p>;
     }
@@ -151,7 +156,7 @@ export function MessageList({ messages, onDelete }: MessageListProps) {
               <div className="space-y-2">
                 {message.parts.map((part) => (
                   <div key={part.id} className="text-sm">
-                    {part.type !== 'text' && part.type !== 'plain' && (
+                    {part.type !== 'text' && (
                       <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
                         {getPartIcon(part.type)}
                         <span>{part.type}</span>

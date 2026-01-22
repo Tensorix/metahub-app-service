@@ -99,7 +99,7 @@ def test_message_sync():
                         "content": "请看这段代码："
                     },
                     {
-                        "type": "plain",
+                        "type": "text",
                         "content": "def hello():\n    print('Hello, World!')",
                         "metadata": {
                             "language": "python"

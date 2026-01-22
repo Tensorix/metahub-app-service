@@ -178,7 +178,7 @@ def test_create_message():
                 "sender_id": None,
                 "parts": [
                     {
-                        "type": "text/plain",
+                        "type": "text",
                         "content": "这是一条测试消息"
                     }
                 ]
@@ -213,7 +213,7 @@ def test_error_cases():
         json={
             "session_id": test_data["session_id"],
             "role": "user",
-            "parts": [{"type": "text/plain", "content": "测试"}]
+            "parts": [{"type": "text", "content": "测试"}]
         }
     ))
 
