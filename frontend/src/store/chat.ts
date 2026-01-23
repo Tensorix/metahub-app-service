@@ -1,0 +1,417 @@
+import { create } from 'zustand';
+import { sessionApi, type Session, type Topic, type Message, type MessageCreate } from '@/lib/api';
+import { computeVirtualTopics, type VirtualTopic } from '@/lib/virtualTopic';
+
+interface ChatState {
+  // ===== 会话列表 =====
+  sessions: Session[];
+  sessionsLoading: boolean;
+  sessionsError: string | null;
+
+  // ===== 当前选中 =====
+  currentSessionId: string | null;
+  currentTopicId: string | null; // 当前显示的话题
+
+  // ===== 话题数据 =====
+  topics: Record<string, Topic[]>; // sessionId -> Topic[]
+  topicsLoading: Record<string, boolean>;
+
+  // ===== 虚拟话题 =====
+  virtualTopics: Record<string, VirtualTopic[]>; // sessionId -> VirtualTopic[]
+
+  // ===== 消息数据 =====
+  messages: Record<string, Message[]>; // topicId -> Message[]
+  messagesLoading: Record<string, boolean>;
+
+  // ===== 连续模式消息 =====
+  sessionMessages: Record<string, Message[]>; // sessionId -> all messages
+
+  // ===== UI 状态 =====
+  topicSidebarCollapsed: boolean;
+  leftDrawerOpen: boolean;
+  rightDrawerOpen: boolean;
+  boundaryProgress: number; // 0-100
+  boundaryDirection: 'up' | 'down' | null;
+
+  // ===== 计算属性（改为方法，避免无限循环） =====
+  getCurrentSession: () => Session | null;
+  getCurrentTopic: () => Topic | VirtualTopic | null;
+  getDisplayMode: () => 'paged' | 'continuous';
+  getAllTopicsForSession: (sessionId?: string | null) => (Topic | VirtualTopic)[];
+
+  // ===== Actions =====
+  // 会话
+  loadSessions: () => Promise<void>;
+  selectSession: (sessionId: string) => Promise<void>;
+  createSession: (data: Omit<MessageCreate, 'session_id' | 'topic_id'> & { session_type: string }) => Promise<Session>;
+  updateSession: (sessionId: string, data: Partial<Session>) => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<void>;
+
+  // 话题
+  loadTopics: (sessionId: string) => Promise<void>;
+  selectTopic: (topicId: string) => Promise<void>;
+  createTopic: (sessionId: string, name?: string) => Promise<Topic>;
+  updateTopic: (topicId: string, data: Partial<Topic>) => Promise<void>;
+  deleteTopic: (topicId: string) => Promise<void>;
+  navigateTopic: (direction: 'prev' | 'next') => Promise<void>;
+
+  // 消息
+  loadMessages: (sessionId: string, topicId?: string) => Promise<void>;
+  sendMessage: (content: string) => Promise<void>;
+  deleteMessage: (messageId: string) => Promise<void>;
+
+  // UI
+  setTopicSidebarCollapsed: (collapsed: boolean) => void;
+  setLeftDrawerOpen: (open: boolean) => void;
+  setRightDrawerOpen: (open: boolean) => void;
+  setBoundaryState: (progress: number, direction: 'up' | 'down' | null) => void;
+}
+
+export const useChatStore = create<ChatState>((set, get) => ({
+  // ===== 初始状态 =====
+  sessions: [],
+  sessionsLoading: false,
+  sessionsError: null,
+  currentSessionId: null,
+  currentTopicId: null,
+  topics: {},
+  topicsLoading: {},
+  virtualTopics: {},
+  messages: {},
+  messagesLoading: {},
+  sessionMessages: {},
+  topicSidebarCollapsed: false,
+  leftDrawerOpen: false,
+  rightDrawerOpen: false,
+  boundaryProgress: 0,
+  boundaryDirection: null,
+
+  // ===== 计算属性（改为方法，避免无限循环） =====
+  getCurrentSession: () => {
+    const { sessions, currentSessionId } = get();
+    return sessions.find((s) => s.id === currentSessionId) ?? null;
+  },
+
+  getCurrentTopic: () => {
+    const { currentTopicId, currentSessionId, getAllTopicsForSession } = get();
+    if (!currentTopicId || !currentSessionId) return null;
+    return getAllTopicsForSession(currentSessionId).find((t) => t.id === currentTopicId) ?? null;
+  },
+
+  getDisplayMode: () => {
+    const session = get().getCurrentSession();
+    return session?.type === 'ai' ? 'paged' : 'continuous';
+  },
+
+  getAllTopicsForSession: (sessionId?: string | null) => {
+    const { topics, virtualTopics, currentSessionId } = get();
+    const id = sessionId ?? currentSessionId;
+    if (!id) return [];
+    return [
+      ...(topics[id] ?? []),
+      ...(virtualTopics[id] ?? []),
+    ].sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    );
+  },
+
+  // ===== 会话 Actions =====
+  loadSessions: async () => {
+    set({ sessionsLoading: true, sessionsError: null });
+    try {
+      const response = await sessionApi.getSessions({ page: 1, size: 100 });
+      set({ sessions: response.items });
+    } catch (error) {
+      console.error('loadSessions error', error);
+      set({ sessionsError: '加载会话失败' });
+    } finally {
+      set({ sessionsLoading: false });
+    }
+  },
+
+  selectSession: async (sessionId: string) => {
+    const { topics, loadTopics, loadMessages } = get();
+
+    set({
+      currentSessionId: sessionId,
+      currentTopicId: null,
+    });
+
+    if (!topics[sessionId]) {
+      await loadTopics(sessionId);
+    }
+
+    const session = get().sessions.find((s) => s.id === sessionId);
+    if (session?.type === 'ai') {
+      const sessionTopics = get().getAllTopicsForSession(sessionId).filter((t) => !(t as VirtualTopic).is_virtual);
+      if (sessionTopics.length > 0) {
+        const firstTopic = sessionTopics[0];
+        set({ currentTopicId: firstTopic.id });
+        await loadMessages(sessionId, firstTopic.id);
+      }
+    } else {
+      await loadMessages(sessionId);
+    }
+  },
+
+  createSession: async (data) => {
+    // 这里仅使用后端已有的 SessionCreate 字段，忽略 MessageCreate 中的多余字段
+    const { session_type, ...rest } = data as any;
+    const session = await sessionApi.createSession({
+      type: session_type,
+      metadata: rest.metadata,
+      agent_id: rest.agent_id,
+      name: rest.name,
+      source: rest.source,
+    });
+    set((state) => ({ sessions: [session, ...state.sessions] }));
+    return session;
+  },
+
+  updateSession: async (sessionId, data) => {
+    await sessionApi.updateSession(sessionId, {
+      name: data.name,
+      type: data.type,
+      agent_id: data.agent_id,
+      metadata: data.metadata,
+      source: data.source,
+      last_visited_at: data.last_visited_at,
+    });
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.id === sessionId ? { ...s, ...data } : s,
+      ),
+    }));
+  },
+
+  deleteSession: async (sessionId) => {
+    await sessionApi.deleteSession(sessionId);
+    set((state) => ({
+      sessions: state.sessions.filter((s) => s.id !== sessionId),
+      currentSessionId:
+        state.currentSessionId === sessionId ? null : state.currentSessionId,
+    }));
+  },
+
+  // ===== 话题 Actions =====
+  loadTopics: async (sessionId: string) => {
+    set((state) => ({
+      topicsLoading: { ...state.topicsLoading, [sessionId]: true },
+    }));
+    try {
+      const topicList = await sessionApi.getTopics(sessionId);
+      set((state) => ({
+        topics: { ...state.topics, [sessionId]: topicList },
+      }));
+
+      // 拉取所有消息用于虚拟话题计算与连续模式
+      const allMessages = await sessionApi.getMessages(sessionId, {
+        size: 200,
+      });
+      const orphanMessages = allMessages.items.filter((m) => !m.topic_id);
+      const virtualTopicList = computeVirtualTopics(orphanMessages, sessionId);
+
+      set((state) => ({
+        virtualTopics: {
+          ...state.virtualTopics,
+          [sessionId]: virtualTopicList,
+        },
+        sessionMessages: {
+          ...state.sessionMessages,
+          [sessionId]: allMessages.items,
+        },
+      }));
+    } catch (error) {
+      console.error('loadTopics error', error);
+    } finally {
+      set((state) => ({
+        topicsLoading: { ...state.topicsLoading, [sessionId]: false },
+      }));
+    }
+  },
+
+  selectTopic: async (topicId: string) => {
+    const { currentSessionId, loadMessages, virtualTopics, sessionMessages } = get();
+    if (!currentSessionId) return;
+    set({ currentTopicId: topicId });
+
+    // 判断是否为虚拟话题
+    const isVirtual = topicId.startsWith('virtual-');
+    if (isVirtual) {
+      // 虚拟话题：从 sessionMessages 中筛选
+      const vt = virtualTopics[currentSessionId]?.find(t => t.id === topicId);
+      if (vt) {
+        const allMsgs = sessionMessages[currentSessionId] ?? [];
+        const { getVirtualTopicMessages } = await import('@/lib/virtualTopic');
+        const virtualMsgs = getVirtualTopicMessages(vt, allMsgs);
+        set(state => ({
+          messages: { ...state.messages, [topicId]: virtualMsgs }
+        }));
+      }
+    } else {
+      // 真实话题：从 API 加载
+      await loadMessages(currentSessionId, topicId);
+    }
+  },
+
+  navigateTopic: async (direction: 'prev' | 'next') => {
+    const { currentTopicId, currentSessionId, getAllTopicsForSession, selectTopic } = get();
+    if (!currentSessionId) return;
+
+    const topics = getAllTopicsForSession(currentSessionId);
+    if (topics.length === 0) return;
+
+    const currentIndex = topics.findIndex((t) => t.id === currentTopicId);
+
+    if (direction === 'prev' && currentIndex > 0) {
+      await selectTopic(topics[currentIndex - 1].id);
+    } else if (direction === 'next') {
+      if (currentIndex >= 0 && currentIndex < topics.length - 1) {
+        await selectTopic(topics[currentIndex + 1].id);
+      } else {
+        // 最后一个话题，准备新建（实际在 sendMessage 中完成）
+        const session = get().getCurrentSession();
+        if (session?.type === 'ai') {
+          // 这里只是占位逻辑，不直接新建
+          console.info('到达最后一个话题，等待用户输入创建新话题');
+        }
+      }
+    }
+  },
+
+  createTopic: async (sessionId, name) => {
+    const topic = await sessionApi.createTopic(sessionId, {
+      name,
+      session_id: sessionId,
+    });
+    set((state) => ({
+      topics: {
+        ...state.topics,
+        [sessionId]: [...(state.topics[sessionId] ?? []), topic],
+      },
+    }));
+    return topic;
+  },
+
+  updateTopic: async (topicId, data) => {
+    const topicEntry = Object.entries(get().topics).find(([_, list]) =>
+      list.some((t) => t.id === topicId),
+    );
+    const sessionId = topicEntry?.[0];
+    if (!sessionId) return;
+
+    await sessionApi.updateTopic(topicId, {
+      name: data.name,
+    });
+
+    set((state) => ({
+      topics: {
+        ...state.topics,
+        [sessionId]: state.topics[sessionId].map((t) =>
+          t.id === topicId ? { ...t, ...data } : t,
+        ),
+      },
+    }));
+  },
+
+  deleteTopic: async (topicId) => {
+    await sessionApi.deleteTopic(topicId);
+    const entry = Object.entries(get().topics).find(([_, list]) =>
+      list.some((t) => t.id === topicId),
+    );
+    const sessionId = entry?.[0];
+    if (!sessionId) return;
+
+    set((state) => ({
+      topics: {
+        ...state.topics,
+        [sessionId]: state.topics[sessionId].filter((t) => t.id !== topicId),
+      },
+      currentTopicId:
+        state.currentTopicId === topicId ? null : state.currentTopicId,
+    }));
+  },
+
+  // ===== 消息 Actions =====
+  loadMessages: async (sessionId: string, topicId?: string) => {
+    const key = topicId ?? sessionId;
+    set((state) => ({
+      messagesLoading: { ...state.messagesLoading, [key]: true },
+    }));
+    try {
+      const params = topicId
+        ? { topic_id: topicId, size: 100 }
+        : { size: 200 };
+      const response = await sessionApi.getMessages(sessionId, params);
+      if (topicId) {
+        set((state) => ({
+          messages: { ...state.messages, [topicId]: response.items },
+        }));
+      } else {
+        set((state) => ({
+          sessionMessages: {
+            ...state.sessionMessages,
+            [sessionId]: response.items,
+          },
+        }));
+      }
+    } catch (error) {
+      console.error('loadMessages error', error);
+    } finally {
+      set((state) => ({
+        messagesLoading: { ...state.messagesLoading, [key]: false },
+      }));
+    }
+  },
+
+  sendMessage: async (content: string) => {
+    const {
+      currentSessionId,
+      currentTopicId,
+      createTopic,
+      loadMessages,
+    } = get();
+    if (!currentSessionId) return;
+
+    let topicId = currentTopicId ?? undefined;
+
+    const mode = get().getDisplayMode();
+    if (mode === 'paged' && !topicId) {
+      const name =
+        content.length > 30 ? `${content.slice(0, 30)}...` : content;
+      const newTopic = await createTopic(currentSessionId, name);
+      topicId = newTopic.id;
+      set({ currentTopicId: topicId });
+    }
+
+    await sessionApi.createMessage(currentSessionId, {
+      session_id: currentSessionId,
+      topic_id: topicId,
+      role: 'user',
+      parts: [
+        {
+          type: 'text',
+          content,
+        },
+      ],
+    });
+
+    await loadMessages(currentSessionId, topicId);
+  },
+
+  deleteMessage: async (messageId: string) => {
+    await sessionApi.deleteMessage(messageId);
+    // 简单做法：重新加载当前会话/话题消息
+    const { currentSessionId, currentTopicId, loadMessages } = get();
+    if (!currentSessionId) return;
+    await loadMessages(currentSessionId, currentTopicId ?? undefined);
+  },
+
+  // ===== UI Actions =====
+  setTopicSidebarCollapsed: (collapsed) => set({ topicSidebarCollapsed: collapsed }),
+  setLeftDrawerOpen: (open) => set({ leftDrawerOpen: open }),
+  setRightDrawerOpen: (open) => set({ rightDrawerOpen: open }),
+  setBoundaryState: (progress, direction) => set({ boundaryProgress: progress, boundaryDirection: direction }),
+}));
+

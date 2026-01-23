@@ -34,6 +34,7 @@ app.add_middleware(
     allow_origins=["*"],          # 生产环境需要改为 ["https://your.domain"]
     allow_credentials=True,
     allow_headers=["*"],
+    allow_methods=["*"],
 )
 
 app.include_router(api_router, prefix=f"/api")
