@@ -15,7 +15,6 @@ export function ChatLayout({ className }: ChatLayoutProps) {
   const rightDrawerOpen = useChatStore((state) => state.rightDrawerOpen);
   const setLeftDrawerOpen = useChatStore((state) => state.setLeftDrawerOpen);
   const setRightDrawerOpen = useChatStore((state) => state.setRightDrawerOpen);
-  const topicSidebarCollapsed = useChatStore((state) => state.topicSidebarCollapsed);
 
   return (
     <div className={cn('flex h-full gap-4', className)}>

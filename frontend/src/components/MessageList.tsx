@@ -1,7 +1,6 @@
 import { useRef, useEffect } from 'react';
-import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Trash, Copy, RotateCw, User, Bot, Monitor } from 'lucide-react';
+import { Trash, Copy, User, Bot, Monitor } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Message } from '@/lib/api';
 

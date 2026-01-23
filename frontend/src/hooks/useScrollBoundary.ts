@@ -10,7 +10,7 @@ interface UseScrollBoundaryOptions {
 }
 
 interface UseScrollBoundaryReturn<T extends HTMLElement> {
-  ref: React.RefObject<T>;
+  ref: React.RefObject<T | null>;
   progress: number; // 0-100 累积进度
   direction: 'up' | 'down' | null; // 滚动方向
 }

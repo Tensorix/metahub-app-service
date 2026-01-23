@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { motion, useMotionValue, useSpring } from 'framer-motion';
 import type { Message, Topic } from '@/lib/api';
 import type { VirtualTopic } from '@/lib/virtualTopic';
@@ -6,7 +6,6 @@ import { useChatStore } from '@/store/chat';
 import { useScrollBoundary } from '@/hooks/useScrollBoundary';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { MessageInput } from '@/components/MessageInput';
 import { MessageList as SimpleMessageList } from '@/components/MessageList';
 import { TopicDivider } from './TopicDivider';
@@ -29,8 +28,6 @@ export function MessageArea() {
   const sendMessage = useChatStore((state) => state.sendMessage);
   const deleteMessage = useChatStore((state) => state.deleteMessage);
   const navigateTopic = useChatStore((state) => state.navigateTopic);
-  const leftDrawerOpen = useChatStore((state) => state.leftDrawerOpen);
-  const rightDrawerOpen = useChatStore((state) => state.rightDrawerOpen);
   const setLeftDrawerOpen = useChatStore((state) => state.setLeftDrawerOpen);
   const setRightDrawerOpen = useChatStore((state) => state.setRightDrawerOpen);
   const topicSidebarCollapsed = useChatStore((state) => state.topicSidebarCollapsed);

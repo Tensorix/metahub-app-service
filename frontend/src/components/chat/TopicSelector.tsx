@@ -63,7 +63,7 @@ export function TopicSelector() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+      <DropdownMenuTrigger>
         <Button variant="ghost" className="h-auto p-0 text-xs text-muted-foreground hover:text-foreground">
           <Hash className="mr-1 h-3 w-3" />
           <span>

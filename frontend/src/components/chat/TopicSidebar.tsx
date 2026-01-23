@@ -25,7 +25,6 @@ export function TopicSidebar({ className }: TopicSidebarProps) {
   const createTopic = useChatStore((state) => state.createTopic);
   const boundaryProgress = useChatStore((state) => state.boundaryProgress);
   const boundaryDirection = useChatStore((state) => state.boundaryDirection);
-  const rightDrawerOpen = useChatStore((state) => state.rightDrawerOpen);
   const setRightDrawerOpen = useChatStore((state) => state.setRightDrawerOpen);
 
   // 直接调用函数，因为这些函数内部会从 store 获取最新状态
