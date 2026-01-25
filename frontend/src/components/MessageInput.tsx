@@ -5,6 +5,7 @@ import { Send } from 'lucide-react';
 
 interface MessageInputProps {
   onSend: (content: string) => Promise<void>;
+  onCreateTopic?: () => void;
   disabled?: boolean;
 }
 
@@ -35,22 +36,37 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2">
-      <Input
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
-        disabled={disabled || sending}
-        className="flex-1"
-      />
-      <Button 
-        type="submit" 
-        disabled={!content.trim() || disabled || sending}
-        size="icon"
-      >
-        <Send className="h-4 w-4" />
-      </Button>
-    </form>
+    <div className="flex gap-2 items-end">
+      <form onSubmit={handleSubmit} className="flex-1 flex gap-2">
+        <Input
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
+          disabled={disabled || sending}
+          className="flex-1"
+        />
+        {/* {onCreateTopic && (
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={onCreateTopic}
+            disabled={disabled || sending}
+            className="shrink-0"
+            title="新建话题"
+          >
+            <MessageSquarePlus className="h-4 w-4" />
+          </Button>
+        )} */}
+        <Button 
+          type="submit" 
+          disabled={!content.trim() || disabled || sending}
+          size="icon"
+        >
+          <Send className="h-4 w-4" />
+        </Button>
+      </form>
+    </div>
   );
 }

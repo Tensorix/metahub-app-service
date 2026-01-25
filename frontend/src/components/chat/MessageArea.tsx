@@ -10,8 +10,9 @@ import { MessageList as SimpleMessageList } from '@/components/MessageList';
 import { TopicDivider } from './TopicDivider';
 import { TopicSelector } from './TopicSelector';
 import { TopicSidebar } from './TopicSidebar';
+import { SessionDialog } from '@/components/SessionDialog';
 import { cn } from '@/lib/utils';
-import { ChevronUp, ChevronDown, Menu, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus } from 'lucide-react';
+import { ChevronUp, ChevronDown, Menu, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2 } from 'lucide-react';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { useToast } from '@/hooks/use-toast';
 
@@ -35,12 +36,33 @@ export function MessageArea() {
   const setRightDrawerOpen = useChatStore((state) => state.setRightDrawerOpen);
   const topicSidebarCollapsed = useChatStore((state) => state.topicSidebarCollapsed);
   const setTopicSidebarCollapsed = useChatStore((state) => state.setTopicSidebarCollapsed);
+  const updateSession = useChatStore((state) => state.updateSession);
 
   // 直接调用函数，因为这些函数内部会从 store 获取最新状态
   const currentSession = getCurrentSession();
   const currentTopic = getCurrentTopic();
   const displayMode = getDisplayMode();
   const allTopics = getAllTopicsForSession(currentSessionId);
+
+  const [isSessionSettingsOpen, setIsSessionSettingsOpen] = useState(false);
+
+  const handleUpdateSession = async (data: any) => {
+    if (!currentSessionId) return;
+    try {
+      await updateSession(currentSessionId, data);
+      toast({
+        title: "会话已更新",
+        description: "会话信息修改成功",
+      });
+    } catch (error) {
+      console.error("Failed to update session", error);
+      toast({
+        variant: "destructive",
+        title: "更新失败",
+        description: "请稍后重试",
+      });
+    }
+  };
 
   const currentIndex = allTopics.findIndex((t) => t.id === currentTopicId);
   const prevTopic = currentIndex > 0 ? allTopics[currentIndex - 1] : null;
@@ -139,6 +161,25 @@ export function MessageArea() {
     await deleteMessage(messageId);
   };
 
+  const handleCreateNewTopic = async () => {
+    if (!currentSessionId) return;
+    try {
+      const newTopic = await createTopic(currentSessionId);
+      await selectTopic(newTopic.id);
+      toast({
+        title: "话题已创建",
+        description: "当前会话已保存为历史话题",
+      });
+    } catch (error) {
+      console.error("Failed to create topic", error);
+      toast({
+        variant: "destructive",
+        title: "创建话题失败",
+        description: "请稍后重试",
+      });
+    }
+  };
+
   const headerTitle =
     currentSession?.name || (currentSession ? '未命名会话' : '请选择会话');
 
@@ -160,47 +201,56 @@ export function MessageArea() {
       : false;
 
   return (
-    <Card className="flex h-full flex-row overflow-hidden">
-      <div className="flex-1 flex flex-col min-w-0 h-full">
-        {/* Header */}
-        <div className="border-b px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              {!isDesktop && (
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => setLeftDrawerOpen(true)}
-                >
-                  <Menu className="h-5 w-5" />
-                </Button>
+    <Card className="flex h-full flex-col overflow-hidden">
+      {/* Header */}
+      <div className="border-b px-4 py-3 shrink-0">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            {!isDesktop && (
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => setLeftDrawerOpen(true)}
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+            )}
+            <div className="flex-1 min-w-0">
+              <h2 className="text-lg font-semibold truncate">{headerTitle}</h2>
+              {displayMode === 'paged' && currentSession && (
+                <div className="mt-1">
+                  <TopicSelector />
+                </div>
               )}
-              <div className="flex-1 min-w-0">
-                <h2 className="text-lg font-semibold truncate">{headerTitle}</h2>
-                {displayMode === 'paged' && currentSession && (
-                  <div className="mt-1">
-                    <TopicSelector />
-                  </div>
-                )}
-                {displayMode === 'continuous' && currentSession && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    连续模式：所有消息按时间排序
-                  </p>
-                )}
-              </div>
+              {displayMode === 'continuous' && currentSession && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  连续模式：所有消息按时间排序
+                </p>
+              )}
             </div>
+          </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              {!isDesktop && (
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => setRightDrawerOpen(true)}
-                >
-                  <Hash className="h-5 w-5" />
-                </Button>
-              )}
-              {isDesktop && (
+          <div className="flex items-center gap-2 shrink-0">
+            {currentSession && (
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => setIsSessionSettingsOpen(true)}
+                title="会话设置"
+              >
+                <Settings2 className="h-5 w-5" />
+              </Button>
+            )}
+            {!isDesktop && (
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => setRightDrawerOpen(true)}
+              >
+                <Hash className="h-5 w-5" />
+              </Button>
+            )}
+            {isDesktop && (
               <Button
                 size="icon"
                 variant="ghost"
@@ -214,14 +264,16 @@ export function MessageArea() {
         </div>
       </div>
 
-      {/* 消息列表 */}
-        <div
-          ref={messageContainerRef}
-          className={cn(
-            'flex-1 overflow-y-auto px-4 py-3 relative group/message-area scroll-smooth',
-            !currentSession && 'flex items-center justify-center',
-          )}
-        >
+      <div className="flex-1 flex flex-row min-h-0">
+        <div className="flex-1 flex flex-col min-w-0 h-full">
+          {/* 消息列表 */}
+          <div
+            ref={messageContainerRef}
+            className={cn(
+              'flex-1 overflow-y-auto px-4 py-3 relative group/message-area scroll-smooth',
+              !currentSession && 'flex items-center justify-center',
+            )}
+          >
           <div
             className={cn("min-h-full w-full flex flex-col", !currentSession && "flex items-center justify-center")}
           >
@@ -341,6 +393,7 @@ export function MessageArea() {
         <div className="border-t px-4 py-3">
           <MessageInput
             onSend={sendMessage}
+            onCreateTopic={handleCreateNewTopic}
             disabled={!currentSession}
           />
         </div>
@@ -352,6 +405,14 @@ export function MessageArea() {
           <TopicSidebar className="h-full border-0" />
         </div>
       )}
+      </div>
+      {/* Session Settings Dialog */}
+      <SessionDialog
+        open={isSessionSettingsOpen}
+        onOpenChange={setIsSessionSettingsOpen}
+        session={currentSession || undefined}
+        onSubmit={handleUpdateSession}
+      />
     </Card>
   );
 }
