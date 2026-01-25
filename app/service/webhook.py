@@ -12,6 +12,7 @@ from app.db.model.event import Event
 from app.db.model.activity import Activity
 from app.schema.webhook import IMMessageWebhookRequest
 from app.agent.message_analyzer import get_message_analyzer
+from app.constants.message import MessageRole
 
 
 class WebhookService:
@@ -197,7 +198,7 @@ class WebhookService:
             user_id=user_id,
             session_id=session_id,
             sender_id=sender_id,
-            role="user",
+            role=MessageRole.NULL,
             external_id=webhook_data.message_id
         )
         db.add(message)

@@ -195,8 +195,9 @@ class MessageService:
     """Message 服务"""
 
     @staticmethod
-    def create_message(db: Session, data: MessageCreate) -> Message:
+    def create_message(db: Session, data: MessageCreate, user_id: UUID) -> Message:
         message = Message(
+            user_id=user_id,
             session_id=data.session_id,
             topic_id=data.topic_id,
             role=data.role,

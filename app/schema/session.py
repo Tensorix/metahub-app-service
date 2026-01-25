@@ -103,7 +103,7 @@ class MessagePartResponse(MessagePartBase):
 class MessageBase(BaseModel):
     session_id: UUID = Field(..., description="所属会话ID")
     topic_id: Optional[UUID] = Field(None, description="所属话题ID")
-    role: str = Field(..., description="角色: user/assistant/system", max_length=50)
+    role: str = Field(..., description="角色: user/assistant/system (AI对话) 或 self/null (IM场景)", max_length=50)
     sender_id: Optional[UUID] = Field(None, description="发送者ID")
 
 

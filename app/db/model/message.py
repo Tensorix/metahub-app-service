@@ -39,7 +39,7 @@ class Message(Base):
         comment="所属话题ID"
     )
     role: Mapped[str] = mapped_column(
-        String(50), nullable=False, comment="角色: user/assistant/system"
+        String(50), nullable=False, comment="角色: user/assistant/system/self/null"
     )
     sender_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("message_sender.id", ondelete="SET NULL"),

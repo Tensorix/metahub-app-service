@@ -147,7 +147,7 @@ def create_message(session_id: UUID, data: MessageCreate, db: Session = Depends(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     
-    message = MessageService.create_message(db, data)
+    message = MessageService.create_message(db, data, current_user.id)
     return MessageResponse.model_validate(message)
 
 

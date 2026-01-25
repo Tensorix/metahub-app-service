@@ -118,7 +118,7 @@ class MessageSyncItem(BaseModel):
     # Message 字段
     session_id: Optional[UUID] = Field(None, description="所属会话ID")
     topic_id: Optional[UUID] = Field(None, description="所属话题ID")
-    role: Optional[str] = Field(None, description="角色: user/assistant/system", max_length=50)
+    role: Optional[str] = Field(None, description="角色: user/assistant/system (AI对话) 或 self/null (IM场景)", max_length=50)
     sender_id: Optional[UUID] = Field(None, description="发送者ID")
     parts: Optional[list[MessagePartSyncItem]] = Field(None, description="消息内容部分")
     
