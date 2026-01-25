@@ -1,5 +1,4 @@
-import { useMemo } from 'react';
-import { motion, useMotionValue, useSpring } from 'framer-motion';
+import { useMemo, useState, useRef } from 'react';
 import type { Message, Topic } from '@/lib/api';
 import type { VirtualTopic } from '@/lib/virtualTopic';
 import { useChatStore } from '@/store/chat';
@@ -12,11 +11,13 @@ import { TopicDivider } from './TopicDivider';
 import { TopicSelector } from './TopicSelector';
 import { TopicSidebar } from './TopicSidebar';
 import { cn } from '@/lib/utils';
-import { ChevronUp, ChevronDown, Menu, Hash, Loader2, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { ChevronUp, ChevronDown, Menu, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus } from 'lucide-react';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
+import { useToast } from '@/hooks/use-toast';
 
 export function MessageArea() {
   const { isDesktop } = useBreakpoints();
+  const { toast } = useToast();
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const currentTopicId = useChatStore((state) => state.currentTopicId);
   const messages = useChatStore((state) => state.messages);
@@ -28,6 +29,8 @@ export function MessageArea() {
   const sendMessage = useChatStore((state) => state.sendMessage);
   const deleteMessage = useChatStore((state) => state.deleteMessage);
   const navigateTopic = useChatStore((state) => state.navigateTopic);
+  const createTopic = useChatStore((state) => state.createTopic);
+  const selectTopic = useChatStore((state) => state.selectTopic);
   const setLeftDrawerOpen = useChatStore((state) => state.setLeftDrawerOpen);
   const setRightDrawerOpen = useChatStore((state) => state.setRightDrawerOpen);
   const topicSidebarCollapsed = useChatStore((state) => state.topicSidebarCollapsed);
@@ -46,38 +49,91 @@ export function MessageArea() {
       ? allTopics[currentIndex + 1]
       : null;
 
-  const setBoundaryState = useChatStore((state) => state.setBoundaryState);
+  // 滚动切换提示状态
+  const [canSwitchPrev, setCanSwitchPrev] = useState(false);
+  const [canSwitchNext, setCanSwitchNext] = useState(false);
+  const [topHint, setTopHint] = useState<string | null>(null);
+  const [bottomHint, setBottomHint] = useState<string | null>(null);
+  const prevHintTimeoutRef = useRef<ReturnType<typeof setTimeout>>(null);
+  const nextHintTimeoutRef = useRef<ReturnType<typeof setTimeout>>(null);
 
-  // 动画状态
-  const dragY = useMotionValue(0);
-  const y = useSpring(dragY, { stiffness: 300, damping: 25 });
+  const resetTopHint = () => {
+    setTopHint(null);
+    setCanSwitchPrev(false);
+  };
+
+  const resetBottomHint = () => {
+    setBottomHint(null);
+    setCanSwitchNext(false);
+  };
 
   const { ref: messageContainerRef } = useScrollBoundary<HTMLDivElement>({
-    onTopBoundary: () => void navigateTopic('prev'),
-    onBottomBoundary: () => void navigateTopic('next'),
-    enableState: false, // 禁用内部 state 更新以避免重渲染
-    onProgress: (progress, direction) => {
-      // 直接驱动动画值
-      if (direction === 'up') {
-        dragY.set(progress * 1.5);
-      } else if (direction === 'down') {
-        dragY.set(-progress * 1.5);
+    onTopBoundary: () => {
+      if (canSwitchPrev) {
+        if (prevTopic) {
+          navigateTopic('prev');
+        }
+        resetTopHint();
+        if (prevHintTimeoutRef.current) clearTimeout(prevHintTimeoutRef.current);
       } else {
-        dragY.set(0);
+        if (prevTopic) {
+          setTopHint("继续下拉切换到上一个话题");
+          setCanSwitchPrev(true);
+        } else {
+          setTopHint("没有更多历史消息了");
+        }
+        
+        if (prevHintTimeoutRef.current) clearTimeout(prevHintTimeoutRef.current);
+        // 2秒后重置状态
+        prevHintTimeoutRef.current = setTimeout(resetTopHint, 2000);
       }
-      
-      // 同步到 store (如果需要的话，注意这可能会导致重渲染，如果 store 更新频繁)
-      // 这里的 setBoundaryState 实际上是用来控制 UI 上的一些视觉反馈（如箭头），如果它导致重渲染，也会影响性能
-      // 但我们主要关注的是列表滚动的流畅度。如果箭头只是小组件，可能还好。
-      // 为了彻底解决闪烁，我们可以先不频繁更新 store，或者 store 的订阅者优化过。
-      setBoundaryState(progress, direction);
     },
-  });
+    onBottomBoundary: async () => {
+      if (canSwitchNext) {
+        if (nextTopic) {
+          navigateTopic('next');
+        } else if (currentSessionId && currentTopicId) {
+          // 检查当前话题是否为空
+          const currentMsgs = messages[currentTopicId] || [];
+          if (currentMsgs.length > 0) {
+             // 创建新话题
+             try {
+               const newTopic = await createTopic(currentSessionId);
+               await selectTopic(newTopic.id);
+             } catch (error) {
+               console.error("Failed to create topic", error);
+               toast({
+                 variant: "destructive",
+                 title: "创建话题失败",
+                 description: "请稍后重试",
+               });
+             }
+          }
+        }
+        resetBottomHint();
+        if (nextHintTimeoutRef.current) clearTimeout(nextHintTimeoutRef.current);
+      } else {
+        if (nextTopic) {
+          setBottomHint("继续上拉切换到下一个话题");
+          setCanSwitchNext(true);
+        } else {
+           // 检查当前话题是否为空
+           const currentMsgs = currentTopicId ? (messages[currentTopicId] || []) : [];
+           if (currentMsgs.length > 0) {
+             setBottomHint("继续上拉创建新话题");
+             setCanSwitchNext(true);
+           } else {
+             setBottomHint("已经是最新话题");
+           }
+        }
 
-  // 移除原来的 useEffect 同步
-  // useEffect(() => {
-  //   setBoundaryState(progress, direction);
-  // }, [progress, direction, setBoundaryState]);
+        if (nextHintTimeoutRef.current) clearTimeout(nextHintTimeoutRef.current);
+        // 2秒后重置状态
+        nextHintTimeoutRef.current = setTimeout(resetBottomHint, 2000);
+      }
+    },
+    enableState: false, // 禁用内部 state 更新以避免重渲染
+  });
 
   const handleDeleteMessage = async (messageId: string) => {
     await deleteMessage(messageId);
@@ -162,13 +218,12 @@ export function MessageArea() {
         <div
           ref={messageContainerRef}
           className={cn(
-            'flex-1 overflow-y-auto px-4 py-3 relative group/message-area',
+            'flex-1 overflow-y-auto px-4 py-3 relative group/message-area scroll-smooth',
             !currentSession && 'flex items-center justify-center',
           )}
         >
-          <motion.div
-            className={cn("min-h-full w-full", !currentSession && "flex items-center justify-center")}
-            style={{ y }}
+          <div
+            className={cn("min-h-full w-full flex flex-col", !currentSession && "flex items-center justify-center")}
           >
           {!currentSession ? (
             <p className="text-sm text-muted-foreground">
@@ -180,15 +235,37 @@ export function MessageArea() {
             </div>
           ) : displayMode === 'paged' ? (
             <>
-              <SimpleMessageList
-                messages={pagedMessages}
-                onDelete={handleDeleteMessage}
-              />
+              {/* 顶部提示 */}
+              {topHint && (
+                <div className="flex items-center justify-center py-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="bg-muted/80 backdrop-blur-sm text-muted-foreground text-xs px-3 py-1 rounded-full shadow-sm flex items-center gap-1.5">
+                    {canSwitchPrev && <ArrowUp className="h-3 w-3" />}
+                    {topHint}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex-1">
+                <SimpleMessageList
+                  messages={pagedMessages}
+                  onDelete={handleDeleteMessage}
+                />
+              </div>
+
+              {/* 底部提示 */}
+              {bottomHint && (
+                <div className="flex items-center justify-center py-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                   <div className="bg-muted/80 backdrop-blur-sm text-muted-foreground text-xs px-3 py-1 rounded-full shadow-sm flex items-center gap-1.5">
+                    {canSwitchNext && (bottomHint.includes("新建") ? <Plus className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
+                    {bottomHint}
+                  </div>
+                </div>
+              )}
               
-              {/* 浮动话题切换器 */}
+              {/* 浮动话题切换器 (保留，作为快捷操作) */}
              {currentSession && (
                <div className={cn(
-                 "absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2 z-10 transition-all duration-200 group/indicator",
+                 "absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2 z-10 transition-all duration-200 group/indicator pointer-events-none",
                  "opacity-0 group-hover/message-area:opacity-100",
                )}>
                   {/* 话题名称显示区域 - 仅hover时显示 */}
@@ -214,7 +291,7 @@ export function MessageArea() {
                     )}
                   </div>
 
-                  <div className="bg-background/20 backdrop-blur-[1px] border border-border/20 rounded-full shadow-sm p-0.5 flex flex-col gap-0.5 hover:bg-background/80 hover:border-border transition-all duration-200">
+                  <div className="bg-background/20 backdrop-blur-[1px] border border-border/20 rounded-full shadow-sm p-0.5 flex flex-col gap-0.5 hover:bg-background/80 hover:border-border transition-all duration-200 pointer-events-auto">
                     {isDesktop && (
                        <Button
                          size="icon"
@@ -257,7 +334,7 @@ export function MessageArea() {
               onDelete={handleDeleteMessage}
             />
           )}
-          </motion.div>
+          </div>
         </div>
 
         {/* 输入框 */}
@@ -361,4 +438,3 @@ function ContinuousMessageList({
     </div>
   );
 }
-
