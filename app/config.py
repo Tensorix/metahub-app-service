@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
 
+    # Agent Chat 配置
+    AGENT_MAX_ITERATIONS: int = 50
+    AGENT_TIMEOUT: int = 300
+    AGENT_DEFAULT_MODEL: str = "gpt-4o-mini"
+
     @computed_field
     @property
     def sqlalchemy_database_uri(self) -> str:
