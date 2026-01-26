@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Session, SessionCreate, SessionUpdate } from '@/lib/api';
+import { agentManagementApi } from '@/lib/agentManagementApi';
+import type { Agent } from '@/lib/agentManagementApi';
 import {
   Dialog,
   DialogContent,
@@ -23,17 +25,30 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
   const [name, setName] = useState('');
   const [type, setType] = useState('pm');
   const [source, setSource] = useState('');
+  const [agentId, setAgentId] = useState<string>('');
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      // Load agents when dialog opens
+      agentManagementApi.listAgents({ page: 1, page_size: 100 })
+        .then(response => setAgents(response.items))
+        .catch(console.error);
+    }
+  }, [open]);
 
   useEffect(() => {
     if (session) {
       setName(session.name || '');
       setType(session.type);
       setSource(session.source || '');
+      setAgentId(session.agent_id || '');
     } else {
       setName('');
       setType('pm');
       setSource('');
+      setAgentId('');
     }
   }, [session, open]);
 
@@ -46,6 +61,7 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
         name: name || undefined,
         type,
         source: source || undefined,
+        agent_id: agentId || undefined,
       };
 
       await onSubmit(data);
@@ -101,6 +117,23 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
                 value={source}
                 onChange={(e) => setSource(e.target.value)}
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="agent">关联 Agent (可选)</Label>
+              <select
+                id="agent"
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                value={agentId}
+                onChange={(e) => setAgentId(e.target.value)}
+              >
+                <option value="">无</option>
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
