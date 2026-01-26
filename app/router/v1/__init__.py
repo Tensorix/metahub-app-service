@@ -7,6 +7,7 @@ from .auth import router as auth_router
 from .sync import router as sync_router
 from .api_key import router as api_key_router
 from .webhook import router as webhook_router
+from .agent_chat import router as agent_chat_router
 
 router = APIRouter()
 router.include_router(experimental_router, prefix="", tags=["v1"])
@@ -17,3 +18,4 @@ router.include_router(auth_router, prefix="", tags=["auth"])
 router.include_router(sync_router, prefix="", tags=["sync"])
 router.include_router(api_key_router, prefix="", tags=["api-key"])
 router.include_router(webhook_router, prefix="", tags=["webhooks"])
+router.include_router(agent_chat_router, prefix="", tags=["agent-chat"])

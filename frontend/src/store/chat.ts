@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { sessionApi, type Session, type Topic, type Message, type MessageCreate } from '@/lib/api';
 import { computeVirtualTopics, type VirtualTopic } from '@/lib/virtualTopic';
+import { chatWithAgentStream, stopGeneration as apiStopGeneration } from '@/lib/agentApi';
 
 interface ChatState {
   // ===== 会话列表 =====
@@ -33,6 +34,17 @@ interface ChatState {
   boundaryProgress: number; // 0-100
   boundaryDirection: 'up' | 'down' | null;
 
+  // ===== AI 对话状态 =====
+  isStreaming: boolean;
+  streamingMessageId: string | null;
+  streamingContent: string;
+  abortController: AbortController | null;
+  activeToolCall: {
+    name: string;
+    args: Record<string, unknown>;
+  } | null;
+  streamError: string | null;
+
   // ===== 计算属性（改为方法，避免无限循环） =====
   getCurrentSession: () => Session | null;
   getCurrentTopic: () => Topic | VirtualTopic | null;
@@ -60,6 +72,12 @@ interface ChatState {
   sendMessage: (content: string) => Promise<void>;
   deleteMessage: (messageId: string) => Promise<void>;
 
+  // AI 对话
+  sendAIMessage: (content: string) => Promise<void>;
+  stopGeneration: () => void;
+  regenerateMessage: (messageId: string) => Promise<void>;
+  clearStreamState: () => void;
+
   // UI
   setTopicSidebarCollapsed: (collapsed: boolean) => void;
   setLeftDrawerOpen: (open: boolean) => void;
@@ -85,6 +103,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   rightDrawerOpen: false,
   boundaryProgress: 0,
   boundaryDirection: null,
+
+  // AI 对话初始状态
+  isStreaming: false,
+  streamingMessageId: null,
+  streamingContent: '',
+  abortController: null,
+  activeToolCall: null,
+  streamError: null,
 
   // ===== 计算属性（改为方法，避免无限循环） =====
   getCurrentSession: () => {
@@ -413,5 +439,295 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setLeftDrawerOpen: (open) => set({ leftDrawerOpen: open }),
   setRightDrawerOpen: (open) => set({ rightDrawerOpen: open }),
   setBoundaryState: (progress, direction) => set({ boundaryProgress: progress, boundaryDirection: direction }),
+
+  // ===== AI 对话 Actions =====
+  sendAIMessage: async (content: string) => {
+    const { currentSessionId, currentTopicId, sessions } = get();
+
+    if (!currentSessionId) {
+      set({ streamError: 'No session selected' });
+      return;
+    }
+
+    // 检查是否是 AI session
+    const session = sessions.find((s) => s.id === currentSessionId);
+    if (!session || session.type !== 'ai') {
+      set({ streamError: 'Not an AI session' });
+      return;
+    }
+
+    // 创建 AbortController
+    const controller = new AbortController();
+
+    // 生成临时消息 ID
+    const userMessageId = `temp-user-${Date.now()}`;
+    const aiMessageId = `temp-ai-${Date.now()}`;
+
+    // 获取或创建 topic
+    let topicId = currentTopicId;
+    if (!topicId) {
+      const topicName = content.length > 30 ? `${content.slice(0, 30)}...` : content;
+      const newTopic = await get().createTopic(currentSessionId, topicName);
+      topicId = newTopic.id;
+      set({ currentTopicId: topicId });
+    }
+
+    // 添加用户消息到 UI
+    const userMessage: Message = {
+      id: userMessageId,
+      session_id: currentSessionId,
+      topic_id: topicId || undefined,
+      role: 'user',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      is_deleted: false,
+      parts: [{ id: userMessageId, message_id: userMessageId, type: 'text', content, created_at: new Date().toISOString() }],
+    };
+
+    // 添加空的 AI 消息占位
+    const aiMessage: Message = {
+      id: aiMessageId,
+      session_id: currentSessionId,
+      topic_id: topicId || undefined,
+      role: 'assistant',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      is_deleted: false,
+      parts: [{ id: aiMessageId, message_id: aiMessageId, type: 'text', content: '', created_at: new Date().toISOString() }],
+    };
+
+    set((state) => {
+      const topicKey = topicId || currentSessionId;
+      const currentMessages = state.messages[topicKey] || [];
+      return {
+        messages: {
+          ...state.messages,
+          [topicKey]: [...currentMessages, userMessage, aiMessage],
+        },
+        isStreaming: true,
+        streamingMessageId: aiMessageId,
+        streamingContent: '',
+        abortController: controller,
+        streamError: null,
+        activeToolCall: null,
+      };
+    });
+
+    try {
+      let fullResponse: string[] = [];
+
+      console.log('Starting AI chat stream:', { currentSessionId, content, topicId });
+
+      for await (const event of chatWithAgentStream(
+        currentSessionId,
+        content,
+        {
+          topicId: topicId || undefined,
+          signal: controller.signal,
+        }
+      )) {
+        console.log('Received event:', event);
+        // 处理不同事件类型
+        switch (event.event) {
+          case 'message':
+            set((state) => {
+              const newContent = state.streamingContent + event.data.content;
+              fullResponse.push(event.data.content);
+
+              // 更新消息内容
+              const topicKey = topicId || currentSessionId;
+              const currentMessages = state.messages[topicKey] || [];
+              const msgIndex = currentMessages.findIndex(
+                (m) => m.id === state.streamingMessageId
+              );
+              if (msgIndex !== -1) {
+                const updatedMessages = [...currentMessages];
+                updatedMessages[msgIndex] = {
+                  ...updatedMessages[msgIndex],
+                  parts: [
+                    {
+                      ...updatedMessages[msgIndex].parts[0],
+                      content: newContent,
+                    },
+                  ],
+                };
+                return {
+                  streamingContent: newContent,
+                  messages: {
+                    ...state.messages,
+                    [topicKey]: updatedMessages,
+                  },
+                };
+              }
+              return { streamingContent: newContent };
+            });
+            break;
+
+          case 'tool_call':
+            set(() => ({
+              activeToolCall: {
+                name: event.data.name,
+                args: event.data.args,
+              },
+            }));
+            break;
+
+          case 'tool_result':
+            set(() => ({
+              activeToolCall: null,
+            }));
+            break;
+
+          case 'done':
+            // 流式完成
+            set(() => ({
+              isStreaming: false,
+              streamingMessageId: null,
+              abortController: null,
+              activeToolCall: null,
+            }));
+
+            // 刷新消息列表获取真实 ID
+            if (topicId) {
+              await get().loadMessages(currentSessionId, topicId);
+            }
+            break;
+
+          case 'error':
+            set(() => ({
+              isStreaming: false,
+              streamError: event.data.error,
+              abortController: null,
+              activeToolCall: null,
+            }));
+            break;
+        }
+      }
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        // 用户取消，不是错误
+        set((state) => {
+          const topicKey = topicId || currentSessionId;
+          const currentMessages = state.messages[topicKey] || [];
+          const msgIndex = currentMessages.findIndex(
+            (m) => m.id === state.streamingMessageId
+          );
+          if (msgIndex !== -1) {
+            const updatedMessages = [...currentMessages];
+            updatedMessages[msgIndex] = {
+              ...updatedMessages[msgIndex],
+              parts: [
+                {
+                  ...updatedMessages[msgIndex].parts[0],
+                  content: updatedMessages[msgIndex].parts[0].content + ' [已取消]',
+                },
+              ],
+            };
+            return {
+              isStreaming: false,
+              abortController: null,
+              activeToolCall: null,
+              streamingMessageId: null,
+              messages: {
+                ...state.messages,
+                [topicKey]: updatedMessages,
+              },
+            };
+          }
+          return {
+            isStreaming: false,
+            abortController: null,
+            activeToolCall: null,
+            streamingMessageId: null,
+          };
+        });
+      } else {
+        set(() => ({
+          isStreaming: false,
+          streamError: (error as Error).message,
+          abortController: null,
+          activeToolCall: null,
+          streamingMessageId: null,
+        }));
+      }
+    }
+  },
+
+  stopGeneration: () => {
+    const { abortController, currentSessionId, currentTopicId } = get();
+
+    if (abortController) {
+      abortController.abort();
+    }
+
+    // 也调用后端 API 确保停止
+    if (currentSessionId && currentTopicId) {
+      apiStopGeneration(currentSessionId, currentTopicId).catch(() => {
+        // Ignore errors
+      });
+    }
+
+    set(() => ({
+      isStreaming: false,
+      abortController: null,
+      activeToolCall: null,
+    }));
+  },
+
+  regenerateMessage: async (messageId: string) => {
+    const { messages, currentSessionId, currentTopicId } = get();
+
+    // 找到消息
+    const topicKey = currentTopicId || currentSessionId;
+    if (!topicKey) return;
+
+    const currentMessages = messages[topicKey] || [];
+    const messageIndex = currentMessages.findIndex((m) => m.id === messageId);
+    if (messageIndex === -1) return;
+
+    const message = currentMessages[messageIndex];
+    if (message.role !== 'assistant') return;
+
+    // 找到对应的用户消息
+    const userMessage = currentMessages
+      .slice(0, messageIndex)
+      .reverse()
+      .find((m) => m.role === 'user');
+
+    if (!userMessage) return;
+
+    // 删除 AI 消息
+    set((state) => {
+      const updatedMessages = (state.messages[topicKey] || []).filter(
+        (m) => m.id !== messageId
+      );
+      return {
+        messages: {
+          ...state.messages,
+          [topicKey]: updatedMessages,
+        },
+      };
+    });
+
+    // 获取用户消息内容
+    const userContent = userMessage.parts
+      .filter((p) => p.type === 'text')
+      .map((p) => p.content)
+      .join('');
+
+    // 重新发送
+    await get().sendAIMessage(userContent);
+  },
+
+  clearStreamState: () => {
+    set({
+      isStreaming: false,
+      streamingMessageId: null,
+      streamingContent: '',
+      abortController: null,
+      activeToolCall: null,
+      streamError: null,
+    });
+  },
 }));
 

@@ -55,6 +55,7 @@ class DeepAgentService:
                 api_key=config.OPENAI_API_KEY,
                 base_url=config.OPENAI_BASE_URL,
                 streaming=True,
+                max_tokens=self.config.get("max_tokens", 4096),
             )
         return self._llm
 
@@ -70,12 +71,10 @@ class DeepAgentService:
         if self._agent is None:
             llm = self._get_llm()
             tools = self._get_tools()
-            system_prompt = self.config.get("system_prompt", "You are a helpful AI assistant.")
 
             self._agent = create_react_agent(
                 model=llm,
                 tools=tools,
-                state_modifier=system_prompt,
                 checkpointer=self.checkpointer,
                 store=self.store,
             )
@@ -104,8 +103,15 @@ class DeepAgentService:
         if user_id:
             config_dict["configurable"]["user_id"] = str(user_id)
 
+        # Prepare messages with system prompt
+        system_prompt = self.config.get("system_prompt", "You are a helpful AI assistant.")
+        messages = []
+        if system_prompt:
+            messages.append(SystemMessage(content=system_prompt))
+        messages.append(HumanMessage(content=message))
+
         response = await agent.ainvoke(
-            {"messages": [HumanMessage(content=message)]},
+            {"messages": messages},
             config=config_dict,
         )
 
@@ -138,25 +144,42 @@ class DeepAgentService:
                 - done: Stream complete
                 - error: Error occurred
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         agent = self._get_agent()
         config_dict = {"configurable": {"thread_id": thread_id}}
 
         if user_id:
             config_dict["configurable"]["user_id"] = str(user_id)
 
+        # Prepare messages with system prompt
+        system_prompt = self.config.get("system_prompt", "You are a helpful AI assistant.")
+        messages = []
+        if system_prompt:
+            messages.append(SystemMessage(content=system_prompt))
+        messages.append(HumanMessage(content=message))
+
+        logger.info(f"Starting agent stream for thread {thread_id}")
+
         try:
+            event_count = 0
             async for event in agent.astream_events(
-                {"messages": [HumanMessage(content=message)]},
+                {"messages": messages},
                 config=config_dict,
                 version="v2",
             ):
+                event_count += 1
                 event_type = event.get("event")
                 event_data = event.get("data", {})
+
+                logger.debug(f"Agent event #{event_count}: {event_type}")
 
                 if event_type == "on_chat_model_stream":
                     # Streaming text chunk
                     chunk = event_data.get("chunk")
                     if chunk and hasattr(chunk, "content") and chunk.content:
+                        logger.debug(f"Yielding message chunk: {chunk.content[:50]}")
                         yield {
                             "event": "message",
                             "data": {"content": chunk.content},
@@ -166,6 +189,7 @@ class DeepAgentService:
                     # Tool invocation started
                     tool_name = event.get("name", "unknown")
                     tool_input = event_data.get("input", {})
+                    logger.info(f"Tool call: {tool_name}")
                     yield {
                         "event": "tool_call",
                         "data": {
@@ -177,6 +201,7 @@ class DeepAgentService:
                 elif event_type == "on_tool_end":
                     # Tool execution completed
                     tool_output = event_data.get("output", "")
+                    logger.info(f"Tool result: {event.get('name', 'unknown')}")
                     yield {
                         "event": "tool_result",
                         "data": {
@@ -185,9 +210,11 @@ class DeepAgentService:
                         },
                     }
 
+            logger.info(f"Agent stream completed, total events: {event_count}")
             yield {"event": "done", "data": {"status": "complete"}}
 
         except Exception as e:
+            logger.error(f"Error in agent stream: {str(e)}", exc_info=True)
             yield {"event": "error", "data": {"error": str(e)}}
 
     async def get_history(

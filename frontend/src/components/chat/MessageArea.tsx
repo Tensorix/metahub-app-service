@@ -7,6 +7,8 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { MessageInput } from '@/components/MessageInput';
 import { MessageList as SimpleMessageList } from '@/components/MessageList';
+import { AIMessageInput } from './AIMessageInput';
+import { AIMessageList } from './AIMessageList';
 import { TopicDivider } from './TopicDivider';
 import { TopicSelector } from './TopicSelector';
 import { TopicSidebar } from './TopicSidebar';
@@ -298,10 +300,14 @@ export function MessageArea() {
               )}
 
               <div className="flex-1">
-                <SimpleMessageList
-                  messages={pagedMessages}
-                  onDelete={handleDeleteMessage}
-                />
+                {currentSession?.type === 'ai' ? (
+                  <AIMessageList />
+                ) : (
+                  <SimpleMessageList
+                    messages={pagedMessages}
+                    onDelete={handleDeleteMessage}
+                  />
+                )}
               </div>
 
               {/* 底部提示 */}
@@ -391,11 +397,15 @@ export function MessageArea() {
 
         {/* 输入框 */}
         <div className="border-t px-4 py-3">
-          <MessageInput
-            onSend={sendMessage}
-            onCreateTopic={handleCreateNewTopic}
-            disabled={!currentSession}
-          />
+          {currentSession?.type === 'ai' ? (
+            <AIMessageInput disabled={!currentSession} />
+          ) : (
+            <MessageInput
+              onSend={sendMessage}
+              onCreateTopic={handleCreateNewTopic}
+              disabled={!currentSession}
+            />
+          )}
         </div>
       </div>
 
