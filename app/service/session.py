@@ -9,6 +9,7 @@ from app.db.model.message import Message
 from app.db.model.message_part import MessagePart
 from app.db.model.message_sender import MessageSender
 from app.db.model.agent import Agent
+from app.db.model.subagent import SubAgent
 from app.schema.session import (
     SessionCreate, SessionUpdate, SessionListQuery,
     TopicCreate, TopicUpdate,
@@ -294,11 +295,34 @@ class AgentService:
         agent = Agent(
             name=data.name,
             system_prompt=data.system_prompt,
+            model=data.model,
+            model_provider=data.model_provider,
+            temperature=data.temperature,
+            max_tokens=data.max_tokens,
+            tools=data.tools,
+            skills=data.skills,
+            memory_files=data.memory_files,
             metadata_=data.metadata,
         )
         db.add(agent)
         db.commit()
         db.refresh(agent)
+        
+        # Create subagents if provided
+        if data.subagents:
+            for subagent_data in data.subagents:
+                subagent = SubAgent(
+                    parent_agent_id=agent.id,
+                    name=subagent_data.name,
+                    description=subagent_data.description,
+                    system_prompt=subagent_data.system_prompt,
+                    model=subagent_data.model,
+                    tools=subagent_data.tools,
+                )
+                db.add(subagent)
+            db.commit()
+            db.refresh(agent)
+        
         return agent
 
     @staticmethod

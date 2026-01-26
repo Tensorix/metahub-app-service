@@ -150,27 +150,92 @@ class MessageSenderResponse(BaseModel):
     created_at: datetime = Field(..., description="创建时间")
 
 
+# ============ SubAgent Schemas ============
+class SubAgentBase(BaseModel):
+    name: str = Field(..., description="子代理名称", max_length=100)
+    description: str = Field(..., description="子代理描述，用于任务委派时的选择")
+    system_prompt: Optional[str] = Field(None, description="子代理系统提示词")
+    model: Optional[str] = Field(None, description="子代理模型，为空则继承父 Agent")
+    tools: Optional[list[str]] = Field(default_factory=list, description="子代理工具列表")
+
+
+class SubAgentCreate(SubAgentBase):
+    pass
+
+
+class SubAgentUpdate(BaseModel):
+    name: Optional[str] = Field(None, description="子代理名称", max_length=100)
+    description: Optional[str] = Field(None, description="子代理描述")
+    system_prompt: Optional[str] = Field(None, description="子代理系统提示词")
+    model: Optional[str] = Field(None, description="子代理模型")
+    tools: Optional[list[str]] = Field(None, description="子代理工具列表")
+
+
+class SubAgentResponse(SubAgentBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID = Field(..., description="子代理 ID")
+    parent_agent_id: UUID = Field(..., description="父 Agent ID")
+    created_at: datetime = Field(..., description="创建时间")
+    updated_at: datetime = Field(..., description="更新时间")
+    is_deleted: bool = Field(..., description="是否删除")
+
+
 # ============ Agent Schemas ============
 class AgentBase(BaseModel):
     name: str = Field(..., description="Agent 名称", max_length=255)
     system_prompt: Optional[str] = Field(None, description="系统提示词")
+    model: Optional[str] = Field("gpt-4o-mini", description="模型名称")
+    model_provider: Optional[str] = Field("openai", description="模型提供商")
+    temperature: Optional[float] = Field(0.7, ge=0, le=2, description="温度参数")
+    max_tokens: Optional[int] = Field(4096, ge=1, le=128000, description="最大 token 数")
+    tools: Optional[list[str]] = Field(default_factory=list, description="工具列表")
+    skills: Optional[list[str]] = Field(None, description="技能目录路径列表")
+    memory_files: Optional[list[str]] = Field(None, description="记忆文件路径列表")
     metadata: Optional[dict] = Field(None, description="扩展元数据", validation_alias="metadata_")
 
 
 class AgentCreate(AgentBase):
-    pass
+    subagents: Optional[list[SubAgentCreate]] = Field(None, description="子代理列表")
 
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = Field(None, description="Agent 名称", max_length=255)
     system_prompt: Optional[str] = Field(None, description="系统提示词")
+    model: Optional[str] = Field(None, description="模型名称")
+    model_provider: Optional[str] = Field(None, description="模型提供商")
+    temperature: Optional[float] = Field(None, ge=0, le=2, description="温度参数")
+    max_tokens: Optional[int] = Field(None, ge=1, le=128000, description="最大 token 数")
+    tools: Optional[list[str]] = Field(None, description="工具列表")
+    skills: Optional[list[str]] = Field(None, description="技能目录路径列表")
+    memory_files: Optional[list[str]] = Field(None, description="记忆文件路径列表")
     metadata: Optional[dict] = Field(None, description="扩展元数据", validation_alias="metadata_")
 
 
 class AgentResponse(AgentBase):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID = Field(..., description="Agent ID")
+    subagents: list[SubAgentResponse] = Field(default_factory=list, description="子代理列表")
     created_at: datetime = Field(..., description="创建时间")
     updated_at: datetime = Field(..., description="更新时间")
     is_deleted: bool = Field(..., description="是否删除")
+
+
+# ============ AgentVersion Schemas ============
+class AgentVersionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID = Field(..., description="版本 ID")
+    agent_id: UUID = Field(..., description="Agent ID")
+    version: int = Field(..., description="版本号")
+    name: str = Field(..., description="Agent 名称快照")
+    system_prompt: Optional[str] = Field(None, description="系统提示词快照")
+    model: Optional[str] = Field(None, description="模型名称快照")
+    model_provider: Optional[str] = Field(None, description="模型提供商快照")
+    temperature: Optional[float] = Field(None, description="温度参数快照")
+    max_tokens: Optional[int] = Field(None, description="最大 token 数快照")
+    tools: Optional[list[str]] = Field(None, description="工具列表快照")
+    subagents_snapshot: Optional[list[dict]] = Field(None, description="子代理配置快照")
+    change_summary: Optional[str] = Field(None, description="变更摘要")
+    created_at: datetime = Field(..., description="创建时间")

@@ -226,8 +226,8 @@ async def chat_with_agent(
     
     logger.info("User message saved")
 
-    # Get agent service
-    agent_config = agent.metadata_ or {}
+    # Get agent service with proper config
+    agent_config = AgentFactory.build_agent_config(agent)
     logger.info(f"Getting agent service with config: {agent_config}")
     
     agent_service = await AgentFactory.get_agent(agent.id, agent_config)
@@ -420,7 +420,7 @@ async def chat_websocket(
             session_id, db, user_id
         )
 
-        agent_config = agent.metadata_ or {}
+        agent_config = AgentFactory.build_agent_config(agent)
         agent_service = await AgentFactory.get_agent(agent.id, agent_config)
 
         current_task: Optional[asyncio.Task] = None

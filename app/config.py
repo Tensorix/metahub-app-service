@@ -44,7 +44,8 @@ class Settings(BaseSettings):
     # Agent Chat 配置
     AGENT_MAX_ITERATIONS: int = 50
     AGENT_TIMEOUT: int = 300
-    AGENT_DEFAULT_MODEL: str = "glm-4.7"
+    AGENT_DEFAULT_MODEL: str = "gpt-4o-mini"
+    AGENT_DEFAULT_PROVIDER: str = "openai"
 
     @computed_field
     @property

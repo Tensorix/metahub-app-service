@@ -7,7 +7,7 @@ Provides:
 - Agent caching and lifecycle
 """
 
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 from uuid import UUID
 import asyncio
 
@@ -18,6 +18,9 @@ from langgraph.store.memory import InMemoryStore
 
 from app.config import config
 from app.agent.deep_agent_service import DeepAgentService
+
+if TYPE_CHECKING:
+    from app.db.model import Agent
 
 
 class AgentFactory:
@@ -92,7 +95,7 @@ class AgentFactory:
 
         Args:
             agent_id: Unique agent identifier
-            agent_config: Agent configuration from Agent.metadata_
+            agent_config: Agent configuration from AgentFactory.build_agent_config()
             use_checkpointer: Whether to use PostgreSQL checkpointer
             use_store: Whether to use memory store
 
@@ -165,3 +168,48 @@ class AgentFactory:
             cls._connection_pool = None
         cls._checkpointer = None
         cls._store = None
+
+    @classmethod
+    def build_agent_config(cls, agent: "Agent") -> dict[str, Any]:
+        """
+        Build agent config dict from ORM model.
+
+        Args:
+            agent: Agent ORM model instance
+
+        Returns:
+            Configuration dictionary for DeepAgentService
+        """
+        agent_config = {
+            "name": agent.name,
+            "model": agent.model,
+            "model_provider": agent.model_provider,
+            "system_prompt": agent.system_prompt,
+            "temperature": agent.temperature,
+            "max_tokens": agent.max_tokens,
+            "tools": agent.tools or [],
+        }
+
+        # Add subagents if available
+        if agent.subagents:
+            agent_config["subagents"] = [
+                {
+                    "name": sa.name,
+                    "description": sa.description,
+                    "system_prompt": sa.system_prompt,
+                    "model": sa.model,
+                    "tools": sa.tools or [],
+                }
+                for sa in agent.subagents
+                if not sa.is_deleted
+            ]
+
+        # Add skills from database field
+        if agent.skills:
+            agent_config["skills"] = agent.skills
+
+        # Add memory files from database field
+        if agent.memory_files:
+            agent_config["memory"] = agent.memory_files
+
+        return agent_config

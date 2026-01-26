@@ -7,4 +7,6 @@ from .message import Message
 from .message_part import MessagePart
 from .message_sender import MessageSender
 from .agent import Agent
+from .subagent import SubAgent
+from .agent_version import AgentVersion
 from .user import User, UserToken

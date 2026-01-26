@@ -1,22 +1,29 @@
 """
-Deep Agent Service - Core agent implementation with streaming support.
+Deep Agent Service - Core agent implementation using deepagents library.
 
-Uses LangGraph for agent orchestration with:
+Uses deepagents for agent orchestration with:
 - Streaming responses via SSE
 - PostgreSQL checkpointer for persistence
-- Configurable tools and system prompts
+- SubAgents for task delegation
+- Built-in filesystem tools (ls, read_file, write_file, edit_file, glob, grep)
+- Built-in planning tools (write_todos, read_todos)
+- CompositeBackend for memory routing
 """
 
+import logging
 from typing import Any, AsyncGenerator, Optional
 from uuid import UUID
 
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
-from langgraph.prebuilt import create_react_agent
+from deepagents import create_deep_agent, SubAgent
+from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
+from deepagents.middleware import SubAgentMiddleware
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.memory import InMemoryStore
 
 from app.config import config
+
+logger = logging.getLogger(__name__)
 
 
 class DeepAgentService:
@@ -33,10 +40,16 @@ class DeepAgentService:
 
         Args:
             agent_config: Agent configuration including:
-                - model: Model name (default: gpt-4o-mini)
+                - name: Agent name
+                - model: Model name (e.g., "gpt-4o-mini")
+                - model_provider: Provider name (e.g., "openai")
                 - system_prompt: System prompt for the agent
                 - tools: List of tool names to enable
                 - temperature: Model temperature (default: 0.7)
+                - max_tokens: Max tokens (default: 4096)
+                - subagents: List of subagent configurations
+                - skills: List of skill directory paths
+                - memory: List of memory file paths
             checkpointer: Optional PostgreSQL checkpointer for persistence
             store: Optional memory store for long-term memory
         """
@@ -44,40 +57,144 @@ class DeepAgentService:
         self.checkpointer = checkpointer
         self.store = store
         self._agent = None
-        self._llm = None
 
-    def _get_llm(self) -> ChatOpenAI:
-        """Get or create the LLM instance."""
-        if self._llm is None:
-            self._llm = ChatOpenAI(
-                model=self.config.get("model", config.AGENT_DEFAULT_MODEL),
-                temperature=self.config.get("temperature", 0.7),
-                api_key=config.OPENAI_API_KEY,
-                base_url=config.OPENAI_BASE_URL,
-                streaming=True,
-                max_tokens=self.config.get("max_tokens", 4096),
-            )
-        return self._llm
+    def _get_model_string(self) -> str:
+        """Build provider:model format string."""
+        model = self.config.get("model") or config.AGENT_DEFAULT_MODEL
+        provider = self.config.get("model_provider") or config.AGENT_DEFAULT_PROVIDER
+        # If model already contains ":", use as-is
+        return model if ":" in model else f"{provider}:{model}"
 
     def _get_tools(self) -> list:
-        """Get tools based on configuration."""
+        """Get custom tools based on configuration."""
         from app.agent.tools import ToolRegistry
 
-        tool_names = self.config.get("tools", [])
+        tool_names = self.config.get("tools") or []
         return ToolRegistry.get_tools(tool_names)
 
-    def _get_agent(self):
-        """Get or create the agent instance."""
-        if self._agent is None:
-            llm = self._get_llm()
-            tools = self._get_tools()
+    def _build_backend(self):
+        """
+        Build CompositeBackend with persistent memory routes.
 
-            self._agent = create_react_agent(
-                model=llm,
-                tools=tools,
-                checkpointer=self.checkpointer,
-                store=self.store,
+        Routes:
+        - /memories/* → StoreBackend (persistent, cross-conversation)
+        - All others → StateBackend (ephemeral, conversation-scoped)
+        """
+        if not self.store:
+            return None
+
+        return CompositeBackend(
+            default=lambda rt: StateBackend(rt),
+            routes={"/memories/": lambda rt: StoreBackend(rt)}
+        )
+
+    def _build_subagent_middleware(self) -> Optional[SubAgentMiddleware]:
+        """
+        Build SubAgentMiddleware with configured subagents.
+
+        Subagents enable task delegation and context isolation.
+        Each subagent has its own tools, model, and system prompt.
+        """
+        subagent_records = self.config.get("subagents") or []
+        if not subagent_records:
+            return None
+
+        from app.agent.tools import ToolRegistry
+
+        subagents = []
+        for sa in subagent_records:
+            subagent = SubAgent(
+                name=sa["name"],
+                description=sa["description"],
+                system_prompt=sa.get("system_prompt", ""),
+                tools=ToolRegistry.get_tools(sa.get("tools") or []),
+                model=sa.get("model"),  # Optional, inherits from parent if None
             )
+            subagents.append(subagent)
+
+        # SubAgentMiddleware requires default_model for subagents without explicit model
+        return SubAgentMiddleware(
+            subagents=subagents,
+            default_model=self._get_model_string()
+        )
+
+    def _get_model_kwargs(self) -> dict:
+        """
+        Build model-specific kwargs including API keys.
+        
+        Returns kwargs to pass to init_chat_model.
+        """
+        provider = self.config.get("model_provider") or config.AGENT_DEFAULT_PROVIDER
+        kwargs = {}
+        
+        # Add provider-specific API keys from config
+        if provider == "openai":
+            if config.OPENAI_API_KEY:
+                kwargs["api_key"] = config.OPENAI_API_KEY
+            if config.OPENAI_BASE_URL:
+                kwargs["base_url"] = config.OPENAI_BASE_URL
+        
+        return kwargs
+
+    def _get_agent(self):
+        """
+        Create deep agent with all features enabled.
+
+        Built-in tools (auto-enabled):
+        - Planning: write_todos, read_todos
+        - Filesystem: ls, read_file, write_file, edit_file, glob, grep
+        - SubAgent: task (if subagents configured)
+        """
+        if self._agent is None:
+            # Build middleware list
+            middleware = []
+            subagent_mw = self._build_subagent_middleware()
+            if subagent_mw:
+                middleware.append(subagent_mw)
+
+            # Build model with explicit API key
+            from langchain.chat_models import init_chat_model
+            model_string = self._get_model_string()
+            model_kwargs = self._get_model_kwargs()
+            
+            # Create model instance with API key
+            model = init_chat_model(model_string, **model_kwargs)
+
+            # Agent kwargs
+            agent_kwargs = {
+                "model": model,  # Pass model instance instead of string
+                "tools": self._get_tools(),
+                "system_prompt": self.config.get("system_prompt") or (
+                    "You are a helpful AI assistant with access to planning tools "
+                    "(write_todos, read_todos) and file system tools "
+                    "(ls, read_file, write_file, edit_file, glob, grep)."
+                ),
+                "middleware": middleware,
+                "checkpointer": self.checkpointer,
+                "store": self.store,
+                "backend": self._build_backend(),
+                "name": self.config.get("name"),
+            }
+
+            # Skills (reusable workflows from SKILL.md files)
+            skills = self.config.get("skills")
+            if skills:
+                agent_kwargs["skills"] = skills
+
+            # Memory (persistent context from AGENTS.md files)
+            memory = self.config.get("memory")
+            if memory:
+                agent_kwargs["memory"] = memory
+
+            logger.info(
+                f"Creating deep agent: model={model_string}, "
+                f"tools={len(agent_kwargs['tools'])} custom, "
+                f"middleware={len(middleware)}, "
+                f"subagents={len(subagent_mw.subagents) if subagent_mw else 0}"
+            )
+
+            self._agent = create_deep_agent(**agent_kwargs)
+
         return self._agent
 
     async def chat(
@@ -98,27 +215,20 @@ class DeepAgentService:
             Complete AI response text
         """
         agent = self._get_agent()
-        config_dict = {"configurable": {"thread_id": thread_id}}
+        cfg = {"configurable": {"thread_id": thread_id}}
 
         if user_id:
-            config_dict["configurable"]["user_id"] = str(user_id)
-
-        # Prepare messages with system prompt
-        system_prompt = self.config.get("system_prompt", "You are a helpful AI assistant.")
-        messages = []
-        if system_prompt:
-            messages.append(SystemMessage(content=system_prompt))
-        messages.append(HumanMessage(content=message))
+            cfg["configurable"]["user_id"] = str(user_id)
 
         response = await agent.ainvoke(
-            {"messages": messages},
-            config=config_dict,
+            {"messages": [{"role": "user", "content": message}]},
+            config=cfg,
         )
 
         # Extract the last AI message
         messages = response.get("messages", [])
         for msg in reversed(messages):
-            if isinstance(msg, AIMessage):
+            if isinstance(msg, AIMessage) or getattr(msg, "type", None) == "ai":
                 return msg.content
         return ""
 
@@ -139,34 +249,24 @@ class DeepAgentService:
         Yields:
             Event dictionaries with types:
                 - message: Text content chunk
-                - tool_call: Tool invocation
+                - tool_call: Tool invocation (including built-in tools)
                 - tool_result: Tool execution result
                 - done: Stream complete
                 - error: Error occurred
         """
-        import logging
-        logger = logging.getLogger(__name__)
-        
         agent = self._get_agent()
-        config_dict = {"configurable": {"thread_id": thread_id}}
+        cfg = {"configurable": {"thread_id": thread_id}}
 
         if user_id:
-            config_dict["configurable"]["user_id"] = str(user_id)
+            cfg["configurable"]["user_id"] = str(user_id)
 
-        # Prepare messages with system prompt
-        system_prompt = self.config.get("system_prompt", "You are a helpful AI assistant.")
-        messages = []
-        if system_prompt:
-            messages.append(SystemMessage(content=system_prompt))
-        messages.append(HumanMessage(content=message))
-
-        logger.info(f"Starting agent stream for thread {thread_id}")
+        logger.info(f"Starting deep agent stream for thread {thread_id}")
 
         try:
             event_count = 0
             async for event in agent.astream_events(
-                {"messages": messages},
-                config=config_dict,
+                {"messages": [{"role": "user", "content": message}]},
+                config=cfg,
                 version="v2",
             ):
                 event_count += 1
@@ -186,7 +286,7 @@ class DeepAgentService:
                         }
 
                 elif event_type == "on_tool_start":
-                    # Tool invocation started
+                    # Tool invocation started (custom or built-in)
                     tool_name = event.get("name", "unknown")
                     tool_input = event_data.get("input", {})
                     logger.info(f"Tool call: {tool_name}")
@@ -245,11 +345,12 @@ class DeepAgentService:
         history = []
 
         for msg in messages[-limit:]:
-            if isinstance(msg, HumanMessage):
+            msg_type = getattr(msg, "type", None)
+            if msg_type == "human":
                 history.append({"role": "user", "content": msg.content})
-            elif isinstance(msg, AIMessage):
+            elif msg_type == "ai":
                 history.append({"role": "assistant", "content": msg.content})
-            elif isinstance(msg, SystemMessage):
+            elif msg_type == "system":
                 history.append({"role": "system", "content": msg.content})
 
         return history
