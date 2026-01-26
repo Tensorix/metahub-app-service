@@ -301,7 +301,7 @@ export function MessageArea() {
 
               <div className="flex-1">
                 {currentSession?.type === 'ai' ? (
-                  <AIMessageList />
+                  <AIMessageList className="overflow-visible p-0" />
                 ) : (
                   <SimpleMessageList
                     messages={pagedMessages}

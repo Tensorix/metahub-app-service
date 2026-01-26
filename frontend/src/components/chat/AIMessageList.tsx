@@ -12,7 +12,7 @@ import { RegenerateButton } from './RegenerateButton';
 import { cn } from '@/lib/utils';
 import { Bot, User } from 'lucide-react';
 
-export function AIMessageList() {
+export function AIMessageList({ className }: { className?: string }) {
   const { currentSessionId, currentTopicId, messages, streamingMessageId } = useChatStore();
   const { activeToolCall } = useAIChat();
 
@@ -20,7 +20,7 @@ export function AIMessageList() {
   const messageList = topicKey ? (messages[topicKey] || []) : [];
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+    <div className={cn("flex-1 overflow-y-auto p-4 space-y-4", className)}>
       {messageList.map((message) => {
         const isUser = message.role === 'user';
         const isCurrentStreaming = message.id === streamingMessageId;
