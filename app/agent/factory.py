@@ -14,7 +14,7 @@ import asyncio
 from psycopg_pool import AsyncConnectionPool
 from psycopg.rows import dict_row
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.store.memory import InMemoryStore
+from langgraph.store.postgres import AsyncPostgresStore
 
 from app.config import config
 from app.agent.deep_agent_service import DeepAgentService
@@ -28,7 +28,7 @@ class AgentFactory:
 
     _checkpointer: Optional[AsyncPostgresSaver] = None
     _connection_pool: Optional[AsyncConnectionPool] = None
-    _store: Optional[InMemoryStore] = None
+    _store: Optional[AsyncPostgresStore] = None
     _agents: dict[str, DeepAgentService] = {}
     _lock = asyncio.Lock()
 
@@ -71,15 +71,23 @@ class AgentFactory:
         return cls._checkpointer
 
     @classmethod
-    def get_store(cls) -> InMemoryStore:
+    async def get_store(cls) -> AsyncPostgresStore:
         """
-        Get or create the memory store.
+        Get or create the PostgreSQL store for persistent memory.
 
         Returns:
-            InMemoryStore instance
+            AsyncPostgresStore instance
         """
         if cls._store is None:
-            cls._store = InMemoryStore()
+            async with cls._lock:
+                if cls._store is None:
+                    # Ensure connection pool exists
+                    if cls._connection_pool is None:
+                        await cls.get_checkpointer()  # This will create the pool
+                    
+                    # AsyncPostgresStore accepts connection pool (same as AsyncPostgresSaver)
+                    cls._store = AsyncPostgresStore(cls._connection_pool)
+                    await cls._store.setup()
         return cls._store
 
     @classmethod
@@ -97,7 +105,7 @@ class AgentFactory:
             agent_id: Unique agent identifier
             agent_config: Agent configuration from AgentFactory.build_agent_config()
             use_checkpointer: Whether to use PostgreSQL checkpointer
-            use_store: Whether to use memory store
+            use_store: Whether to use PostgreSQL store
 
         Returns:
             DeepAgentService instance
@@ -110,7 +118,7 @@ class AgentFactory:
 
         # Get dependencies
         checkpointer = await cls.get_checkpointer() if use_checkpointer else None
-        store = cls.get_store() if use_store else None
+        store = await cls.get_store() if use_store else None
 
         # Create agent service
         agent_service = DeepAgentService(

@@ -19,7 +19,7 @@ from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
 from deepagents.middleware import SubAgentMiddleware
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.store.memory import InMemoryStore
+from langgraph.store.postgres import AsyncPostgresStore
 
 from app.config import config
 
@@ -33,7 +33,7 @@ class DeepAgentService:
         self,
         agent_config: dict[str, Any],
         checkpointer: Optional[AsyncPostgresSaver] = None,
-        store: Optional[InMemoryStore] = None,
+        store: Optional[AsyncPostgresStore] = None,
     ):
         """
         Initialize the Deep Agent service.
@@ -51,7 +51,7 @@ class DeepAgentService:
                 - skills: List of skill directory paths
                 - memory: List of memory file paths
             checkpointer: Optional PostgreSQL checkpointer for persistence
-            store: Optional memory store for long-term memory
+            store: Optional PostgreSQL store for long-term memory
         """
         self.config = agent_config
         self.checkpointer = checkpointer
@@ -83,10 +83,14 @@ class DeepAgentService:
         if not self.store:
             return None
 
-        return CompositeBackend(
-            default=lambda rt: StateBackend(rt),
-            routes={"/memories/": lambda rt: StoreBackend(rt)}
-        )
+        # Return a factory function that creates backends with runtime
+        def backend_factory(runtime):
+            return CompositeBackend(
+                default=StateBackend(runtime),
+                routes={"/memories/": StoreBackend(runtime)}
+            )
+        
+        return backend_factory
 
     def _build_subagent_middleware(self) -> Optional[SubAgentMiddleware]:
         """
@@ -202,6 +206,7 @@ class DeepAgentService:
         message: str,
         thread_id: str,
         user_id: Optional[UUID] = None,
+        session_id: Optional[UUID] = None,
     ) -> str:
         """
         Send a message and get a complete response.
@@ -210,6 +215,7 @@ class DeepAgentService:
             message: User message
             thread_id: Conversation thread ID
             user_id: Optional user ID for context
+            session_id: Optional session ID for filesystem isolation
 
         Returns:
             Complete AI response text
@@ -219,6 +225,12 @@ class DeepAgentService:
 
         if user_id:
             cfg["configurable"]["user_id"] = str(user_id)
+        
+        # Enable session-level filesystem isolation
+        if session_id:
+            if "metadata" not in cfg:
+                cfg["metadata"] = {}
+            cfg["metadata"]["assistant_id"] = str(session_id)
 
         response = await agent.ainvoke(
             {"messages": [{"role": "user", "content": message}]},
@@ -237,6 +249,7 @@ class DeepAgentService:
         message: str,
         thread_id: str,
         user_id: Optional[UUID] = None,
+        session_id: Optional[UUID] = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """
         Send a message and stream the response.
@@ -245,6 +258,7 @@ class DeepAgentService:
             message: User message
             thread_id: Conversation thread ID
             user_id: Optional user ID for context
+            session_id: Optional session ID for filesystem isolation
 
         Yields:
             Event dictionaries with types:
@@ -259,6 +273,12 @@ class DeepAgentService:
 
         if user_id:
             cfg["configurable"]["user_id"] = str(user_id)
+        
+        # Enable session-level filesystem isolation
+        if session_id:
+            if "metadata" not in cfg:
+                cfg["metadata"] = {}
+            cfg["metadata"]["assistant_id"] = str(session_id)
 
         logger.info(f"Starting deep agent stream for thread {thread_id}")
 

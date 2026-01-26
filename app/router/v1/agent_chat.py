@@ -244,6 +244,7 @@ async def chat_with_agent(
             request.message,
             thread_id=thread_id,
             user_id=current_user.id,
+            session_id=session_id,
         )
 
         # Save AI message
@@ -282,6 +283,7 @@ async def chat_with_agent(
                 request.message,
                 thread_id=thread_id,
                 user_id=current_user.id,
+                session_id=session_id,
             ):
                 event_type = event.get("event")
                 event_data = event.get("data", {})
@@ -457,6 +459,7 @@ async def chat_websocket(
                             msg.content,
                             thread_id=thread_id,
                             user_id=user_id,
+                            session_id=session_id,
                         ):
                             event_type = event.get("event")
                             event_data = event.get("data", {})
