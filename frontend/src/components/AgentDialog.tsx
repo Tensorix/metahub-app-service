@@ -584,7 +584,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                               )}
                               {(sa.tools || []).length > 0 && (
                                 <div className="flex gap-1 mt-1 flex-wrap">
-                                  {sa.tools.map(tool => (
+                                  {(sa.tools || []).map(tool => (
                                     <Badge key={tool} variant="outline" className="text-xs">
                                       {tool}
                                     </Badge>
