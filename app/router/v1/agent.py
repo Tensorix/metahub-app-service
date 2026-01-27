@@ -176,6 +176,10 @@ def update_agent(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
+    # Clear agent cache to apply new configuration
+    from app.agent.factory import AgentFactory
+    AgentFactory.clear_cache(agent_id)
+    
     # Manually construct response to avoid metadata conflict
     return {
         "id": agent.id,
@@ -217,4 +221,9 @@ def delete_agent(
     success = AgentService.delete_agent(db, agent_id)
     if not success:
         raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Clear agent cache
+    from app.agent.factory import AgentFactory
+    AgentFactory.clear_cache(agent_id)
+    
     return None
