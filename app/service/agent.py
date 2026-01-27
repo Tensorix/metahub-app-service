@@ -8,7 +8,8 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.db.model.agent import Agent
-from app.schema.session import AgentCreate, AgentUpdate
+from app.db.model.subagent import SubAgent
+from app.schema.agent import AgentCreate, AgentUpdate, SubAgentSchema
 
 
 class AgentService:
@@ -20,8 +21,33 @@ class AgentService:
         agent_data: AgentCreate
     ) -> Agent:
         """Create a new agent."""
-        agent = Agent(**agent_data.model_dump(exclude_unset=True))
+        # Extract subagents data
+        subagents_data = agent_data.subagents or []
+        summarization_data = agent_data.summarization
+        
+        # Create agent without subagents
+        agent_dict = agent_data.model_dump(exclude_unset=True, exclude={'subagents', 'summarization'})
+        
+        # Store summarization config
+        if summarization_data:
+            agent_dict['summarization_config'] = summarization_data.model_dump()
+        
+        agent = Agent(**agent_dict)
         db.add(agent)
+        db.flush()  # Get agent.id
+        
+        # Create subagents
+        for sa_data in subagents_data:
+            subagent = SubAgent(
+                parent_agent_id=agent.id,
+                name=sa_data.name,
+                description=sa_data.description,
+                system_prompt=sa_data.system_prompt,
+                model=sa_data.model,
+                tools=sa_data.tools or []
+            )
+            db.add(subagent)
+        
         db.commit()
         db.refresh(agent)
         return agent
@@ -70,9 +96,34 @@ class AgentService:
         if not agent:
             return None
         
-        update_data = agent_data.model_dump(exclude_unset=True)
+        update_data = agent_data.model_dump(exclude_unset=True, exclude={'subagents', 'summarization'})
+        
+        # Update basic fields
         for field, value in update_data.items():
             setattr(agent, field, value)
+        
+        # Update summarization config
+        if agent_data.summarization is not None:
+            agent.summarization_config = agent_data.summarization.model_dump()
+        
+        # Update subagents if provided
+        if agent_data.subagents is not None:
+            # Delete existing subagents
+            db.query(SubAgent).filter(
+                SubAgent.parent_agent_id == agent_id
+            ).delete()
+            
+            # Create new subagents
+            for sa_data in agent_data.subagents:
+                subagent = SubAgent(
+                    parent_agent_id=agent.id,
+                    name=sa_data.name,
+                    description=sa_data.description,
+                    system_prompt=sa_data.system_prompt,
+                    model=sa_data.model,
+                    tools=sa_data.tools or []
+                )
+                db.add(subagent)
         
         db.commit()
         db.refresh(agent)

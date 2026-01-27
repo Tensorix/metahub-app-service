@@ -4,6 +4,48 @@
 
 import { api } from './api';
 
+/**
+ * SubAgent - 子代理配置
+ */
+export interface SubAgent {
+  id?: string;
+  name: string;
+  description: string;
+  system_prompt?: string;
+  model?: string;
+  tools?: string[];
+}
+
+/**
+ * SkillContent - 技能内容
+ */
+export interface SkillContent {
+  name: string;
+  content: string;
+}
+
+/**
+ * MemoryContent - 记忆内容
+ */
+export interface MemoryContent {
+  name: string;
+  content: string;
+}
+
+/**
+ * SummarizationConfig - 对话摘要配置
+ */
+export interface SummarizationConfig {
+  enabled: boolean;
+  max_messages?: number;
+  keep_last_n?: number;
+  summary_prompt?: string;
+  model?: string;
+}
+
+/**
+ * Agent - AI Agent 完整配置
+ */
 export interface Agent {
   id: string;
   name: string;
@@ -13,14 +55,19 @@ export interface Agent {
   temperature?: number;
   max_tokens?: number;
   tools?: string[];
-  skills?: string[];
-  memory_files?: string[];
+  skills?: SkillContent[];
+  memory_files?: MemoryContent[];
+  subagents?: SubAgent[];
+  summarization?: SummarizationConfig;
   metadata?: Record<string, any>;
   created_at: string;
   updated_at: string;
   is_deleted: boolean;
 }
 
+/**
+ * AgentCreate - 创建 Agent 请求
+ */
 export interface AgentCreate {
   name: string;
   system_prompt?: string;
@@ -29,11 +76,16 @@ export interface AgentCreate {
   temperature?: number;
   max_tokens?: number;
   tools?: string[];
-  skills?: string[];
-  memory_files?: string[];
+  skills?: SkillContent[];
+  memory_files?: MemoryContent[];
+  subagents?: SubAgent[];
+  summarization?: SummarizationConfig;
   metadata?: Record<string, any>;
 }
 
+/**
+ * AgentUpdate - 更新 Agent 请求
+ */
 export interface AgentUpdate {
   name?: string;
   system_prompt?: string;
@@ -42,8 +94,10 @@ export interface AgentUpdate {
   temperature?: number;
   max_tokens?: number;
   tools?: string[];
-  skills?: string[];
-  memory_files?: string[];
+  skills?: SkillContent[];
+  memory_files?: MemoryContent[];
+  subagents?: SubAgent[];
+  summarization?: SummarizationConfig;
   metadata?: Record<string, any>;
 }
 

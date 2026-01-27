@@ -220,4 +220,8 @@ class AgentFactory:
         if agent.memory_files:
             agent_config["memory"] = agent.memory_files
 
+        # Add summarization config
+        if agent.summarization_config:
+            agent_config["summarization"] = agent.summarization_config
+
         return agent_config

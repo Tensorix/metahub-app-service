@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.deps import get_current_user
 from app.db.model.user import User
-from app.schema.session import (
+from app.schema.agent import (
     AgentCreate,
     AgentUpdate,
     AgentResponse,
@@ -38,7 +38,36 @@ def create_agent(
 ):
     """Create a new agent."""
     agent = AgentService.create_agent(db, agent_data)
-    return agent
+    
+    # Manually construct response to avoid metadata conflict
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "system_prompt": agent.system_prompt,
+        "model": agent.model,
+        "model_provider": agent.model_provider,
+        "temperature": agent.temperature,
+        "max_tokens": agent.max_tokens,
+        "tools": agent.tools or [],
+        "skills": agent.skills,
+        "memory_files": agent.memory_files,
+        "metadata": agent.metadata_,
+        "created_at": agent.created_at,
+        "updated_at": agent.updated_at,
+        "is_deleted": agent.is_deleted,
+        "subagents": [
+            {
+                "id": sa.id,
+                "name": sa.name,
+                "description": sa.description,
+                "system_prompt": sa.system_prompt,
+                "model": sa.model,
+                "tools": sa.tools or []
+            }
+            for sa in agent.subagents if not sa.is_deleted
+        ],
+        "summarization": agent.summarization_config
+    }
 
 
 @router.get("", response_model=AgentListResponse)
@@ -51,8 +80,42 @@ def list_agents(
 ):
     """List all agents with pagination."""
     agents, total = AgentService.list_agents(db, page, page_size, search)
+    
+    # Manually construct response to avoid metadata conflict
+    items = []
+    for agent in agents:
+        agent_dict = {
+            "id": agent.id,
+            "name": agent.name,
+            "system_prompt": agent.system_prompt,
+            "model": agent.model,
+            "model_provider": agent.model_provider,
+            "temperature": agent.temperature,
+            "max_tokens": agent.max_tokens,
+            "tools": agent.tools or [],
+            "skills": agent.skills,
+            "memory_files": agent.memory_files,
+            "metadata": agent.metadata_,  # Use metadata_ field
+            "created_at": agent.created_at,
+            "updated_at": agent.updated_at,
+            "is_deleted": agent.is_deleted,
+            "subagents": [
+                {
+                    "id": sa.id,
+                    "name": sa.name,
+                    "description": sa.description,
+                    "system_prompt": sa.system_prompt,
+                    "model": sa.model,
+                    "tools": sa.tools or []
+                }
+                for sa in agent.subagents if not sa.is_deleted
+            ],
+            "summarization": agent.summarization_config
+        }
+        items.append(agent_dict)
+    
     return {
-        "items": agents,
+        "items": items,
         "total": total,
         "page": page,
         "page_size": page_size
@@ -69,7 +132,36 @@ def get_agent(
     agent = AgentService.get_agent(db, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    return agent
+    
+    # Manually construct response to avoid metadata conflict
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "system_prompt": agent.system_prompt,
+        "model": agent.model,
+        "model_provider": agent.model_provider,
+        "temperature": agent.temperature,
+        "max_tokens": agent.max_tokens,
+        "tools": agent.tools or [],
+        "skills": agent.skills,
+        "memory_files": agent.memory_files,
+        "metadata": agent.metadata_,  # Use metadata_ field
+        "created_at": agent.created_at,
+        "updated_at": agent.updated_at,
+        "is_deleted": agent.is_deleted,
+        "subagents": [
+            {
+                "id": sa.id,
+                "name": sa.name,
+                "description": sa.description,
+                "system_prompt": sa.system_prompt,
+                "model": sa.model,
+                "tools": sa.tools or []
+            }
+            for sa in agent.subagents if not sa.is_deleted
+        ],
+        "summarization": agent.summarization_config
+    }
 
 
 @router.put("/{agent_id}", response_model=AgentResponse)
@@ -83,7 +175,36 @@ def update_agent(
     agent = AgentService.update_agent(db, agent_id, agent_data)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    return agent
+    
+    # Manually construct response to avoid metadata conflict
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "system_prompt": agent.system_prompt,
+        "model": agent.model,
+        "model_provider": agent.model_provider,
+        "temperature": agent.temperature,
+        "max_tokens": agent.max_tokens,
+        "tools": agent.tools or [],
+        "skills": agent.skills,
+        "memory_files": agent.memory_files,
+        "metadata": agent.metadata_,
+        "created_at": agent.created_at,
+        "updated_at": agent.updated_at,
+        "is_deleted": agent.is_deleted,
+        "subagents": [
+            {
+                "id": sa.id,
+                "name": sa.name,
+                "description": sa.description,
+                "system_prompt": sa.system_prompt,
+                "model": sa.model,
+                "tools": sa.tools or []
+            }
+            for sa in agent.subagents if not sa.is_deleted
+        ],
+        "summarization": agent.summarization_config
+    }
 
 
 @router.delete("/{agent_id}", status_code=204)

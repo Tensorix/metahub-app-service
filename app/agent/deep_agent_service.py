@@ -16,7 +16,7 @@ from uuid import UUID
 
 from deepagents import create_deep_agent, SubAgent
 from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
-from deepagents.middleware import SubAgentMiddleware
+from deepagents.middleware import SubAgentMiddleware, SummarizationMiddleware
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres import AsyncPostgresStore
@@ -140,6 +140,25 @@ class DeepAgentService:
         
         return kwargs
 
+    def _build_summarization_middleware(self) -> Optional[SummarizationMiddleware]:
+        """
+        Build summarization middleware for conversation compression.
+        
+        When conversation exceeds max_messages, automatically generates summary
+        and keeps only recent messages.
+        """
+        summarization_config = self.config.get("summarization", {})
+        
+        if not summarization_config or not summarization_config.get("enabled", False):
+            return None
+        
+        return SummarizationMiddleware(
+            max_messages=summarization_config.get("max_messages", 50),
+            keep_last_n=summarization_config.get("keep_last_n", 20),
+            summary_prompt=summarization_config.get("summary_prompt"),
+            model=summarization_config.get("model"),
+        )
+
     def _get_agent(self):
         """
         Create deep agent with all features enabled.
@@ -152,9 +171,16 @@ class DeepAgentService:
         if self._agent is None:
             # Build middleware list
             middleware = []
+            
+            # SubAgent middleware
             subagent_mw = self._build_subagent_middleware()
             if subagent_mw:
                 middleware.append(subagent_mw)
+            
+            # Summarization middleware
+            summarization_mw = self._build_summarization_middleware()
+            if summarization_mw:
+                middleware.append(summarization_mw)
 
             # Build model with explicit API key
             from langchain.chat_models import init_chat_model
@@ -181,14 +207,16 @@ class DeepAgentService:
             }
 
             # Skills (reusable workflows from SKILL.md files)
-            skills = self.config.get("skills")
-            if skills:
-                agent_kwargs["skills"] = skills
+            # TODO: Implement virtual filesystem for skills stored in database
+            # skills = self.config.get("skills")
+            # if skills:
+            #     agent_kwargs["skills"] = skills
 
             # Memory (persistent context from AGENTS.md files)
-            memory = self.config.get("memory")
-            if memory:
-                agent_kwargs["memory"] = memory
+            # TODO: Implement virtual filesystem for memory stored in database
+            # memory = self.config.get("memory")
+            # if memory:
+            #     agent_kwargs["memory"] = memory
 
             logger.info(
                 f"Creating deep agent: model={model_string}, "

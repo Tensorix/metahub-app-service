@@ -206,11 +206,48 @@ export default function Agents() {
                         {agent.system_prompt}
                       </p>
                     )}
+                    
+                    {/* Tools */}
+                    {agent.tools && agent.tools.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {agent.tools.map((tool) => (
+                          <Badge key={tool} variant="outline" className="text-xs">
+                            {tool}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Features */}
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {agent.subagents && agent.subagents.length > 0 && (
+                        <Badge variant="secondary">
+                          {agent.subagents.length} 子代理
+                        </Badge>
+                      )}
+                      {agent.skills && agent.skills.length > 0 && (
+                        <Badge variant="secondary">
+                          {agent.skills.length} Skills
+                        </Badge>
+                      )}
+                      {agent.memory_files && agent.memory_files.length > 0 && (
+                        <Badge variant="secondary">
+                          {agent.memory_files.length} Memory
+                        </Badge>
+                      )}
+                      {agent.summarization?.enabled && (
+                        <Badge variant="secondary">
+                          摘要
+                        </Badge>
+                      )}
+                    </div>
+
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <span>Temperature: {agent.temperature ?? 0.7}</span>
                       <span>•</span>
                       <span>Max Tokens: {agent.max_tokens ?? 4096}</span>
                     </div>
+                    
                     <div className="flex items-center gap-2 pt-2">
                       <Button
                         size="sm"
