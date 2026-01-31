@@ -11,14 +11,18 @@ import { AIMessageInput } from './AIMessageInput';
 import { AIMessageList } from './AIMessageList';
 import { TopicDivider } from './TopicDivider';
 import { TopicSelector } from './TopicSelector';
-import { TopicSidebar } from './TopicSidebar';
 import { SessionDialog } from '@/components/SessionDialog';
 import { cn } from '@/lib/utils';
-import { ChevronUp, ChevronDown, Menu, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2 } from 'lucide-react';
+import { ChevronUp, ChevronDown, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2, ArrowLeft } from 'lucide-react';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { useToast } from '@/hooks/use-toast';
 
-export function MessageArea() {
+interface MessageAreaProps {
+  onBack?: () => void;
+  showBackButton?: boolean;
+}
+
+export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   const { isDesktop } = useBreakpoints();
   const { toast } = useToast();
   const currentSessionId = useChatStore((state) => state.currentSessionId);
@@ -34,7 +38,6 @@ export function MessageArea() {
   const navigateTopic = useChatStore((state) => state.navigateTopic);
   const createTopic = useChatStore((state) => state.createTopic);
   const selectTopic = useChatStore((state) => state.selectTopic);
-  const setLeftDrawerOpen = useChatStore((state) => state.setLeftDrawerOpen);
   const setRightDrawerOpen = useChatStore((state) => state.setRightDrawerOpen);
   const topicSidebarCollapsed = useChatStore((state) => state.topicSidebarCollapsed);
   const setTopicSidebarCollapsed = useChatStore((state) => state.setTopicSidebarCollapsed);
@@ -208,13 +211,15 @@ export function MessageArea() {
       <div className="border-b px-4 py-3 shrink-0">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            {!isDesktop && (
+            {/* 移动端返回按钮 */}
+            {showBackButton && (
               <Button
                 size="icon"
                 variant="ghost"
-                onClick={() => setLeftDrawerOpen(true)}
+                onClick={onBack}
+                className="shrink-0"
               >
-                <Menu className="h-5 w-5" />
+                <ArrowLeft className="h-5 w-5" />
               </Button>
             )}
             <div className="flex-1 min-w-0">
@@ -243,6 +248,7 @@ export function MessageArea() {
                 <Settings2 className="h-5 w-5" />
               </Button>
             )}
+            {/* 移动端和平板端显示话题抽屉按钮 */}
             {!isDesktop && (
               <Button
                 size="icon"
@@ -252,6 +258,7 @@ export function MessageArea() {
                 <Hash className="h-5 w-5" />
               </Button>
             )}
+            {/* 桌面端显示话题侧边栏切换按钮 */}
             {isDesktop && (
               <Button
                 size="icon"
@@ -408,13 +415,6 @@ export function MessageArea() {
           )}
         </div>
       </div>
-
-      {/* 右侧：话题列表 (仅桌面端且未折叠) */}
-      {isDesktop && !topicSidebarCollapsed && (
-        <div className="w-72 border-l bg-background shrink-0">
-          <TopicSidebar className="h-full border-0" />
-        </div>
-      )}
       </div>
       {/* Session Settings Dialog */}
       <SessionDialog

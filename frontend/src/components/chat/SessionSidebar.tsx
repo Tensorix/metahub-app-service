@@ -9,7 +9,11 @@ import { SessionDialog } from '@/components/SessionDialog';
 import { cn } from '@/lib/utils';
 import { MessageSquare, Search } from 'lucide-react';
 
-export function SessionSidebar() {
+interface SessionSidebarProps {
+  onSessionSelect?: () => void;
+}
+
+export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
@@ -120,7 +124,10 @@ export function SessionSidebar() {
             <button
               key={session.id}
               type="button"
-              onClick={() => void selectSession(session.id)}
+              onClick={() => {
+                void selectSession(session.id);
+                onSessionSelect?.();
+              }}
               className={cn(
                 'w-full rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-accent',
                 currentSessionId === session.id && 'bg-accent',
