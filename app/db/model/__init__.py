@@ -6,6 +6,7 @@ from .topic import Topic
 from .message import Message
 from .message_part import MessagePart
 from .message_sender import MessageSender
+from .message_search_index import MessageSearchIndex
 from .agent import Agent
 from .subagent import SubAgent
 from .agent_version import AgentVersion

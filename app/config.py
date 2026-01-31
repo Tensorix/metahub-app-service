@@ -47,6 +47,40 @@ class Settings(BaseSettings):
     AGENT_DEFAULT_MODEL: str = "gpt-4o-mini"
     AGENT_DEFAULT_PROVIDER: str = "openai"
 
+    # ============ 搜索配置 ============
+    
+    # 上下文窗口大小：无 topic 时返回命中消息前后各 N 条
+    SEARCH_CONTEXT_WINDOW_SIZE: int = 5
+    
+    # 是否在消息创建时同步生成 embedding
+    SEARCH_SYNC_EMBEDDING: bool = True
+    
+    # 模糊搜索最低相似度阈值 (0.0 - 1.0)
+    SEARCH_FUZZY_THRESHOLD: float = 0.1
+    
+    # 向量搜索最低相似度阈值 (0.0 - 1.0)
+    SEARCH_VECTOR_THRESHOLD: float = 0.3
+    
+    # 混合搜索权重
+    SEARCH_FUZZY_WEIGHT: float = 0.4
+    SEARCH_VECTOR_WEIGHT: float = 0.6
+    
+    # 默认返回结果数量
+    SEARCH_DEFAULT_TOP_K: int = 20
+    
+    # Embedding 模型
+    SEARCH_EMBEDDING_MODEL: str = "text-embedding-3-large"
+    SEARCH_EMBEDDING_DIMENSIONS: int = 3072
+    
+    # 最短可索引文本长度（少于此长度跳过 embedding）
+    SEARCH_MIN_CONTENT_LENGTH: int = 2
+    
+    # 批量 embedding 处理大小
+    SEARCH_EMBEDDING_BATCH_SIZE: int = 100
+    
+    # 需要索引的 session 类型
+    SEARCH_INDEXABLE_SESSION_TYPES: list[str] = ["pm", "group"]
+
     @computed_field
     @property
     def sqlalchemy_database_uri(self) -> str:

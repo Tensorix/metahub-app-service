@@ -22,6 +22,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres import AsyncPostgresStore
 
 from app.config import config
+from app.agent.tools.context import agent_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -251,29 +252,34 @@ class DeepAgentService:
         Returns:
             Complete AI response text
         """
-        agent = self._get_agent()
-        cfg = {"configurable": {"thread_id": thread_id}}
+        # 设置工具运行时上下文
+        token = agent_user_id.set(user_id)
+        try:
+            agent = self._get_agent()
+            cfg = {"configurable": {"thread_id": thread_id}}
 
-        if user_id:
-            cfg["configurable"]["user_id"] = str(user_id)
-        
-        # Enable session-level filesystem isolation
-        if session_id:
-            if "metadata" not in cfg:
-                cfg["metadata"] = {}
-            cfg["metadata"]["assistant_id"] = str(session_id)
+            if user_id:
+                cfg["configurable"]["user_id"] = str(user_id)
+            
+            # Enable session-level filesystem isolation
+            if session_id:
+                if "metadata" not in cfg:
+                    cfg["metadata"] = {}
+                cfg["metadata"]["assistant_id"] = str(session_id)
 
-        response = await agent.ainvoke(
-            {"messages": [{"role": "user", "content": message}]},
-            config=cfg,
-        )
+            response = await agent.ainvoke(
+                {"messages": [{"role": "user", "content": message}]},
+                config=cfg,
+            )
 
-        # Extract the last AI message
-        messages = response.get("messages", [])
-        for msg in reversed(messages):
-            if isinstance(msg, AIMessage) or getattr(msg, "type", None) == "ai":
-                return msg.content
-        return ""
+            # Extract the last AI message
+            messages = response.get("messages", [])
+            for msg in reversed(messages):
+                if isinstance(msg, AIMessage) or getattr(msg, "type", None) == "ai":
+                    return msg.content
+            return ""
+        finally:
+            agent_user_id.reset(token)
 
     async def chat_stream(
         self,
@@ -299,74 +305,79 @@ class DeepAgentService:
                 - done: Stream complete
                 - error: Error occurred
         """
-        agent = self._get_agent()
-        cfg = {"configurable": {"thread_id": thread_id}}
-
-        if user_id:
-            cfg["configurable"]["user_id"] = str(user_id)
-        
-        # Enable session-level filesystem isolation
-        if session_id:
-            if "metadata" not in cfg:
-                cfg["metadata"] = {}
-            cfg["metadata"]["assistant_id"] = str(session_id)
-
-        logger.info(f"Starting deep agent stream for thread {thread_id}")
-
+        # 设置工具运行时上下文
+        token = agent_user_id.set(user_id)
         try:
-            event_count = 0
-            async for event in agent.astream_events(
-                {"messages": [{"role": "user", "content": message}]},
-                config=cfg,
-                version="v2",
-            ):
-                event_count += 1
-                event_type = event.get("event")
-                event_data = event.get("data", {})
+            agent = self._get_agent()
+            cfg = {"configurable": {"thread_id": thread_id}}
 
-                logger.debug(f"Agent event #{event_count}: {event_type}")
+            if user_id:
+                cfg["configurable"]["user_id"] = str(user_id)
+            
+            # Enable session-level filesystem isolation
+            if session_id:
+                if "metadata" not in cfg:
+                    cfg["metadata"] = {}
+                cfg["metadata"]["assistant_id"] = str(session_id)
 
-                if event_type == "on_chat_model_stream":
-                    # Streaming text chunk
-                    chunk = event_data.get("chunk")
-                    if chunk and hasattr(chunk, "content") and chunk.content:
-                        logger.debug(f"Yielding message chunk: {chunk.content[:50]}")
+            logger.info(f"Starting deep agent stream for thread {thread_id}")
+
+            try:
+                event_count = 0
+                async for event in agent.astream_events(
+                    {"messages": [{"role": "user", "content": message}]},
+                    config=cfg,
+                    version="v2",
+                ):
+                    event_count += 1
+                    event_type = event.get("event")
+                    event_data = event.get("data", {})
+
+                    logger.debug(f"Agent event #{event_count}: {event_type}")
+
+                    if event_type == "on_chat_model_stream":
+                        # Streaming text chunk
+                        chunk = event_data.get("chunk")
+                        if chunk and hasattr(chunk, "content") and chunk.content:
+                            logger.debug(f"Yielding message chunk: {chunk.content[:50]}")
+                            yield {
+                                "event": "message",
+                                "data": {"content": chunk.content},
+                            }
+
+                    elif event_type == "on_tool_start":
+                        # Tool invocation started (custom or built-in)
+                        tool_name = event.get("name", "unknown")
+                        tool_input = event_data.get("input", {})
+                        logger.info(f"Tool call: {tool_name}")
                         yield {
-                            "event": "message",
-                            "data": {"content": chunk.content},
+                            "event": "tool_call",
+                            "data": {
+                                "name": tool_name,
+                                "args": tool_input,
+                            },
                         }
 
-                elif event_type == "on_tool_start":
-                    # Tool invocation started (custom or built-in)
-                    tool_name = event.get("name", "unknown")
-                    tool_input = event_data.get("input", {})
-                    logger.info(f"Tool call: {tool_name}")
-                    yield {
-                        "event": "tool_call",
-                        "data": {
-                            "name": tool_name,
-                            "args": tool_input,
-                        },
-                    }
+                    elif event_type == "on_tool_end":
+                        # Tool execution completed
+                        tool_output = event_data.get("output", "")
+                        logger.info(f"Tool result: {event.get('name', 'unknown')}")
+                        yield {
+                            "event": "tool_result",
+                            "data": {
+                                "name": event.get("name", "unknown"),
+                                "result": str(tool_output) if tool_output else "",
+                            },
+                        }
 
-                elif event_type == "on_tool_end":
-                    # Tool execution completed
-                    tool_output = event_data.get("output", "")
-                    logger.info(f"Tool result: {event.get('name', 'unknown')}")
-                    yield {
-                        "event": "tool_result",
-                        "data": {
-                            "name": event.get("name", "unknown"),
-                            "result": str(tool_output) if tool_output else "",
-                        },
-                    }
+                logger.info(f"Agent stream completed, total events: {event_count}")
+                yield {"event": "done", "data": {"status": "complete"}}
 
-            logger.info(f"Agent stream completed, total events: {event_count}")
-            yield {"event": "done", "data": {"status": "complete"}}
-
-        except Exception as e:
-            logger.error(f"Error in agent stream: {str(e)}", exc_info=True)
-            yield {"event": "error", "data": {"error": str(e)}}
+            except Exception as e:
+                logger.error(f"Error in agent stream: {str(e)}", exc_info=True)
+                yield {"event": "error", "data": {"error": str(e)}}
+        finally:
+            agent_user_id.reset(token)
 
     async def get_history(
         self,

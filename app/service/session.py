@@ -220,6 +220,17 @@ class MessageService:
         
         db.commit()
         db.refresh(message)
+        
+        # 触发搜索索引
+        try:
+            from app.service.search_indexer import SearchIndexerService
+            indexer = SearchIndexerService()
+            indexer.index_message(db, message)
+        except Exception as e:
+            # 索引失败不影响消息创建
+            from loguru import logger
+            logger.error(f"Failed to index message {message.id}: {e}")
+        
         return message
 
     @staticmethod
