@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useEffect } from 'react';
+import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import type { Message, Topic } from '@/lib/api';
 import type { VirtualTopic } from '@/lib/virtualTopic';
 import { useChatStore } from '@/store/chat';
@@ -13,10 +13,16 @@ import { TopicDivider } from './TopicDivider';
 import { TopicSelector } from './TopicSelector';
 import { TopicSidebar } from './TopicSidebar';
 import { SessionDialog } from '@/components/SessionDialog';
+import { ResizableHandle } from '@/components/ui/resizable';
 import { cn } from '@/lib/utils';
 import { ChevronUp, ChevronDown, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2, ArrowLeft } from 'lucide-react';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { useToast } from '@/hooks/use-toast';
+
+// 话题侧边栏宽度常量
+const TOPIC_SIDEBAR_MIN_WIDTH = 200;
+const TOPIC_SIDEBAR_MAX_WIDTH = 400;
+const TOPIC_SIDEBAR_DEFAULT_WIDTH = 280;
 
 interface MessageAreaProps {
   onBack?: () => void;
@@ -43,6 +49,9 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   const topicSidebarCollapsed = useChatStore((state) => state.topicSidebarCollapsed);
   const setTopicSidebarCollapsed = useChatStore((state) => state.setTopicSidebarCollapsed);
   const updateSession = useChatStore((state) => state.updateSession);
+  
+  // AI 聊天 hook
+  const { send: sendAIMessage, stop: stopAIGeneration, isStreaming } = useAIChat();
 
   // 直接调用函数，因为这些函数内部会从 store 获取最新状态
   const currentSession = getCurrentSession();
@@ -51,6 +60,16 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   const allTopics = getAllTopicsForSession(currentSessionId);
 
   const [isSessionSettingsOpen, setIsSessionSettingsOpen] = useState(false);
+  
+  // 话题侧边栏可调整宽度
+  const [topicSidebarWidth, setTopicSidebarWidth] = useState(TOPIC_SIDEBAR_DEFAULT_WIDTH);
+  
+  const handleTopicSidebarResize = useCallback((delta: number) => {
+    // 话题侧边栏在右侧，拖拽方向相反
+    setTopicSidebarWidth((prev) =>
+      Math.min(TOPIC_SIDEBAR_MAX_WIDTH, Math.max(TOPIC_SIDEBAR_MIN_WIDTH, prev - delta))
+    );
+  }, []);
 
   const handleUpdateSession = async (data: any) => {
     if (!currentSessionId) return;
@@ -406,24 +425,39 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
             </div>
           )}
 
-        {/* 输入框 - 优化后的样式 */}
-        <div className="border-t bg-background/80 backdrop-blur-sm px-4 py-3">
-          <MessageInputWithAI
-            sessionType={currentSession?.type as 'ai' | 'normal' | undefined}
-            onSend={sendMessage}
-            disabled={!currentSession}
-          />
+        {/* 输入框 */}
+        <div className="border-t px-4 py-3">
+          {currentSession?.type === 'ai' ? (
+            <MessageInput
+              onSend={sendAIMessage}
+              onStop={stopAIGeneration}
+              isStreaming={isStreaming}
+              disabled={!currentSession}
+            />
+          ) : (
+            <MessageInput
+              onSend={sendMessage}
+              disabled={!currentSession}
+            />
+          )}
         </div>
       </div>
 
-      {/* 右侧：话题列表 (仅桌面端) - 带动画的折叠/展开 */}
-      {isDesktop && (
-        <div
-          className="shrink-0 border-l transition-all duration-300 ease-in-out overflow-hidden"
-          style={{ width: topicSidebarCollapsed ? 0 : 280 }}
-        >
-          <TopicSidebar className="h-full w-[280px]" />
-        </div>
+      {/* 右侧：话题列表 (仅桌面端) - 带动画的折叠/展开和拖拽调整宽度 */}
+      {isDesktop && !topicSidebarCollapsed && (
+        <>
+          {/* 拖拽手柄 */}
+          <ResizableHandle
+            direction="horizontal"
+            onResize={handleTopicSidebarResize}
+          />
+          <div
+            className="shrink-0 overflow-hidden border rounded-lg bg-background"
+            style={{ width: topicSidebarWidth }}
+          >
+            <TopicSidebar className="h-full" style={{ width: topicSidebarWidth }} />
+          </div>
+        </>
       )}
       </div>
       {/* Session Settings Dialog */}
@@ -517,36 +551,5 @@ function ContinuousMessageList({
         </div>
       ))}
     </div>
-  );
-}
-
-/**
- * MessageInput wrapper that handles AI vs regular session types
- */
-interface MessageInputWithAIProps {
-  sessionType?: 'ai' | 'normal';
-  onSend: (content: string) => Promise<void>;
-  disabled?: boolean;
-}
-
-function MessageInputWithAI({ sessionType, onSend, disabled }: MessageInputWithAIProps) {
-  const { isStreaming, send, stop } = useAIChat();
-
-  const handleSend = async (content: string) => {
-    if (sessionType === 'ai') {
-      await send(content);
-    } else {
-      await onSend(content);
-    }
-  };
-
-  return (
-    <MessageInput
-      onSend={handleSend}
-      onStop={sessionType === 'ai' ? stop : undefined}
-      isStreaming={sessionType === 'ai' ? isStreaming : false}
-      showCharCount={sessionType === 'ai'}
-      disabled={disabled}
-    />
   );
 }

@@ -17,9 +17,10 @@ import {
 
 interface TopicSidebarProps {
   className?: string;
+  style?: React.CSSProperties;
 }
 
-export function TopicSidebar({ className }: TopicSidebarProps) {
+export function TopicSidebar({ className, style }: TopicSidebarProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newTopicName, setNewTopicName] = useState('');
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
@@ -114,7 +115,7 @@ export function TopicSidebar({ className }: TopicSidebarProps) {
   };
 
   return (
-    <div className={cn('flex h-full flex-col bg-background', className)}>
+    <div className={cn('flex h-full flex-col bg-background', className)} style={style}>
       <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
         <div className="flex items-center gap-2">
           <Hash className="h-4 w-4" />
