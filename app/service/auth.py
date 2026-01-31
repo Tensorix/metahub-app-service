@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -7,6 +8,8 @@ import bcrypt
 from jose import jwt, JWTError
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.config import config
 from app.db.model.user import User, UserToken
@@ -182,10 +185,12 @@ class AuthService:
         # 解码 refresh_token
         payload = TokenService.decode_token(refresh_token)
         if not payload or payload.get("type") != "refresh":
+            logger.warning("Refresh token 解码失败或类型不匹配")
             return None
 
         user_id = payload.get("sub")
         if not user_id:
+            logger.warning("Refresh token payload 中缺少 sub 字段")
             return None
 
         # 查找 token 记录
@@ -196,15 +201,35 @@ class AuthService:
         ).first()
 
         if not token_record:
+            # 检查是否是已撤销的 token（竞态条件或重复使用）
+            revoked_record = db.query(UserToken).filter(
+                UserToken.refresh_token_hash == token_hash,
+                UserToken.is_revoked == True,
+            ).first()
+            if revoked_record:
+                logger.warning(
+                    "Refresh token 已被撤销 (user_id=%s)，可能是并发刷新或 token 重用",
+                    user_id,
+                )
+            else:
+                logger.warning(
+                    "Refresh token hash 在数据库中不存在 (user_id=%s)",
+                    user_id,
+                )
             return None
 
         # 检查是否过期
         if token_record.expires_at < datetime.now(timezone.utc):
+            logger.warning(
+                "Refresh token 已过期 (user_id=%s, expired_at=%s)",
+                user_id, token_record.expires_at,
+            )
             return None
 
         # 获取用户
         user = db.query(User).filter(User.id == token_record.user_id, User.is_active == True).first()
         if not user:
+            logger.warning("用户不存在或已停用 (user_id=%s)", user_id)
             return None
 
         # 撤销旧 token
