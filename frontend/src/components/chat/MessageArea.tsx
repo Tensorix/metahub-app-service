@@ -3,11 +3,11 @@ import type { Message, Topic } from '@/lib/api';
 import type { VirtualTopic } from '@/lib/virtualTopic';
 import { useChatStore } from '@/store/chat';
 import { useScrollBoundary } from '@/hooks/useScrollBoundary';
+import { useAIChat } from '@/hooks/useAIChat';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { MessageInput } from '@/components/MessageInput';
 import { MessageList as SimpleMessageList } from '@/components/MessageList';
-import { AIMessageInput } from './AIMessageInput';
 import { AIMessageList } from './AIMessageList';
 import { TopicDivider } from './TopicDivider';
 import { TopicSelector } from './TopicSelector';
@@ -168,25 +168,6 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
 
   const handleDeleteMessage = async (messageId: string) => {
     await deleteMessage(messageId);
-  };
-
-  const handleCreateNewTopic = async () => {
-    if (!currentSessionId) return;
-    try {
-      const newTopic = await createTopic(currentSessionId);
-      await selectTopic(newTopic.id);
-      toast({
-        title: "话题已创建",
-        description: "当前会话已保存为历史话题",
-      });
-    } catch (error) {
-      console.error("Failed to create topic", error);
-      toast({
-        variant: "destructive",
-        title: "创建话题失败",
-        description: "请稍后重试",
-      });
-    }
   };
 
   const headerTitle =
@@ -425,17 +406,13 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
             </div>
           )}
 
-        {/* 输入框 */}
-        <div className="border-t px-4 py-3">
-          {currentSession?.type === 'ai' ? (
-            <AIMessageInput disabled={!currentSession} />
-          ) : (
-            <MessageInput
-              onSend={sendMessage}
-              onCreateTopic={handleCreateNewTopic}
-              disabled={!currentSession}
-            />
-          )}
+        {/* 输入框 - 优化后的样式 */}
+        <div className="border-t bg-background/80 backdrop-blur-sm px-4 py-3">
+          <MessageInputWithAI
+            sessionType={currentSession?.type as 'ai' | 'normal' | undefined}
+            onSend={sendMessage}
+            disabled={!currentSession}
+          />
         </div>
       </div>
 
@@ -540,5 +517,36 @@ function ContinuousMessageList({
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * MessageInput wrapper that handles AI vs regular session types
+ */
+interface MessageInputWithAIProps {
+  sessionType?: 'ai' | 'normal';
+  onSend: (content: string) => Promise<void>;
+  disabled?: boolean;
+}
+
+function MessageInputWithAI({ sessionType, onSend, disabled }: MessageInputWithAIProps) {
+  const { isStreaming, send, stop } = useAIChat();
+
+  const handleSend = async (content: string) => {
+    if (sessionType === 'ai') {
+      await send(content);
+    } else {
+      await onSend(content);
+    }
+  };
+
+  return (
+    <MessageInput
+      onSend={handleSend}
+      onStop={sessionType === 'ai' ? stop : undefined}
+      isStreaming={sessionType === 'ai' ? isStreaming : false}
+      showCharCount={sessionType === 'ai'}
+      disabled={disabled}
+    />
   );
 }

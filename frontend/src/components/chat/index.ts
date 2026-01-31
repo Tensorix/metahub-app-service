@@ -4,7 +4,6 @@ export * from './MessageArea';
 export * from './TopicSidebar';
 export * from './TopicDivider';
 export * from './TopicSelector';
-export { AIMessageInput } from './AIMessageInput';
 export { StreamingMessage } from './StreamingMessage';
 export { ToolCallIndicator } from './ToolCallIndicator';
 export { RegenerateButton } from './RegenerateButton';
