@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { Topic } from '@/lib/api';
 import type { VirtualTopic } from '@/lib/virtualTopic';
 import { useChatStore } from '@/store/chat';
@@ -24,6 +24,7 @@ export function TopicSidebar({ className }: TopicSidebarProps) {
   const [newTopicName, setNewTopicName] = useState('');
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const currentTopicId = useChatStore((state) => state.currentTopicId);
@@ -41,7 +42,17 @@ export function TopicSidebar({ className }: TopicSidebarProps) {
   const currentSession = getCurrentSession();
   const topics = getAllTopicsForSession(currentSessionId);
 
+  // 话题加载后滚动到底部（最新的话题在底部）
+  useEffect(() => {
+    if (topics.length > 0) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [currentSessionId, topics.length]);
+
   // 计算预览目标话题
+  // 话题按 created_at 升序排列（最旧在 index 0，最新在末尾）
+  // up = 向上滚动 = 查看更旧的话题 = index - 1
+  // down = 向下滚动 = 查看更新的话题 = index + 1
   const currentIndex = topics.findIndex(t => t.id === currentTopicId);
   const previewIndex = boundaryDirection === 'up'
     ? currentIndex - 1
@@ -285,6 +296,8 @@ export function TopicSidebar({ className }: TopicSidebarProps) {
               </div>
             </div>
           )}
+          {/* 滚动到底部的锚点 */}
+          <div ref={bottomRef} />
         </div>
       </ScrollArea>
 

@@ -35,6 +35,9 @@ export function TopicSelector() {
   const topics = getAllTopicsForSession(currentSessionId);
 
   // 计算预览目标话题
+  // 话题按 created_at 升序排列（最旧在 index 0，最新在末尾）
+  // up = 向上滚动 = 查看更旧的话题 = index - 1
+  // down = 向下滚动 = 查看更新的话题 = index + 1
   const currentIndex = topics.findIndex(t => t.id === currentTopicId);
   const previewIndex = boundaryDirection === 'up'
     ? currentIndex - 1

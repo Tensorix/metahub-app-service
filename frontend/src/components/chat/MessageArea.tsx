@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import type { Message, Topic } from '@/lib/api';
 import type { VirtualTopic } from '@/lib/virtualTopic';
 import { useChatStore } from '@/store/chat';
@@ -11,6 +11,7 @@ import { AIMessageInput } from './AIMessageInput';
 import { AIMessageList } from './AIMessageList';
 import { TopicDivider } from './TopicDivider';
 import { TopicSelector } from './TopicSelector';
+import { TopicSidebar } from './TopicSidebar';
 import { SessionDialog } from '@/components/SessionDialog';
 import { cn } from '@/lib/utils';
 import { ChevronUp, ChevronDown, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2, ArrowLeft } from 'lucide-react';
@@ -70,6 +71,9 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   };
 
   const currentIndex = allTopics.findIndex((t) => t.id === currentTopicId);
+  // 话题按 created_at 升序排列（最旧在 index 0，最新在末尾）
+  // prevTopic = 更旧的话题 = index - 1
+  // nextTopic = 更新的话题 = index + 1
   const prevTopic = currentIndex > 0 ? allTopics[currentIndex - 1] : null;
   const nextTopic =
     currentIndex >= 0 && currentIndex < allTopics.length - 1
@@ -104,7 +108,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
         if (prevHintTimeoutRef.current) clearTimeout(prevHintTimeoutRef.current);
       } else {
         if (prevTopic) {
-          setTopHint("继续下拉切换到上一个话题");
+          setTopHint("继续下拉查看更早的话题");
           setCanSwitchPrev(true);
         } else {
           setTopHint("没有更多历史消息了");
@@ -141,7 +145,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
         if (nextHintTimeoutRef.current) clearTimeout(nextHintTimeoutRef.current);
       } else {
         if (nextTopic) {
-          setBottomHint("继续上拉切换到下一个话题");
+          setBottomHint("继续上拉查看更新的话题");
           setCanSwitchNext(true);
         } else {
            // 检查当前话题是否为空
@@ -204,6 +208,19 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
     : currentSessionId
       ? messagesLoading[currentSessionId]
       : false;
+
+  // 消息底部 ref，用于滚动到最新消息
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // 消息加载完成后滚动到底部
+  useEffect(() => {
+    if (!isLoading && (pagedMessages.length > 0 || continuousMessages.length > 0)) {
+      // 使用 setTimeout 确保 DOM 已更新
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+    }
+  }, [isLoading, currentTopicId, currentSessionId, pagedMessages.length, continuousMessages.length]);
 
   return (
     <Card className="flex h-full flex-col overflow-hidden">
@@ -274,12 +291,12 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
       </div>
 
       <div className="flex-1 flex flex-row min-h-0">
-        <div className="flex-1 flex flex-col min-w-0 h-full">
+        <div className="flex-1 flex flex-col min-w-0 h-full relative group/message-area">
           {/* 消息列表 */}
           <div
             ref={messageContainerRef}
             className={cn(
-              'flex-1 overflow-y-auto px-4 py-3 relative group/message-area scroll-smooth',
+              'flex-1 overflow-y-auto px-4 py-3 scroll-smooth',
               !currentSession && 'flex items-center justify-center',
             )}
           >
@@ -326,81 +343,87 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
                   </div>
                 </div>
               )}
-              
-              {/* 浮动话题切换器 (保留，作为快捷操作) */}
-             {currentSession && (
-               <div className={cn(
-                 "absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2 z-10 transition-all duration-200 group/indicator pointer-events-none",
-                 "opacity-0 group-hover/message-area:opacity-100",
-               )}>
-                  {/* 话题名称显示区域 - 仅hover时显示 */}
-                  <div className="flex flex-col items-end gap-1 mr-1 opacity-0 group-hover/indicator:opacity-100 transition-opacity duration-200 pointer-events-none group-hover/indicator:pointer-events-auto">
-                    {prevTopic && (
-                      <div 
-                        className="text-[10px] text-muted-foreground/60 cursor-pointer hover:text-primary transition-colors max-w-[100px] truncate text-right"
-                        onClick={() => void navigateTopic('prev')}
-                      >
-                        {prevTopic.name || '未命名话题'}
-                      </div>
-                    )}
-                    <div className="text-xs font-medium text-primary max-w-[120px] truncate text-right shadow-sm bg-background/50 backdrop-blur-[1px] rounded px-1">
-                      {currentTopic?.name || '未命名话题'}
-                    </div>
-                    {nextTopic && (
-                      <div 
-                        className="text-[10px] text-muted-foreground/60 cursor-pointer hover:text-primary transition-colors max-w-[100px] truncate text-right"
-                        onClick={() => void navigateTopic('next')}
-                      >
-                        {nextTopic.name || '未命名话题'}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="bg-background/20 backdrop-blur-[1px] border border-border/20 rounded-full shadow-sm p-0.5 flex flex-col gap-0.5 hover:bg-background/80 hover:border-border transition-all duration-200 pointer-events-auto">
-                    {isDesktop && (
-                       <Button
-                         size="icon"
-                         variant="ghost"
-                         className="h-6 w-6 rounded-full hover:bg-muted/50"
-                         onClick={() => setTopicSidebarCollapsed(!topicSidebarCollapsed)}
-                         title={topicSidebarCollapsed ? "展开话题列表" : "折叠话题列表"}
-                       >
-                         {topicSidebarCollapsed ? <PanelRightOpen className="h-3 w-3 opacity-50 hover:opacity-100" /> : <PanelRightClose className="h-3 w-3 opacity-50 hover:opacity-100" />}
-                       </Button>
-                     )}
-                    <Button
-                       size="icon"
-                       variant="ghost"
-                       className="h-6 w-6 rounded-full hover:bg-muted/50"
-                       disabled={!prevTopic}
-                       onClick={() => void navigateTopic('prev')}
-                       title="上一个话题"
-                     >
-                       <ChevronUp className="h-3 w-3 opacity-50 hover:opacity-100" />
-                     </Button>
-                     <Button
-                       size="icon"
-                       variant="ghost"
-                       className="h-6 w-6 rounded-full hover:bg-muted/50"
-                       disabled={!nextTopic}
-                       onClick={() => void navigateTopic('next')}
-                       title="下一个话题"
-                     >
-                       <ChevronDown className="h-3 w-3 opacity-50 hover:opacity-100" />
-                     </Button>
-                  </div>
-               </div>
-             )}
+             {/* 消息底部锚点 */}
+             <div ref={messagesEndRef} />
             </>
           ) : (
-            <ContinuousMessageList
-              messages={continuousMessages}
-              topics={allTopics}
-              onDelete={handleDeleteMessage}
-            />
+            <>
+              <ContinuousMessageList
+                messages={continuousMessages}
+                topics={allTopics}
+                onDelete={handleDeleteMessage}
+              />
+              {/* 消息底部锚点 */}
+              <div ref={messagesEndRef} />
+            </>
           )}
           </div>
         </div>
+
+          {/* 浮动话题切换器 - 固定在消息区域右侧 */}
+          {currentSession && displayMode === 'paged' && (
+            <div className={cn(
+              "absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2 z-20 transition-all duration-300 group/indicator",
+              "opacity-30 hover:opacity-100",
+            )}>
+              {/* 话题名称显示区域 - 仅hover时显示 */}
+              <div className="flex flex-col items-end gap-1 mr-1 opacity-0 group-hover/indicator:opacity-100 transition-opacity duration-200 pointer-events-none group-hover/indicator:pointer-events-auto">
+                {prevTopic && (
+                  <div 
+                    className="text-[10px] text-muted-foreground/70 cursor-pointer hover:text-primary transition-colors max-w-[120px] truncate text-right bg-background/60 backdrop-blur-sm rounded px-1.5 py-0.5"
+                    onClick={() => void navigateTopic('prev')}
+                  >
+                    ↑ {prevTopic.name || '未命名话题'}
+                  </div>
+                )}
+                <div className="text-xs font-medium text-primary max-w-[140px] truncate text-right bg-background/80 backdrop-blur-sm rounded px-2 py-0.5 shadow-sm border border-primary/20">
+                  {currentTopic?.name || '未命名话题'}
+                </div>
+                {nextTopic && (
+                  <div 
+                    className="text-[10px] text-muted-foreground/70 cursor-pointer hover:text-primary transition-colors max-w-[120px] truncate text-right bg-background/60 backdrop-blur-sm rounded px-1.5 py-0.5"
+                    onClick={() => void navigateTopic('next')}
+                  >
+                    ↓ {nextTopic.name || '未命名话题'}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-background/90 backdrop-blur-sm border border-border/50 rounded-full shadow-md p-1 flex flex-col gap-0.5 hover:shadow-lg transition-all duration-200">
+                {isDesktop && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 rounded-full hover:bg-muted"
+                    onClick={() => setTopicSidebarCollapsed(!topicSidebarCollapsed)}
+                    title={topicSidebarCollapsed ? "展开话题列表" : "折叠话题列表"}
+                  >
+                    {topicSidebarCollapsed ? <PanelRightOpen className="h-4 w-4" /> : <PanelRightClose className="h-4 w-4" />}
+                  </Button>
+                )}
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7 rounded-full hover:bg-muted"
+                  disabled={!prevTopic}
+                  onClick={() => void navigateTopic('prev')}
+                  title="上一个话题（更早）"
+                >
+                  <ChevronUp className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7 rounded-full hover:bg-muted"
+                  disabled={!nextTopic}
+                  onClick={() => void navigateTopic('next')}
+                  title="下一个话题（更新）"
+                >
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
 
         {/* 输入框 */}
         <div className="border-t px-4 py-3">
@@ -415,6 +438,16 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
           )}
         </div>
       </div>
+
+      {/* 右侧：话题列表 (仅桌面端) - 带动画的折叠/展开 */}
+      {isDesktop && (
+        <div
+          className="shrink-0 border-l transition-all duration-300 ease-in-out overflow-hidden"
+          style={{ width: topicSidebarCollapsed ? 0 : 280 }}
+        >
+          <TopicSidebar className="h-full w-[280px]" />
+        </div>
+      )}
       </div>
       {/* Session Settings Dialog */}
       <SessionDialog

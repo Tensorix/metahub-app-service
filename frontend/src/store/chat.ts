@@ -138,6 +138,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ...(virtualTopics[id] ?? []),
     ].sort(
       (a, b) =>
+        // 按创建时间升序排序，最新的话题在列表底部
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
   },
@@ -172,9 +173,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (session?.type === 'ai') {
       const sessionTopics = get().getAllTopicsForSession(sessionId).filter((t) => !(t as VirtualTopic).is_virtual);
       if (sessionTopics.length > 0) {
-        const firstTopic = sessionTopics[0];
-        set({ currentTopicId: firstTopic.id });
-        await loadMessages(sessionId, firstTopic.id);
+        // 选择最后一个话题（最新的话题在列表底部）
+        const latestTopic = sessionTopics[sessionTopics.length - 1];
+        set({ currentTopicId: latestTopic.id });
+        await loadMessages(sessionId, latestTopic.id);
       }
     } else {
       await loadMessages(sessionId);
@@ -290,17 +292,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const currentIndex = topics.findIndex((t) => t.id === currentTopicId);
 
+    // 话题按 created_at 升序排列（最旧在 index 0，最新在末尾）
+    // prev = 向上滚动 = 查看更旧的话题 = index - 1
+    // next = 向下滚动 = 查看更新的话题 = index + 1
     if (direction === 'prev' && currentIndex > 0) {
       await selectTopic(topics[currentIndex - 1].id);
     } else if (direction === 'next') {
       if (currentIndex >= 0 && currentIndex < topics.length - 1) {
         await selectTopic(topics[currentIndex + 1].id);
       } else {
-        // 最后一个话题，准备新建（实际在 sendMessage 中完成）
+        // 已经是最新的话题，准备新建（实际在 sendMessage 中完成）
         const session = get().getCurrentSession();
         if (session?.type === 'ai') {
           // 这里只是占位逻辑，不直接新建
-          console.info('到达最后一个话题，等待用户输入创建新话题');
+          console.info('到达最新话题，等待用户输入创建新话题');
         }
       }
     }
