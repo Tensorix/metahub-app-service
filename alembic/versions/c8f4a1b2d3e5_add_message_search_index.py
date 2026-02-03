@@ -49,12 +49,13 @@ def upgrade() -> None:
         USING GIN (content_text gin_trgm_ops)
     """)
 
-    # pgvector HNSW 索引
+    # pgvector 索引 - 使用 IVFFlat 代替 HNSW（支持超过 2000 维）
+    # 注意：此表将在后续迁移中被删除并重建为 halfvec 架构
     op.execute("""
-        CREATE INDEX idx_search_embedding_hnsw
+        CREATE INDEX idx_search_embedding_ivfflat
         ON message_search_index
-        USING hnsw (embedding vector_cosine_ops)
-        WITH (m = 16, ef_construction = 64)
+        USING ivfflat (embedding vector_cosine_ops)
+        WITH (lists = 100)
     """)
 
     # B-Tree 索引
