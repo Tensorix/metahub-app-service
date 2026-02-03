@@ -88,18 +88,35 @@ def search_messages(
     db = SessionLocal()
     try:
         search_service = SearchService()
-        results = search_service.search_messages(
-            db=db,
-            user_id=user_id,
-            query=query,
-            mode="hybrid",
-            session_types=session_types,
-            top_k=top_k,
-            sender_filter=sender or None,
-            session_name_filter=group_name or None,
-            start_date=parsed_start,
-            end_date=parsed_end,
-        )
+        
+        # 如果没有 query，使用 filter-only 模式直接返回匹配的消息
+        # 而不是走 hybrid 搜索（hybrid 模式需要有效的 query）
+        if not query.strip():
+            results = search_service.search_messages(
+                db=db,
+                user_id=user_id,
+                query="",
+                mode="filter_only",  # 仅使用过滤条件，不进行相似度搜索
+                session_types=session_types,
+                top_k=top_k,
+                sender_filter=sender or None,
+                session_name_filter=group_name or None,
+                start_date=parsed_start,
+                end_date=parsed_end,
+            )
+        else:
+            results = search_service.search_messages(
+                db=db,
+                user_id=user_id,
+                query=query,
+                mode="hybrid",
+                session_types=session_types,
+                top_k=top_k,
+                sender_filter=sender or None,
+                session_name_filter=group_name or None,
+                start_date=parsed_start,
+                end_date=parsed_end,
+            )
 
         if not results:
             return f"No messages found matching query: '{query}'"

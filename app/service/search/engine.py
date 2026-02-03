@@ -68,6 +68,10 @@ class HybridSearchEngine:
             return self._vector_search(
                 db, provider, query, filters, top_k, vector_threshold
             )
+        elif mode == "filter_only":
+            return self._filter_only_search(
+                db, provider, filters, top_k
+            )
         else:
             return self._hybrid_search(
                 db,
@@ -80,6 +84,49 @@ class HybridSearchEngine:
                 similarity_threshold,
                 vector_threshold,
             )
+
+    def _filter_only_search(
+        self,
+        db: Session,
+        provider: SearchProvider,
+        filters: tuple[list[str], dict],
+        top_k: int,
+    ) -> list[dict]:
+        """
+        纯过滤模式搜索（不使用 fuzzy 或 vector）。
+        
+        当 query 为空但有其他过滤条件（如 sender, session_name）时使用。
+        按时间倒序返回最近的消息。
+        """
+        table = provider.get_table_name()
+        select_cols = ", ".join(
+            f"t.{c}" for c in provider.get_select_columns()
+        )
+
+        where_clauses, params = filters
+        params = {**params, "top_k": top_k}
+
+        where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+
+        sql = text(
+            f"""
+            SELECT {select_cols}
+            FROM {table} t
+            WHERE {where_sql}
+            ORDER BY t.message_created_at DESC
+            LIMIT :top_k
+        """
+        )
+
+        rows = db.execute(sql, params).fetchall()
+        results = []
+        for row in rows:
+            result = provider.format_result(row)
+            result["score"] = 1.0  # 过滤模式不计算相似度
+            result["fuzzy_score"] = 0.0
+            result["vector_score"] = 0.0
+            results.append(result)
+        return results
 
     def _fuzzy_search(
         self,

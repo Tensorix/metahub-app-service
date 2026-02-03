@@ -29,25 +29,36 @@ export function MessageList({ messages, onDelete }: MessageListProps) {
 }
 
 function MessageItem({ message, onDelete }: { message: Message; onDelete: (id: string) => void }) {
-  const isUser = message.role === 'pm' || message.role === 'user';
+  // user 和 self 角色显示在右侧（用户侧）
+  // assistant、null、system 角色显示在左侧（对方侧）
+  const isUserSide = message.role === 'user' || message.role === 'self';
+  const isAssistant = message.role === 'assistant';
   const isSystem = message.role === 'system';
 
   return (
-    <div className={cn("flex w-full gap-3", isUser ? "flex-row-reverse" : "flex-row")}>
+    <div className={cn("flex w-full gap-3", isUserSide ? "flex-row-reverse" : "flex-row")}>
       <div className={cn(
         "flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full border",
-        isUser ? "bg-muted" : "bg-primary/10"
+        isUserSide ? "bg-muted" : "bg-primary/10"
       )}>
-        {isUser ? <User className="h-4 w-4" /> : isSystem ? <Monitor className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+        {isUserSide ? (
+          <User className="h-4 w-4" />
+        ) : isSystem ? (
+          <Monitor className="h-4 w-4" />
+        ) : isAssistant ? (
+          <Bot className="h-4 w-4" />
+        ) : (
+          <User className="h-4 w-4" />
+        )}
       </div>
       
       <div className={cn(
         "group relative flex max-w-[80%] flex-col gap-2",
-        isUser ? "items-end" : "items-start"
+        isUserSide ? "items-end" : "items-start"
       )}>
         <div className={cn(
           "rounded-lg px-4 py-2 text-sm shadow-sm",
-          isUser 
+          isUserSide 
             ? "bg-primary text-primary-foreground" 
             : "bg-muted text-foreground border"
         )}>
@@ -82,7 +93,7 @@ function MessageItem({ message, onDelete }: { message: Message; onDelete: (id: s
         
         <div className={cn(
           "flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100",
-          isUser ? "flex-row-reverse" : "flex-row"
+          isUserSide ? "flex-row-reverse" : "flex-row"
         )}>
           <Button
             variant="ghost"
