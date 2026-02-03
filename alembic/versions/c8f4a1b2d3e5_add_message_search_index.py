@@ -49,14 +49,15 @@ def upgrade() -> None:
         USING GIN (content_text gin_trgm_ops)
     """)
 
-    # pgvector 索引 - 使用 IVFFlat 代替 HNSW（支持超过 2000 维）
-    # 注意：此表将在后续迁移中被删除并重建为 halfvec 架构
-    op.execute("""
-        CREATE INDEX idx_search_embedding_ivfflat
-        ON message_search_index
-        USING ivfflat (embedding vector_cosine_ops)
-        WITH (lists = 100)
-    """)
+    # pgvector 索引 - 跳过创建（Vector(3072) 超过 2000 维限制）
+    # 注意：此表将在下一个迁移 d1e2f3a4b5c6 中被删除并重建为 halfvec 架构
+    # 该架构使用 HALFVEC 类型 + 部分索引，可以支持任意维度
+    # op.execute("""
+    #     CREATE INDEX idx_search_embedding_ivfflat
+    #     ON message_search_index
+    #     USING ivfflat (embedding vector_cosine_ops)
+    #     WITH (lists = 100)
+    # """)
 
     # B-Tree 索引
     op.create_index('idx_search_user_session_type', 'message_search_index', ['user_id', 'session_type'])
