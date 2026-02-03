@@ -10,3 +10,6 @@ from .agent import Agent
 from .subagent import SubAgent
 from .agent_version import AgentVersion
 from .user import User, UserToken
+from .embedding_config import EmbeddingConfig
+from .message_search_index import MessageSearchIndex
+from .message_embedding import MessageEmbedding

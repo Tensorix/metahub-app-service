@@ -15,6 +15,16 @@ from app import config
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # init_db() # 如果使用 Alembic 管理迁移，就不需要在这里初始化数据库了
+    
+    # Pre-initialize AgentFactory store to avoid blocking on first request
+    try:
+        from app.agent import AgentFactory
+        logger.info("Pre-initializing AgentFactory store...")
+        await AgentFactory.get_store()
+        logger.info("AgentFactory store initialized")
+    except Exception as e:
+        logger.warning(f"Failed to pre-initialize AgentFactory store: {e}")
+    
     yield
 
 

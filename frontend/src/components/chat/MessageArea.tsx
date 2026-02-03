@@ -12,10 +12,11 @@ import { AIMessageList } from './AIMessageList';
 import { TopicDivider } from './TopicDivider';
 import { TopicSelector } from './TopicSelector';
 import { TopicSidebar } from './TopicSidebar';
+import { FileExplorer } from './FileExplorer';
 import { SessionDialog } from '@/components/SessionDialog';
 import { ResizableHandle } from '@/components/ui/resizable';
 import { cn } from '@/lib/utils';
-import { ChevronUp, ChevronDown, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2, ArrowLeft } from 'lucide-react';
+import { ChevronUp, ChevronDown, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2, ArrowLeft, FolderOpen } from 'lucide-react';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { useToast } from '@/hooks/use-toast';
 
@@ -23,6 +24,11 @@ import { useToast } from '@/hooks/use-toast';
 const TOPIC_SIDEBAR_MIN_WIDTH = 200;
 const TOPIC_SIDEBAR_MAX_WIDTH = 400;
 const TOPIC_SIDEBAR_DEFAULT_WIDTH = 280;
+
+// 文件系统侧边栏宽度常量
+const FILE_EXPLORER_MIN_WIDTH = 280;
+const FILE_EXPLORER_MAX_WIDTH = 600;
+const FILE_EXPLORER_DEFAULT_WIDTH = 400;
 
 interface MessageAreaProps {
   onBack?: () => void;
@@ -64,10 +70,21 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   // 话题侧边栏可调整宽度
   const [topicSidebarWidth, setTopicSidebarWidth] = useState(TOPIC_SIDEBAR_DEFAULT_WIDTH);
   
+  // 文件系统侧边栏状态
+  const [fileExplorerOpen, setFileExplorerOpen] = useState(false);
+  const [fileExplorerWidth, setFileExplorerWidth] = useState(FILE_EXPLORER_DEFAULT_WIDTH);
+  
   const handleTopicSidebarResize = useCallback((delta: number) => {
     // 话题侧边栏在右侧，拖拽方向相反
     setTopicSidebarWidth((prev) =>
       Math.min(TOPIC_SIDEBAR_MAX_WIDTH, Math.max(TOPIC_SIDEBAR_MIN_WIDTH, prev - delta))
+    );
+  }, []);
+
+  const handleFileExplorerResize = useCallback((delta: number) => {
+    // 文件系统侧边栏在右侧，拖拽方向相反
+    setFileExplorerWidth((prev) =>
+      Math.min(FILE_EXPLORER_MAX_WIDTH, Math.max(FILE_EXPLORER_MIN_WIDTH, prev - delta))
     );
   }, []);
 
@@ -255,6 +272,17 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* AI 会话显示文件系统按钮 */}
+            {currentSession?.type === 'ai' && (
+              <Button
+                size="icon"
+                variant={fileExplorerOpen ? "secondary" : "ghost"}
+                onClick={() => setFileExplorerOpen(!fileExplorerOpen)}
+                title={fileExplorerOpen ? "关闭文件系统" : "打开文件系统"}
+              >
+                <FolderOpen className="h-5 w-5" />
+              </Button>
+            )}
             {currentSession && (
               <Button
                 size="icon"
@@ -456,6 +484,26 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
             style={{ width: topicSidebarWidth }}
           >
             <TopicSidebar className="h-full" style={{ width: topicSidebarWidth }} />
+          </div>
+        </>
+      )}
+      
+      {/* 右侧：文件系统面板 (仅 AI 会话) */}
+      {currentSession?.type === 'ai' && fileExplorerOpen && currentSessionId && (
+        <>
+          <ResizableHandle
+            direction="horizontal"
+            onResize={handleFileExplorerResize}
+          />
+          <div
+            className="shrink-0 overflow-hidden"
+            style={{ width: fileExplorerWidth }}
+          >
+            <FileExplorer
+              sessionId={currentSessionId}
+              className="h-full"
+              onClose={() => setFileExplorerOpen(false)}
+            />
           </div>
         </>
       )}

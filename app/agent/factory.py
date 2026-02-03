@@ -79,12 +79,13 @@ class AgentFactory:
             AsyncPostgresStore instance
         """
         if cls._store is None:
+            # Ensure connection pool exists BEFORE acquiring lock
+            # This avoids deadlock since get_checkpointer also uses cls._lock
+            if cls._connection_pool is None:
+                await cls.get_checkpointer()  # This will create the pool
+            
             async with cls._lock:
                 if cls._store is None:
-                    # Ensure connection pool exists
-                    if cls._connection_pool is None:
-                        await cls.get_checkpointer()  # This will create the pool
-                    
                     # AsyncPostgresStore accepts connection pool (same as AsyncPostgresSaver)
                     cls._store = AsyncPostgresStore(cls._connection_pool)
                     await cls._store.setup()

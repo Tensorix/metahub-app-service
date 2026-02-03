@@ -24,7 +24,7 @@ async def test_chat_stream():
         
         # token_data = login_response.json()
         # access_token = token_data["access_token"]
-        access_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMTliZDQ1MS01ZmZmLTc0NDUtYTY3MC1iNzJhNzYzM2U2OGYiLCJ1c2VybmFtZSI6Im5vYWgiLCJ0eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY5NDM0MTQyLCJpYXQiOjE3Njk0MzIzNDJ9.rMK5XZC7RLj3l8nVBVDCv1OQ3wA8QhqV7MSWuTVBLHI"
+        access_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMTliZDQ1MS01ZmZmLTc0NDUtYTY3MC1iNzJhNzYzM2U2OGYiLCJ1c2VybmFtZSI6Im5vYWgiLCJ0eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY5OTQwODA5LCJpYXQiOjE3Njk5MzkwMDl9._s5NZ83ogQZmlXIaCFI52cXXCqBmkkH4rW4uBdfUjLI"
         print(f"✓ Logged in successfully")
         
         # Get or create a session

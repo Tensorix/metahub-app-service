@@ -77,8 +77,11 @@ class DeepAgentService:
         Build CompositeBackend with persistent memory routes.
 
         Routes:
-        - /memories/* → StoreBackend (persistent, cross-conversation)
-        - All others → StateBackend (ephemeral, conversation-scoped)
+        - /memories/* → StoreBackend (persistent, cross-conversation, visible to frontend)
+        - All others → StateBackend (ephemeral, conversation-scoped, not visible to frontend)
+        
+        Frontend API can only access files in /memories/ since they are stored in the database.
+        Temporary files in other paths only exist during Agent runtime.
         """
         if not self.store:
             return None
