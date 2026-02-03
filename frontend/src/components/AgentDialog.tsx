@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import type { Agent, AgentCreate, AgentUpdate, SubAgent } from '@/lib/agentManagementApi';
 import { X, Plus } from 'lucide-react';
+import { useTools } from '@/hooks/useTools';
 
 interface AgentDialogProps {
   open: boolean;
@@ -21,9 +22,21 @@ interface AgentDialogProps {
   onSubmit: (data: AgentCreate | AgentUpdate) => Promise<void>;
 }
 
-const AVAILABLE_TOOLS = ['calculator', 'search', 'datetime', 'execute'];
-
 export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialogProps) {
+  // 获取可用工具列表
+  const { tools, categories, loading: toolsLoading, error: toolsError } = useTools();
+  
+  // 获取所有有效工具名称的集合
+  const validToolNames = new Set(tools.map(t => t.name));
+  
+  // 检查工具是否失效
+  const isToolInvalid = (toolName: string) => !validToolNames.has(toolName);
+  
+  // 获取失效的工具列表
+  const getInvalidTools = (toolList: string[]) => {
+    return toolList.filter(tool => isToolInvalid(tool));
+  };
+
   const [formData, setFormData] = useState<AgentCreate>({
     name: '',
     system_prompt: '',
@@ -329,18 +342,88 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
 
                 <div className="grid gap-2">
                   <Label>工具</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {AVAILABLE_TOOLS.map(tool => (
-                      <Badge
-                        key={tool}
-                        variant={(formData.tools || []).includes(tool) ? 'default' : 'outline'}
-                        className="cursor-pointer"
-                        onClick={() => toggleTool(tool)}
-                      >
-                        {tool}
-                      </Badge>
-                    ))}
-                  </div>
+                  {toolsLoading ? (
+                    <div className="text-sm text-muted-foreground">加载工具列表...</div>
+                  ) : toolsError ? (
+                    <div className="text-sm text-destructive">
+                      加载工具失败: {toolsError}
+                    </div>
+                  ) : (
+                    <>
+                      {/* 显示失效的工具（如果有） */}
+                      {getInvalidTools(formData.tools || []).length > 0 && (
+                        <div className="border border-destructive/50 rounded-lg p-3 space-y-2 bg-destructive/5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-destructive">⚠️ 失效的工具</span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {getInvalidTools(formData.tools || []).map((tool) => (
+                              <Badge
+                                key={tool}
+                                variant="destructive"
+                                className="cursor-pointer"
+                                onClick={() => toggleTool(tool)}
+                              >
+                                {tool}
+                                <X className="ml-1 h-3 w-3" />
+                              </Badge>
+                            ))}
+                          </div>
+                          <p className="text-xs text-destructive">
+                            这些工具在系统中不存在，点击删除它们
+                          </p>
+                        </div>
+                      )}
+                      
+                      {/* 按分类显示有效工具 */}
+                      {categories.length > 0 ? (
+                        <div className="space-y-3">
+                          {categories.map((category) => (
+                            <div key={category.category} className="space-y-1">
+                              <div className="text-xs font-medium text-muted-foreground uppercase">
+                                {category.category}
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {category.tools.map((tool) => {
+                                  const isSelected = (formData.tools || []).includes(tool.name);
+                                  return (
+                                    <Badge
+                                      key={tool.name}
+                                      variant={isSelected ? 'default' : 'outline'}
+                                      className="cursor-pointer hover:bg-primary/90"
+                                      onClick={() => toggleTool(tool.name)}
+                                      title={tool.description}
+                                    >
+                                      {tool.name}
+                                      {isSelected && <X className="ml-1 h-3 w-3" />}
+                                    </Badge>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {tools.map((tool) => {
+                            const isSelected = (formData.tools || []).includes(tool.name);
+                            return (
+                              <Badge
+                                key={tool.name}
+                                variant={isSelected ? 'default' : 'outline'}
+                                className="cursor-pointer hover:bg-primary/90"
+                                onClick={() => toggleTool(tool.name)}
+                                title={tool.description}
+                              >
+                                {tool.name}
+                                {isSelected && <X className="ml-1 h-3 w-3" />}
+                              </Badge>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     点击选择工具。内置工具（文件系统、计划）会自动启用。
                   </p>
@@ -544,18 +627,88 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
 
                   <div className="grid gap-2">
                     <Label>工具</Label>
-                    <div className="flex flex-wrap gap-2">
-                      {AVAILABLE_TOOLS.map(tool => (
-                        <Badge
-                          key={tool}
-                          variant={(subAgentForm.tools || []).includes(tool) ? 'default' : 'outline'}
-                          className="cursor-pointer"
-                          onClick={() => toggleSubAgentTool(tool)}
-                        >
-                          {tool}
-                        </Badge>
-                      ))}
-                    </div>
+                    {toolsLoading ? (
+                      <div className="text-sm text-muted-foreground">加载工具列表...</div>
+                    ) : toolsError ? (
+                      <div className="text-sm text-destructive">
+                        加载工具失败: {toolsError}
+                      </div>
+                    ) : (
+                      <>
+                        {/* 显示失效的工具（如果有） */}
+                        {getInvalidTools(subAgentForm.tools || []).length > 0 && (
+                          <div className="border border-destructive/50 rounded-lg p-3 space-y-2 bg-destructive/5">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-destructive">⚠️ 失效的工具</span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {getInvalidTools(subAgentForm.tools || []).map((tool) => (
+                                <Badge
+                                  key={tool}
+                                  variant="destructive"
+                                  className="cursor-pointer"
+                                  onClick={() => toggleSubAgentTool(tool)}
+                                >
+                                  {tool}
+                                  <X className="ml-1 h-3 w-3" />
+                                </Badge>
+                              ))}
+                            </div>
+                            <p className="text-xs text-destructive">
+                              这些工具在系统中不存在，点击删除它们
+                            </p>
+                          </div>
+                        )}
+                        
+                        {/* 按分类显示有效工具 */}
+                        {categories.length > 0 ? (
+                          <div className="space-y-3">
+                            {categories.map((category) => (
+                              <div key={category.category} className="space-y-1">
+                                <div className="text-xs font-medium text-muted-foreground uppercase">
+                                  {category.category}
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  {category.tools.map((tool) => {
+                                    const isSelected = (subAgentForm.tools || []).includes(tool.name);
+                                    return (
+                                      <Badge
+                                        key={tool.name}
+                                        variant={isSelected ? 'default' : 'outline'}
+                                        className="cursor-pointer hover:bg-primary/90"
+                                        onClick={() => toggleSubAgentTool(tool.name)}
+                                        title={tool.description}
+                                      >
+                                        {tool.name}
+                                        {isSelected && <X className="ml-1 h-3 w-3" />}
+                                      </Badge>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {tools.map((tool) => {
+                              const isSelected = (subAgentForm.tools || []).includes(tool.name);
+                              return (
+                                <Badge
+                                  key={tool.name}
+                                  variant={isSelected ? 'default' : 'outline'}
+                                  className="cursor-pointer hover:bg-primary/90"
+                                  onClick={() => toggleSubAgentTool(tool.name)}
+                                  title={tool.description}
+                                >
+                                  {tool.name}
+                                  {isSelected && <X className="ml-1 h-3 w-3" />}
+                                </Badge>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
 
                   <Button

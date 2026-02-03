@@ -8,7 +8,10 @@ Provides:
 """
 
 from typing import Callable, Optional, Any
+import logging
 from langchain_core.tools import tool as langchain_tool
+
+logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
@@ -69,17 +72,35 @@ class ToolRegistry:
         return cls._tools.get(name)
 
     @classmethod
-    def get_tools(cls, names: list[str]) -> list[Callable]:
+    def get_tools(cls, names: list[str], strict: bool = False) -> list[Callable]:
         """
         Get multiple tools by name.
 
         Args:
             names: List of tool names
+            strict: If True, raise error for missing tools
 
         Returns:
-            List of tool functions (excludes not found)
+            List of tool functions
+
+        Raises:
+            ValueError: If strict=True and any tool not found
         """
-        return [cls._tools[n] for n in names if n in cls._tools]
+        result = []
+        not_found = []
+
+        for name in names:
+            if name in cls._tools:
+                result.append(cls._tools[name])
+            else:
+                not_found.append(name)
+
+        if not_found:
+            if strict:
+                raise ValueError(f"Tools not found in registry: {not_found}")
+            logger.warning(f"Tools not found in registry: {not_found}")
+
+        return result
 
     @classmethod
     def get_all(cls) -> list[Callable]:
