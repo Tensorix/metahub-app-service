@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Optional
 from uuid import UUID
 from math import ceil
+from loguru import logger
 
 from app.db.session import get_db
 from app.db.model.user import User
@@ -138,8 +139,35 @@ def delete_topic(topic_id: UUID, hard_delete: bool = Query(False), db: Session =
 
 
 # ============ Message APIs ============
+
+def _index_message_background(message_id: UUID):
+    """后台任务：为消息创建搜索索引和embedding"""
+    try:
+        from app.db.session import SessionLocal
+        from app.service.search_indexer import SearchIndexerService
+        from app.service.session import MessageService
+        
+        db = SessionLocal()
+        try:
+            message = MessageService.get_message(db, message_id)
+            if message:
+                indexer = SearchIndexerService()
+                indexer.index_message(db, message)
+                logger.info(f"Successfully indexed message {message_id}")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Failed to index message {message_id} in background: {e}")
+
+
 @router.post("/sessions/{session_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED, summary="添加消息")
-def create_message(session_id: UUID, data: MessageCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def create_message(
+    session_id: UUID, 
+    data: MessageCreate, 
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user)
+):
     if data.session_id != session_id:
         raise HTTPException(status_code=400, detail="session_id 不匹配")
     
@@ -148,6 +176,10 @@ def create_message(session_id: UUID, data: MessageCreate, db: Session = Depends(
         raise HTTPException(status_code=404, detail="会话不存在")
     
     message = MessageService.create_message(db, data, current_user.id)
+    
+    # 添加后台任务：异步创建搜索索引和embedding
+    background_tasks.add_task(_index_message_background, message.id)
+    
     return MessageResponse.model_validate(message)
 
 

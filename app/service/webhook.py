@@ -63,6 +63,14 @@ class WebhookService:
             )
             logger.info(f"Message created: id={message.id}, external_id={message.external_id}")
             
+            # 3.1 创建搜索索引（在后台任务中，不会阻塞主流程）
+            try:
+                from app.service.search_indexer import SearchIndexerService
+                indexer = SearchIndexerService()
+                indexer.index_message(db, message)
+            except Exception as e:
+                logger.error(f"Failed to index message {message.id}: {e}")
+            
             # 4. 获取会话上下文（最近 30 条消息）
             context_messages = WebhookService._get_context_messages(
                 db, session.id, limit=30

@@ -55,7 +55,9 @@ class Settings(BaseSettings):
     # 上下文窗口大小：无 topic 时返回命中消息前后各 N 条
     SEARCH_CONTEXT_WINDOW_SIZE: int = 5
 
-    # 是否在消息创建时同步生成 embedding
+    # 是否在消息创建时立即触发 embedding 生成（后台任务异步处理）
+    # True: 收到消息后立即在后台任务中生成 embedding
+    # False: 不自动生成，需要手动运行脚本处理 pending embeddings
     SEARCH_SYNC_EMBEDDING: bool = True
 
     # 模糊搜索最低相似度阈值 (0.0 - 1.0)

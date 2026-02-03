@@ -10,6 +10,9 @@ export const api = axios.create({
   },
 });
 
+// Export as apiClient for compatibility
+export const apiClient = api;
+
 // 请求拦截器：添加 token
 api.interceptors.request.use(
   (config) => {

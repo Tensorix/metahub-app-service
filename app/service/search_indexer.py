@@ -86,9 +86,14 @@ class SearchIndexerService:
         db.add(search_index)
         db.flush()  # Get search_index.id
 
-        # 2. Generate embedding → write message_embedding
+        # 2. 创建 embedding 记录（在后台任务中调用时才生成向量）
+        # 注意：此方法在后台任务中调用，不会阻塞消息创建接口
         if config.SEARCH_SYNC_EMBEDDING:
+            # 立即生成 embedding（在后台任务中执行，不阻塞）
             self._generate_embedding_for_index(db, search_index, content_text)
+        else:
+            # 创建 pending 状态，等待定时任务处理
+            self._create_pending_embedding(db, search_index)
 
         db.commit()
         db.refresh(search_index)
@@ -129,6 +134,27 @@ class SearchIndexerService:
             )
             db.add(emb_record)
             return emb_record
+
+    def _create_pending_embedding(
+        self,
+        db: Session,
+        search_index: MessageSearchIndex,
+    ) -> MessageEmbedding:
+        """Create a pending embedding record for background processing."""
+        try:
+            _, model_config = get_active_embedding_service(db)
+            model_id = model_config.model_id
+        except Exception:
+            model_id = "unknown"
+        
+        emb_record = MessageEmbedding(
+            search_index_id=search_index.id,
+            model_id=model_id,
+            embedding=[0.0],  # Placeholder
+            status="pending",
+        )
+        db.add(emb_record)
+        return emb_record
 
     def update_index(
         self, db: Session, message: Message
@@ -376,6 +402,60 @@ class SearchIndexerService:
             db.add(emb)
 
     # ========== Embedding Retry ==========
+
+    def process_pending_embeddings(
+        self, db: Session, batch_size: int = 50
+    ) -> dict:
+        """Process pending embeddings in background."""
+        stats = {"processed": 0, "succeeded": 0, "failed": 0}
+
+        pending_records = (
+            db.query(MessageEmbedding)
+            .filter(MessageEmbedding.status == "pending")
+            .limit(batch_size)
+            .all()
+        )
+
+        if not pending_records:
+            return stats
+
+        embedding_svc, model_config = get_active_embedding_service(db)
+
+        # Get corresponding content_text
+        index_ids = [r.search_index_id for r in pending_records]
+        search_indices = {
+            si.id: si
+            for si in db.query(MessageSearchIndex)
+            .filter(MessageSearchIndex.id.in_(index_ids))
+            .all()
+        }
+
+        texts = []
+        for record in pending_records:
+            si = search_indices.get(record.search_index_id)
+            texts.append(si.content_text if si else "")
+
+        stats["processed"] = len(texts)
+
+        try:
+            embeddings = embedding_svc.generate_embeddings_batch(texts)
+            for i, record in enumerate(pending_records):
+                if embeddings[i]:
+                    record.embedding = embeddings[i]
+                    record.model_id = model_config.model_id
+                    record.status = "completed"
+                    stats["succeeded"] += 1
+                else:
+                    record.status = "failed"
+                    stats["failed"] += 1
+        except Exception as e:
+            logger.error(f"Process pending embeddings batch failed: {e}")
+            for record in pending_records:
+                record.status = "failed"
+            stats["failed"] = len(pending_records)
+
+        db.commit()
+        return stats
 
     def retry_failed_embeddings(
         self, db: Session, batch_size: int = 50

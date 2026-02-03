@@ -721,6 +721,14 @@ class SyncService:
         db.commit()
         db.refresh(message)
         
+        # 创建搜索索引
+        try:
+            from app.service.search_indexer import SearchIndexerService
+            indexer = SearchIndexerService()
+            indexer.index_message(db, message)
+        except Exception as e:
+            logger.error(f"Failed to index message {message.id}: {e}")
+        
         return MessageSyncResult(
             id=message.id,
             operation="create",
