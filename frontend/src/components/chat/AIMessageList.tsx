@@ -22,7 +22,10 @@ export function AIMessageList({ className }: { className?: string }) {
   return (
     <div className={cn("flex-1 overflow-y-auto p-4 space-y-4", className)}>
       {messageList.map((message) => {
-        const isUser = message.role === 'user';
+        // user 和 self 角色显示在右侧（用户侧）
+        // assistant 和 null 角色显示在左侧（对方侧）
+        const isUserSide = message.role === 'user' || message.role === 'self';
+        const isAssistant = message.role === 'assistant';
         const isCurrentStreaming = message.id === streamingMessageId;
         const content = message.parts
           .filter((p) => p.type === 'text')
@@ -34,18 +37,20 @@ export function AIMessageList({ className }: { className?: string }) {
             key={message.id}
             className={cn(
               'flex gap-3',
-              isUser && 'flex-row-reverse'
+              isUserSide && 'flex-row-reverse'
             )}
           >
             {/* Avatar */}
             <div className={cn(
               "flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full border",
-              isUser ? "bg-muted" : "bg-primary/10"
+              isUserSide ? "bg-muted" : "bg-primary/10"
             )}>
-              {isUser ? (
+              {isUserSide ? (
                 <User className="h-4 w-4" />
-              ) : (
+              ) : isAssistant ? (
                 <Bot className="h-4 w-4" />
+              ) : (
+                <User className="h-4 w-4" />
               )}
             </div>
 
@@ -53,18 +58,18 @@ export function AIMessageList({ className }: { className?: string }) {
             <div
               className={cn(
                 'flex flex-col max-w-[80%]',
-                isUser && 'items-end'
+                isUserSide && 'items-end'
               )}
             >
               <div
                 className={cn(
                   'rounded-lg px-4 py-2',
-                  isUser
+                  isUserSide
                     ? 'bg-primary text-primary-foreground'
                     : 'bg-muted'
                 )}
               >
-                {isUser ? (
+                {isUserSide ? (
                   <p className="whitespace-pre-wrap">{content}</p>
                 ) : (
                   <StreamingMessage
@@ -75,7 +80,7 @@ export function AIMessageList({ className }: { className?: string }) {
               </div>
 
               {/* Actions for AI messages */}
-              {!isUser && !isCurrentStreaming && (
+              {isAssistant && !isCurrentStreaming && (
                 <div className="flex gap-1 mt-1">
                   <RegenerateButton messageId={message.id} />
                 </div>

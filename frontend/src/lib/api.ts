@@ -356,4 +356,18 @@ export const sessionApi = {
       params: { hard_delete: hardDelete },
     });
   },
+
+  // IM Gateway - 发送消息到 IM 平台
+  async sendIMMessage(sessionId: string, data: {
+    message: Array<{ type: string; text?: string; content?: string; [key: string]: any }>;
+    message_str: string;
+  }): Promise<{
+    success: boolean;
+    message_id?: string;
+    bridge_result?: any;
+    error?: string;
+  }> {
+    const response = await api.post(`/api/v1/sessions/${sessionId}/messages/send`, data);
+    return response.data;
+  },
 };

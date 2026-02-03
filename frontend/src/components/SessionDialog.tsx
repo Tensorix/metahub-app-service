@@ -26,6 +26,7 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
   const [type, setType] = useState('pm');
   const [source, setSource] = useState('');
   const [agentId, setAgentId] = useState<string>('');
+  const [autoSendIM, setAutoSendIM] = useState(true);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -44,11 +45,13 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
       setType(session.type);
       setSource(session.source || '');
       setAgentId(session.agent_id || '');
+      setAutoSendIM(session.metadata?.auto_send_im !== false); // 默认 true
     } else {
       setName('');
       setType('pm');
       setSource('');
       setAgentId('');
+      setAutoSendIM(true);
     }
   }, [session, open]);
 
@@ -57,11 +60,16 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
     setLoading(true);
 
     try {
+      const isIMSession = type === 'pm' || type === 'group';
       const data = {
         name: name || undefined,
         type,
         source: source || undefined,
         agent_id: agentId || undefined,
+        metadata: isIMSession ? {
+          ...(session?.metadata || {}),
+          auto_send_im: autoSendIM,
+        } : session?.metadata,
       };
 
       await onSubmit(data);
@@ -135,6 +143,27 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
                 ))}
               </select>
             </div>
+
+            {/* IM 会话配置 */}
+            {(type === 'pm' || type === 'group') && (
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="autoSendIM"
+                    checked={autoSendIM}
+                    onChange={(e) => setAutoSendIM(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  <Label htmlFor="autoSendIM" className="cursor-pointer">
+                    自动发送到 IM 平台
+                  </Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  启用后，发送的消息会直接通过 IM Gateway 发送到对应平台（私聊/群聊）
+                </p>
+              </div>
+            )}
           </div>
 
           <DialogFooter>

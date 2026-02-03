@@ -173,15 +173,17 @@ class HybridSearchEngine:
         params = {**params}
 
         # 添加 embedding 特有的过滤
+        # 将向量转换为 PostgreSQL 数组字符串格式
+        vec_str = "[" + ",".join(map(str, query_embedding)) + "]"
+        
         where_clauses.extend(
             [
                 f"e.model_id = :model_id",
                 f"e.status = 'completed'",
-                f"(1 - (e.embedding::{cast} <=> :query_vec::{cast})) > :threshold",
+                f"(1 - (e.embedding::{cast} <=> '{vec_str}'::{cast})) > :threshold",
             ]
         )
         params["model_id"] = model_config.model_id
-        params["query_vec"] = str(query_embedding)
         params["threshold"] = vector_threshold
         params["top_k"] = top_k
 
@@ -191,11 +193,11 @@ class HybridSearchEngine:
             f"""
             SELECT
                 {select_cols},
-                (1 - (e.embedding::{cast} <=> :query_vec::{cast})) AS vector_score
+                (1 - (e.embedding::{cast} <=> '{vec_str}'::{cast})) AS vector_score
             FROM {table} t
             JOIN {emb_table} e ON e.search_index_id = t.id
             WHERE {where_sql}
-            ORDER BY e.embedding::{cast} <=> :query_vec::{cast}
+            ORDER BY e.embedding::{cast} <=> '{vec_str}'::{cast}
             LIMIT :top_k
         """
         )

@@ -70,6 +70,7 @@ interface ChatState {
   // 消息
   loadMessages: (sessionId: string, topicId?: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
+  sendIMMessage: (content: string) => Promise<void>;
   deleteMessage: (messageId: string) => Promise<void>;
 
   // AI 对话
@@ -402,9 +403,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
       currentTopicId,
       createTopic,
       loadMessages,
+      getCurrentSession,
     } = get();
     if (!currentSessionId) return;
 
+    const session = getCurrentSession();
+    if (!session) return;
+
+    // 判断是否是 IM 类型的 session（pm/group）且配置为自动发送
+    const isIMSession = session.type === 'pm' || session.type === 'group';
+    const autoSendIM = session.metadata?.auto_send_im !== false; // 默认 true
+
+    if (isIMSession && autoSendIM) {
+      // 使用 IM 发送接口
+      await get().sendIMMessage(content);
+      return;
+    }
+
+    // 原有逻辑：普通消息发送
     let topicId = currentTopicId ?? undefined;
 
     const mode = get().getDisplayMode();
@@ -429,6 +445,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
 
     await loadMessages(currentSessionId, topicId);
+  },
+
+  sendIMMessage: async (content: string) => {
+    const { currentSessionId, loadMessages } = get();
+    if (!currentSessionId) return;
+
+    try {
+      // 调用 IM Gateway 发送接口
+      const result = await sessionApi.sendIMMessage(currentSessionId, {
+        message: [{ type: 'text', text: content }],
+        message_str: content,
+      });
+
+      if (!result.success) {
+        console.error('IM message send failed:', result.error);
+        // 可以在这里添加错误提示
+      }
+
+      // 刷新消息列表
+      await loadMessages(currentSessionId);
+    } catch (error) {
+      console.error('sendIMMessage error:', error);
+      // 可以在这里添加错误提示
+    }
   },
 
   deleteMessage: async (messageId: string) => {
