@@ -78,17 +78,18 @@ async def _authenticate_ws(websocket: WebSocket, db: DBSession) -> User | None:
 @router.websocket("/im/gateway")
 async def im_gateway_ws(
     websocket: WebSocket,
-    source: str = Query(..., description="IM 平台标识，如 astr_qq"),
+    source: str = Query(None, description="IM 平台标识，如 astr_qq。不传时需在每条消息 data 中声明 source"),
 ):
     """
     IM 桥接 WebSocket 端点。
 
     Query Params:
         token: JWT 或 API Key (sk-xxx)
-        source: IM 平台标识
+        source: IM 平台标识（可选，不传时支持 multi-source provider）
 
     Bridge → Server:
-        {"type": "message", "data": {...}}  转发 IM 消息
+        {"type": "register", "sources": ["astr_qq", ...]}  声明支持的 source（multi-source 模式）
+        {"type": "message", "data": {...}}  转发 IM 消息（multi-source 时 data.source 必填）
         {"type": "result", "request_id": "...", "success": true/false, ...}
         {"type": "ping"}
 
@@ -99,6 +100,7 @@ async def im_gateway_ws(
     await websocket.accept()
     db = SessionLocal()
     user = None
+    registered_sources: set[str] = set()
 
     try:
         # 认证
@@ -107,8 +109,10 @@ async def im_gateway_ws(
             await websocket.close(code=4001, reason="Authentication failed")
             return
 
-        # 注册连接
-        await im_connection_manager.connect(user.id, source, websocket)
+        # 固定 source 模式：立即注册连接
+        if source:
+            await im_connection_manager.connect(user.id, source, websocket)
+            registered_sources.add(source)
 
         # 主消息循环
         while True:
@@ -118,9 +122,41 @@ async def im_gateway_ws(
             if msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
 
+            elif msg_type == "register":
+                # multi-source 桥接声明支持的 sources
+                sources = raw.get("sources", [])
+                if not isinstance(sources, list) or not sources:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "register requires non-empty 'sources' array",
+                    })
+                    continue
+                for s in sources:
+                    if s not in registered_sources:
+                        await im_connection_manager.connect(user.id, s, websocket)
+                        registered_sources.add(s)
+                await websocket.send_json({
+                    "type": "register_ack",
+                    "sources": list(registered_sources),
+                })
+
             elif msg_type == "message":
-                # 收到 IM 消息，复用 WebhookService 处理
-                await _handle_incoming_message(raw.get("data", {}), user.id, source)
+                data = raw.get("data", {})
+                # 确定 effective source：消息级 > 连接级
+                msg_source = data.get("source") or source
+                if not msg_source:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Missing 'source': provide via query param or in message data.source",
+                    })
+                    continue
+
+                # multi-source: 动态注册新 source 的连接
+                if msg_source not in registered_sources:
+                    await im_connection_manager.connect(user.id, msg_source, websocket)
+                    registered_sources.add(msg_source)
+
+                await _handle_incoming_message(data, user.id, msg_source)
 
             elif msg_type == "result":
                 # 桥接回报发送结果
@@ -143,7 +179,7 @@ async def im_gateway_ws(
                 logger.warning(f"Unknown WS message type: {msg_type}")
 
     except WebSocketDisconnect:
-        logger.info(f"IM bridge disconnected: source={source}")
+        logger.info(f"IM bridge disconnected: source={source or 'multi'}, registered={registered_sources}")
     except Exception as e:
         logger.error(f"IM gateway error: {e}", exc_info=True)
         try:
@@ -152,7 +188,8 @@ async def im_gateway_ws(
             pass
     finally:
         if user is not None:
-            await im_connection_manager.disconnect(user.id, source)
+            for s in registered_sources:
+                await im_connection_manager.disconnect(user.id, s)
         db.close()
 
 
