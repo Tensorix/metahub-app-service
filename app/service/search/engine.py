@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from loguru import logger
 
-from app.service.embedding import EmbeddingService
+from app.service.embedding import get_active_embedding_service
 from app.service.search.provider import SearchProvider
 
 
@@ -18,12 +18,11 @@ class HybridSearchEngine:
 
     封装 pg_trgm 模糊搜索、pgvector 向量搜索和 RRF 融合算法。
     不绑定具体业务类别——通过 SearchProvider 注入表结构和过滤逻辑。
+
+    向量搜索通过 JOIN embedding 表 + 动态 halfvec cast 实现多模型支持。
     """
 
     RRF_K = 60
-
-    def __init__(self):
-        self._embedding_service = EmbeddingService()
 
     def search(
         self,
@@ -58,19 +57,28 @@ class HybridSearchEngine:
 
         if mode == "fuzzy":
             return self._fuzzy_search(
-                db, provider, query, filters,
-                top_k, similarity_threshold,
+                db,
+                provider,
+                query,
+                filters,
+                top_k,
+                similarity_threshold,
             )
         elif mode == "vector":
             return self._vector_search(
-                db, provider, query, filters,
-                top_k, vector_threshold,
+                db, provider, query, filters, top_k, vector_threshold
             )
         else:
             return self._hybrid_search(
-                db, provider, query, filters, top_k,
-                fuzzy_weight, vector_weight,
-                similarity_threshold, vector_threshold,
+                db,
+                provider,
+                query,
+                filters,
+                top_k,
+                fuzzy_weight,
+                vector_weight,
+                similarity_threshold,
+                vector_threshold,
             )
 
     def _fuzzy_search(
@@ -82,7 +90,7 @@ class HybridSearchEngine:
         top_k: int,
         similarity_threshold: float,
     ) -> list[dict]:
-        """通用 pg_trgm 模糊搜索。"""
+        """通用 pg_trgm 模糊搜索（不涉及 embedding 表）。"""
         table = provider.get_table_name()
         content_col = provider.get_content_column()
         select_cols = ", ".join(
@@ -102,7 +110,8 @@ class HybridSearchEngine:
 
         where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
 
-        sql = text(f"""
+        sql = text(
+            f"""
             SELECT
                 {select_cols},
                 similarity(t.{content_col}, :query) AS fuzzy_score
@@ -110,7 +119,8 @@ class HybridSearchEngine:
             WHERE {where_sql}
             ORDER BY fuzzy_score DESC
             LIMIT :top_k
-        """)
+        """
+        )
 
         rows = db.execute(sql, params).fetchall()
         results = []
@@ -131,16 +141,29 @@ class HybridSearchEngine:
         top_k: int,
         vector_threshold: float,
     ) -> list[dict]:
-        """通用 pgvector 向量搜索。"""
-        query_embedding = self._embedding_service.generate_query_embedding(
-            query
+        """
+        通用 pgvector 向量搜索。
+
+        核心变更：
+        1. 从 embedding_config 查活跃 model_id
+        2. 从注册表获取 model_config → index_cast, cosine_ops
+        3. JOIN embedding 表 + WHERE model_id 过滤
+        4. 使用 dynamic cast 表达式匹配 HNSW 部分索引
+        """
+        # 获取活跃模型配置
+        embedding_svc, model_config = get_active_embedding_service(
+            db, provider.get_category()
         )
+
+        # 生成查询向量
+        query_embedding = embedding_svc.generate_query_embedding(query)
         if query_embedding is None:
             logger.warning(f"Failed to generate query embedding: {query}")
             return []
 
         table = provider.get_table_name()
-        embedding_col = provider.get_embedding_column()
+        emb_table = provider.get_embedding_table()
+        cast = model_config.index_cast  # e.g. "halfvec(3072)"
         select_cols = ", ".join(
             f"t.{c}" for c in provider.get_select_columns()
         )
@@ -149,26 +172,33 @@ class HybridSearchEngine:
         where_clauses = where_clauses.copy()
         params = {**params}
 
-        where_clauses.extend([
-            f"t.{embedding_col} IS NOT NULL",
-            "t.embedding_status = 'completed'",
-            f"(1 - (t.{embedding_col} <=> :query_vec)) > :threshold",
-        ])
+        # 添加 embedding 特有的过滤
+        where_clauses.extend(
+            [
+                f"e.model_id = :model_id",
+                f"e.status = 'completed'",
+                f"(1 - (e.embedding::{cast} <=> :query_vec::{cast})) > :threshold",
+            ]
+        )
+        params["model_id"] = model_config.model_id
         params["query_vec"] = str(query_embedding)
         params["threshold"] = vector_threshold
         params["top_k"] = top_k
 
-        where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+        where_sql = " AND ".join(where_clauses)
 
-        sql = text(f"""
+        sql = text(
+            f"""
             SELECT
                 {select_cols},
-                (1 - (t.{embedding_col} <=> :query_vec)) AS vector_score
+                (1 - (e.embedding::{cast} <=> :query_vec::{cast})) AS vector_score
             FROM {table} t
+            JOIN {emb_table} e ON e.search_index_id = t.id
             WHERE {where_sql}
-            ORDER BY t.{embedding_col} <=> :query_vec
+            ORDER BY e.embedding::{cast} <=> :query_vec::{cast}
             LIMIT :top_k
-        """)
+        """
+        )
 
         rows = db.execute(sql, params).fetchall()
         results = []
@@ -203,9 +233,12 @@ class HybridSearchEngine:
         )
 
         return self._rrf_fusion(
-            fuzzy_results, vector_results,
-            fuzzy_weight, vector_weight,
-            provider.get_id_column(), top_k,
+            fuzzy_results,
+            vector_results,
+            fuzzy_weight,
+            vector_weight,
+            provider.get_id_column(),
+            top_k,
         )
 
     def _rrf_fusion(
@@ -225,12 +258,10 @@ class HybridSearchEngine:
         k = self.RRF_K
 
         ranks_a = {
-            str(r[id_key]): rank
-            for rank, r in enumerate(list_a, start=1)
+            str(r[id_key]): rank for rank, r in enumerate(list_a, start=1)
         }
         ranks_b = {
-            str(r[id_key]): rank
-            for rank, r in enumerate(list_b, start=1)
+            str(r[id_key]): rank for rank, r in enumerate(list_b, start=1)
         }
 
         all_results = {}

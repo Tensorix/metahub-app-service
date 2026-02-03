@@ -11,17 +11,17 @@ class SearchProvider(ABC):
     搜索类别的抽象接口。
 
     每种可搜索的内容类型（消息、文档、活动等）实现一个 Provider，
-    定义自己的索引表结构、过滤维度、结果格式化逻辑。
+    定义自己的索引表结构、embedding 表、过滤维度、结果格式化逻辑。
 
     扩展新类别时只需：
-    1. 创建对应的索引表（参考 message_search_index）
+    1. 创建对应的索引表 + embedding 表（参考 message_search_index + message_embedding）
     2. 实现一个新的 SearchProvider 子类
     3. 注册一个新的 Agent Tool
     """
 
     @abstractmethod
     def get_table_name(self) -> str:
-        """返回索引表名。"""
+        """返回主索引表名（文本 + 元数据）。"""
         ...
 
     @abstractmethod
@@ -30,8 +30,13 @@ class SearchProvider(ABC):
         ...
 
     @abstractmethod
-    def get_embedding_column(self) -> str:
-        """返回向量列名。"""
+    def get_embedding_table(self) -> str:
+        """返回 embedding 表名（存储向量的独立表）。"""
+        ...
+
+    @abstractmethod
+    def get_category(self) -> str:
+        """返回业务类别名（对应 embedding_config.category）。"""
         ...
 
     @abstractmethod
@@ -60,6 +65,7 @@ class SearchProvider(ABC):
 
         Returns:
             (where_clauses, params) 元组
+            where_clauses 中的表别名: t = 主索引表, e = embedding 表
         """
         ...
 

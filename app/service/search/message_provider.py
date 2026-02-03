@@ -16,14 +16,23 @@ class MessageSearchProvider(SearchProvider):
     def get_content_column(self) -> str:
         return "content_text"
 
-    def get_embedding_column(self) -> str:
-        return "embedding"
+    def get_embedding_table(self) -> str:
+        return "message_embedding"
+
+    def get_category(self) -> str:
+        return "message"
 
     def get_select_columns(self) -> list[str]:
         return [
-            "message_id", "session_id", "session_type",
-            "session_name", "topic_id", "content_text",
-            "sender_name", "role", "message_created_at",
+            "message_id",
+            "session_id",
+            "session_type",
+            "session_name",
+            "topic_id",
+            "content_text",
+            "sender_name",
+            "role",
+            "message_created_at",
         ]
 
     def get_id_column(self) -> str:

@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -94,9 +95,7 @@ class MessageSearchIndex(Base):
             "idx_search_topic",
             "topic_id",
             postgresql_where=text("topic_id IS NOT NULL"),
-        )
-        if False
-        else Index("idx_search_topic", "topic_id"),
+        ),
         Index("idx_search_session_created", "session_id", "message_created_at"),
         Index("idx_search_user_created", "user_id", "message_created_at"),
         # pg_trgm on sender_name and session_name for ILIKE filters

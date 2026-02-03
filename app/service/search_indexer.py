@@ -1,26 +1,25 @@
 # app/service/search_indexer.py
 
+"""Search indexer service — manages dual-table writes (search_index + embedding)."""
+
 import re
 from typing import Optional
 from uuid import UUID
-from datetime import datetime
 
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, and_
 from loguru import logger
+from sqlalchemy import func
+from sqlalchemy.orm import Session, joinedload
 
+from app.config import config
 from app.db.model.message import Message
-from app.db.model.message_part import MessagePart
+from app.db.model.message_embedding import MessageEmbedding
 from app.db.model.message_search_index import MessageSearchIndex
 from app.db.model.session import Session as SessionModel
-from app.service.embedding import EmbeddingService
-from app.config import config
+from app.service.embedding import get_active_embedding_service
 
 
 def extract_searchable_text(message: Message) -> str:
-    """
-    从消息的所有 parts 中提取可搜索文本。
-    """
+    """Extract searchable text from all message parts."""
     text_parts = []
     for part in message.parts:
         if part.type == "text":
@@ -33,55 +32,45 @@ def extract_searchable_text(message: Message) -> str:
 
 
 def preprocess_text(text: str) -> str:
-    """对提取的文本进行预处理。"""
+    """Preprocess extracted text."""
     if not text:
         return ""
-    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
-    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    text = re.sub(r"\s+", " ", text)
     return text.strip()
 
 
 class SearchIndexerService:
-    """搜索索引管理服务"""
+    """Search indexer service — dual-table writes (search_index + embedding)."""
 
-    def __init__(self):
-        self._embedding_service = EmbeddingService()
+    # ========== Real-time Indexing ==========
 
-    # ========== 实时索引 ==========
-
-    def index_message(self, db: Session, message: Message) -> Optional[MessageSearchIndex]:
+    def index_message(
+        self, db: Session, message: Message
+    ) -> Optional[MessageSearchIndex]:
         """
-        为单条消息创建搜索索引。
-        在 MessageService.create_message() 之后调用。
+        Create search index for a single message.
+        Called after MessageService.create_message().
 
-        流程:
-        1. 检查 session 类型是否为 pm/group（只索引这两种）
-        2. 提取文本内容
-        3. 创建索引记录（embedding_status = pending）
-        4. 同步生成 embedding（如果配置允许）
-
-        Args:
-            db: 数据库会话
-            message: 已创建的消息对象（需要已加载 parts 和 session）
-
-        Returns:
-            创建的搜索索引记录，如果不符合索引条件则返回 None
+        Flow:
+        1. Check session type (only index pm/group)
+        2. Extract text content
+        3. Write message_search_index (text + metadata)
+        4. Get active embedding model
+        5. Generate embedding → write message_embedding
         """
-        # 1. 检查 session 类型
         session = message.session
         if session.type not in ("pm", "group"):
             return None
 
-        # 2. 提取文本
         content_text = preprocess_text(extract_searchable_text(message))
         if not content_text:
             return None
 
-        # 3. 获取发送者名称和会话名称
         sender_name = message.sender.name if message.sender else None
-        session_name = session.name  # 群名/会话名快照
+        session_name = session.name
 
-        # 4. 创建索引记录
+        # 1. Write search_index (text only, no embedding)
         search_index = MessageSearchIndex(
             message_id=message.id,
             user_id=message.user_id,
@@ -93,80 +82,108 @@ class SearchIndexerService:
             role=message.role,
             message_created_at=message.created_at,
             content_text=content_text,
-            embedding_status="pending",
         )
         db.add(search_index)
+        db.flush()  # Get search_index.id
 
-        # 5. 同步生成 embedding（可选，取决于配置）
+        # 2. Generate embedding → write message_embedding
         if config.SEARCH_SYNC_EMBEDDING:
-            try:
-                embedding = self._embedding_service.generate_embedding(content_text)
-                if embedding:
-                    search_index.embedding = embedding
-                    search_index.embedding_status = "completed"
-                else:
-                    search_index.embedding_status = "skipped"
-            except Exception as e:
-                logger.error(f"Sync embedding failed for message {message.id}: {e}")
-                search_index.embedding_status = "failed"
+            self._generate_embedding_for_index(db, search_index, content_text)
 
         db.commit()
         db.refresh(search_index)
         return search_index
 
-    def update_index(self, db: Session, message: Message) -> Optional[MessageSearchIndex]:
-        """
-        更新已有消息的搜索索引（消息内容变更时调用）。
-        """
-        index = db.query(MessageSearchIndex).filter(
-            MessageSearchIndex.message_id == message.id
-        ).first()
+    def _generate_embedding_for_index(
+        self,
+        db: Session,
+        search_index: MessageSearchIndex,
+        content_text: str,
+    ) -> Optional[MessageEmbedding]:
+        """Generate embedding for a search_index and write to message_embedding."""
+        try:
+            embedding_svc, model_config = get_active_embedding_service(db)
+            embedding_vec = embedding_svc.generate_embedding(content_text)
+
+            if embedding_vec is None:
+                # Text too short, don't create embedding record
+                return None
+
+            emb_record = MessageEmbedding(
+                search_index_id=search_index.id,
+                model_id=model_config.model_id,
+                embedding=embedding_vec,
+                status="completed",
+            )
+            db.add(emb_record)
+            return emb_record
+
+        except Exception as e:
+            logger.error(f"Embedding failed for index {search_index.id}: {e}")
+            # Write failed record for retry
+            emb_record = MessageEmbedding(
+                search_index_id=search_index.id,
+                model_id="unknown",  # Will be updated on retry
+                embedding=[0.0],  # Placeholder
+                status="failed",
+            )
+            db.add(emb_record)
+            return emb_record
+
+    def update_index(
+        self, db: Session, message: Message
+    ) -> Optional[MessageSearchIndex]:
+        """Update existing message search index (when message content changes)."""
+        index = (
+            db.query(MessageSearchIndex)
+            .filter(MessageSearchIndex.message_id == message.id)
+            .first()
+        )
 
         if not index:
             return self.index_message(db, message)
 
         content_text = preprocess_text(extract_searchable_text(message))
         if not content_text:
-            db.delete(index)
+            db.delete(index)  # CASCADE will delete message_embedding
             db.commit()
             return None
 
+        # Update text
         index.content_text = content_text
         index.topic_id = message.topic_id
         index.sender_name = message.sender.name if message.sender else None
-        index.session_name = message.session.name if message.session else None
-        index.embedding_status = "pending"
-        index.embedding = None  # 清空旧 embedding，等待重新生成
-        index.indexed_at = func.timezone("UTC", func.now())
+        index.session_name = (
+            message.session.name if message.session else None
+        )
+        index.indexed_at = func.now()
+
+        # Delete old embedding, regenerate
+        if index.embedding:
+            db.delete(index.embedding)
+            db.flush()
 
         if config.SEARCH_SYNC_EMBEDDING:
-            try:
-                embedding = self._embedding_service.generate_embedding(content_text)
-                if embedding:
-                    index.embedding = embedding
-                    index.embedding_status = "completed"
-                else:
-                    index.embedding_status = "skipped"
-            except Exception as e:
-                logger.error(f"Update embedding failed for message {message.id}: {e}")
-                index.embedding_status = "failed"
+            self._generate_embedding_for_index(db, index, content_text)
 
         db.commit()
         db.refresh(index)
         return index
 
     def delete_index(self, db: Session, message_id: UUID) -> bool:
-        """删除消息的搜索索引。"""
-        index = db.query(MessageSearchIndex).filter(
-            MessageSearchIndex.message_id == message_id
-        ).first()
+        """Delete message search index (CASCADE auto-deletes embedding)."""
+        index = (
+            db.query(MessageSearchIndex)
+            .filter(MessageSearchIndex.message_id == message_id)
+            .first()
+        )
         if index:
             db.delete(index)
             db.commit()
             return True
         return False
 
-    # ========== 批量回填 ==========
+    # ========== Batch Backfill ==========
 
     def reindex(
         self,
@@ -177,23 +194,13 @@ class SearchIndexerService:
         batch_size: int = 100,
     ) -> dict:
         """
-        批量重建搜索索引。
+        Batch rebuild search indexes.
 
-        流程:
-        1. 查询所有符合条件的消息（pm/group 类型的 session）
-        2. 跳过已有索引的消息（除非 regenerate_embeddings=True）
-        3. 批量创建索引记录
-        4. 批量生成 embeddings
-
-        Args:
-            db: 数据库会话
-            user_id: 用户ID
-            session_id: 限定某个会话，为空则处理所有会话
-            regenerate_embeddings: 是否重新生成所有 embeddings
-            batch_size: 每批处理数量
-
-        Returns:
-            处理统计信息
+        Flow:
+        1. Query all qualifying messages
+        2. Batch create message_search_index records
+        3. Get active model
+        4. Batch generate embeddings → write message_embedding
         """
         stats = {
             "status": "started",
@@ -203,7 +210,6 @@ class SearchIndexerService:
             "failed_count": 0,
         }
 
-        # 1. 构建查询
         query = (
             db.query(Message)
             .join(SessionModel, Message.session_id == SessionModel.id)
@@ -220,41 +226,38 @@ class SearchIndexerService:
             query = query.filter(Message.session_id == session_id)
 
         if not regenerate_embeddings:
-            # 只处理还没有索引的消息
-            existing_ids = (
-                db.query(MessageSearchIndex.message_id)
+            existing_ids = {
+                row[0]
+                for row in db.query(MessageSearchIndex.message_id)
                 .filter(MessageSearchIndex.user_id == user_id)
-            )
-            if session_id:
-                existing_ids = existing_ids.filter(
-                    MessageSearchIndex.session_id == session_id
-                )
-            existing_ids = {row[0] for row in existing_ids.all()}
+                .all()
+            }
         else:
             existing_ids = set()
 
-        # 2. 分批处理
+        # Get active model
+        embedding_svc, model_config = get_active_embedding_service(db)
+
         offset = 0
         while True:
             messages = (
-                query
-                .order_by(Message.created_at.asc())
+                query.order_by(Message.created_at.asc())
                 .offset(offset)
                 .limit(batch_size)
                 .all()
             )
-
             if not messages:
                 break
 
             stats["total_messages"] += len(messages)
-
-            # 准备批量数据
             texts_to_embed = []
             indices_to_create = []
 
             for message in messages:
-                if message.id in existing_ids and not regenerate_embeddings:
+                if (
+                    message.id in existing_ids
+                    and not regenerate_embeddings
+                ):
                     stats["skipped_count"] += 1
                     continue
 
@@ -266,63 +269,71 @@ class SearchIndexerService:
                     continue
 
                 session = message.session
-                sender_name = message.sender.name if message.sender else None
-                session_name = session.name
-
-                indices_to_create.append({
-                    "message": message,
-                    "content_text": content_text,
-                    "session_type": session.type,
-                    "session_name": session_name,
-                    "sender_name": sender_name,
-                })
+                indices_to_create.append(
+                    {
+                        "message": message,
+                        "content_text": content_text,
+                        "session_type": session.type,
+                        "session_name": session.name,
+                        "sender_name": (
+                            message.sender.name if message.sender else None
+                        ),
+                    }
+                )
                 texts_to_embed.append(content_text)
 
-            # 3. 批量生成 embeddings
+            # Batch generate embeddings
             embeddings = []
             if texts_to_embed:
                 try:
-                    embeddings = self._embedding_service.generate_embeddings_batch(
+                    embeddings = embedding_svc.generate_embeddings_batch(
                         texts_to_embed
                     )
                 except Exception as e:
                     logger.error(f"Batch embedding failed: {e}")
                     embeddings = [None] * len(texts_to_embed)
 
-            # 4. 创建/更新索引记录
+            # Create/update records (dual-table)
             for i, item in enumerate(indices_to_create):
                 message = item["message"]
                 embedding = embeddings[i] if i < len(embeddings) else None
 
                 try:
                     if regenerate_embeddings:
-                        # 更新已有记录
-                        existing = db.query(MessageSearchIndex).filter(
-                            MessageSearchIndex.message_id == message.id
-                        ).first()
+                        existing = (
+                            db.query(MessageSearchIndex)
+                            .filter(
+                                MessageSearchIndex.message_id == message.id
+                            )
+                            .first()
+                        )
                         if existing:
                             existing.content_text = item["content_text"]
-                            existing.embedding = embedding
-                            existing.embedding_status = (
-                                "completed" if embedding else "skipped"
-                            )
-                            existing.indexed_at = func.timezone(
-                                "UTC", func.now()
-                            )
+                            existing.indexed_at = func.now()
+                            # Delete old embedding
+                            if existing.embedding:
+                                db.delete(existing.embedding)
+                                db.flush()
+                            # Write new embedding
+                            if embedding:
+                                emb = MessageEmbedding(
+                                    search_index_id=existing.id,
+                                    model_id=model_config.model_id,
+                                    embedding=embedding,
+                                    status="completed",
+                                )
+                                db.add(emb)
                         else:
-                            self._create_index_record(
-                                db, message, item, embedding
+                            self._create_index_records(
+                                db, message, item, embedding, model_config
                             )
                     else:
-                        self._create_index_record(
-                            db, message, item, embedding
+                        self._create_index_records(
+                            db, message, item, embedding, model_config
                         )
-
                     stats["indexed_count"] += 1
                 except Exception as e:
-                    logger.error(
-                        f"Failed to index message {message.id}: {e}"
-                    )
+                    logger.error(f"Failed to index message {message.id}: {e}")
                     stats["failed_count"] += 1
 
             db.commit()
@@ -331,14 +342,15 @@ class SearchIndexerService:
         stats["status"] = "completed"
         return stats
 
-    def _create_index_record(
+    def _create_index_records(
         self,
         db: Session,
         message: Message,
         item: dict,
         embedding: Optional[list[float]],
+        model_config,
     ):
-        """创建单条索引记录。"""
+        """Create search_index + embedding dual-table records."""
         search_index = MessageSearchIndex(
             message_id=message.id,
             user_id=message.user_id,
@@ -350,93 +362,104 @@ class SearchIndexerService:
             role=message.role,
             message_created_at=message.created_at,
             content_text=item["content_text"],
-            embedding=embedding,
-            embedding_status="completed" if embedding else "skipped",
         )
         db.add(search_index)
+        db.flush()
 
-    # ========== Embedding 重试 ==========
+        if embedding:
+            emb = MessageEmbedding(
+                search_index_id=search_index.id,
+                model_id=model_config.model_id,
+                embedding=embedding,
+                status="completed",
+            )
+            db.add(emb)
+
+    # ========== Embedding Retry ==========
 
     def retry_failed_embeddings(
         self, db: Session, batch_size: int = 50
     ) -> dict:
-        """
-        重试之前失败的 embedding 生成。
-
-        适合作为定时任务运行。
-        """
+        """Retry previously failed embedding generation."""
         stats = {"retried": 0, "succeeded": 0, "still_failed": 0}
 
-        failed_indices = (
-            db.query(MessageSearchIndex)
-            .filter(MessageSearchIndex.embedding_status == "failed")
+        failed_records = (
+            db.query(MessageEmbedding)
+            .filter(MessageEmbedding.status == "failed")
             .limit(batch_size)
             .all()
         )
 
-        if not failed_indices:
+        if not failed_records:
             return stats
 
-        texts = [idx.content_text for idx in failed_indices]
+        embedding_svc, model_config = get_active_embedding_service(db)
+
+        # Get corresponding content_text
+        index_ids = [r.search_index_id for r in failed_records]
+        search_indices = {
+            si.id: si
+            for si in db.query(MessageSearchIndex)
+            .filter(MessageSearchIndex.id.in_(index_ids))
+            .all()
+        }
+
+        texts = []
+        for record in failed_records:
+            si = search_indices.get(record.search_index_id)
+            texts.append(si.content_text if si else "")
+
         stats["retried"] = len(texts)
 
         try:
-            embeddings = self._embedding_service.generate_embeddings_batch(texts)
-            for i, index in enumerate(failed_indices):
+            embeddings = embedding_svc.generate_embeddings_batch(texts)
+            for i, record in enumerate(failed_records):
                 if embeddings[i]:
-                    index.embedding = embeddings[i]
-                    index.embedding_status = "completed"
+                    record.embedding = embeddings[i]
+                    record.model_id = model_config.model_id
+                    record.status = "completed"
                     stats["succeeded"] += 1
                 else:
-                    index.embedding_status = "skipped"
                     stats["still_failed"] += 1
         except Exception as e:
             logger.error(f"Retry embeddings batch failed: {e}")
-            stats["still_failed"] = len(failed_indices)
+            stats["still_failed"] = len(failed_records)
 
         db.commit()
         return stats
 
-    # ========== 统计信息 ==========
+    # ========== Statistics ==========
 
     def get_stats(self, db: Session, user_id: UUID) -> dict:
-        """获取用户的搜索索引统计信息。"""
-        base_query = db.query(MessageSearchIndex).filter(
-            MessageSearchIndex.user_id == user_id
-        )
-
-        total = base_query.count()
-        completed = base_query.filter(
-            MessageSearchIndex.embedding_status == "completed"
-        ).count()
-        pending = base_query.filter(
-            MessageSearchIndex.embedding_status == "pending"
-        ).count()
-        failed = base_query.filter(
-            MessageSearchIndex.embedding_status == "failed"
-        ).count()
-        skipped = base_query.filter(
-            MessageSearchIndex.embedding_status == "skipped"
-        ).count()
-
-        sessions = (
-            db.query(func.count(func.distinct(MessageSearchIndex.session_id)))
+        """Get user's search index statistics."""
+        total = (
+            db.query(MessageSearchIndex)
             .filter(MessageSearchIndex.user_id == user_id)
-            .scalar()
+            .count()
         )
 
-        last_indexed = (
-            db.query(func.max(MessageSearchIndex.indexed_at))
+        # Embedding stats from message_embedding table
+        from sqlalchemy import func as sa_func
+
+        emb_stats = (
+            db.query(
+                MessageEmbedding.status,
+                sa_func.count(MessageEmbedding.id),
+            )
+            .join(
+                MessageSearchIndex,
+                MessageEmbedding.search_index_id == MessageSearchIndex.id,
+            )
             .filter(MessageSearchIndex.user_id == user_id)
-            .scalar()
+            .group_by(MessageEmbedding.status)
+            .all()
         )
+        status_counts = dict(emb_stats)
 
         return {
             "total_indexed": total,
-            "embedding_completed": completed,
-            "embedding_pending": pending,
-            "embedding_failed": failed,
-            "embedding_skipped": skipped,
-            "sessions_indexed": sessions or 0,
-            "last_indexed_at": last_indexed,
+            "embedding_completed": status_counts.get("completed", 0),
+            "embedding_pending": status_counts.get("pending", 0),
+            "embedding_failed": status_counts.get("failed", 0),
+            "no_embedding": total - sum(status_counts.values()),
         }
