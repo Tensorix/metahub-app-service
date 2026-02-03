@@ -6,7 +6,12 @@
 - **HybridSearchEngine**（通用层）：封装 pg_trgm 模糊搜索、pgvector 向量搜索、RRF 融合算法，不绑定任何具体业务
 - **SearchProvider**（类别层）：每种可搜索的内容类别实现一个 Provider，定义自己的表、列、过滤维度
 
-当前实现 `MessageSearchProvider`（消息搜索），未来可扩展 `DocumentSearchProvider`、`ActivitySearchProvider` 等。
+核心变更（相比旧设计）：
+- `SearchProvider` 新增 `get_embedding_table()` 和 `get_category()` 方法，移除 `get_embedding_column()`
+- 向量搜索通过 JOIN `message_embedding` 表 + 动态 cast 实现，支持多模型
+- 查询时从 `embedding_config` 获取活跃模型，自动构造正确的 cast 表达式
+
+当前实现 `MessageSearchProvider`（消息搜索），未来可扩展 `DocumentSearchProvider` 等。
 
 ## 2. 架构分层
 
@@ -16,9 +21,8 @@
 │  search_messages(query, sender, group_name, ...)           │
 │  search_documents(query, tag, folder, ...)      ← 未来     │
 ├────────────────────────────────────────────────────────────┤
-│  SearchCoordinator                                         │
-│  .search(provider, query, mode, filters) → list[dict]      │
-│  统一调度，不关心具体搜索什么                                  │
+│  SearchService (入口)                                       │
+│  .search_messages(db, user_id, query, mode, ...)           │
 ├────────────────────────────────────────────────────────────┤
 │  Provider Layer (按类别实现)                                 │
 │  ┌──────────────────┐  ┌──────────────────┐                │
@@ -26,16 +30,20 @@
 │  │ Provider          │  │ Provider         │                │
 │  │ - table: message_ │  │ - table: doc_    │                │
 │  │   search_index    │  │   search_index   │                │
-│  │ - filters: sender │  │ - filters: tag   │                │
-│  │   group, time     │  │   folder, type   │                │
+│  │ - embed: message_ │  │ - embed: doc_    │                │
+│  │   embedding       │  │   embedding      │                │
+│  │ - category:       │  │ - category:      │                │
+│  │   "message"       │  │   "document"     │                │
 │  └──────────────────┘  └──────────────────┘                │
 ├────────────────────────────────────────────────────────────┤
 │  HybridSearchEngine (通用搜索引擎)                          │
-│  - _fuzzy_search(table, content_col, where, ...)           │
-│  - _vector_search(table, content_col, embedding_col, ...)  │
+│  - _fuzzy_search(provider, query, ...)                     │
+│  - _vector_search(provider, query, ...)  ← JOIN + 动态 cast│
 │  - _rrf_fusion(list_a, list_b, weights)                    │
 ├────────────────────────────────────────────────────────────┤
-│  EmbeddingService (通用 embedding 生成)                      │
+│  Embedding Provider Layer                                   │
+│  - EmbeddingService → OpenAIProvider / HTTPProvider         │
+│  - embedding_config → 活跃模型配置                          │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -54,18 +62,13 @@ class SearchProvider(ABC):
     """
     搜索类别的抽象接口。
 
-    每种可搜索的内容类型（消息、文档、活动等）实现一个 Provider，
-    定义自己的索引表结构、过滤维度、结果格式化逻辑。
-
-    扩展新类别时只需：
-    1. 创建对应的索引表（参考 message_search_index）
-    2. 实现一个新的 SearchProvider 子类
-    3. 注册一个新的 Agent Tool
+    每种可搜索的内容类型（消息、文档等）实现一个 Provider，
+    定义自己的索引表结构、embedding 表、过滤维度、结果格式化逻辑。
     """
 
     @abstractmethod
     def get_table_name(self) -> str:
-        """返回索引表名。"""
+        """返回主索引表名（文本 + 元数据）。"""
         ...
 
     @abstractmethod
@@ -74,16 +77,18 @@ class SearchProvider(ABC):
         ...
 
     @abstractmethod
-    def get_embedding_column(self) -> str:
-        """返回向量列名。"""
+    def get_embedding_table(self) -> str:
+        """返回 embedding 表名（存储向量的独立表）。"""
+        ...
+
+    @abstractmethod
+    def get_category(self) -> str:
+        """返回业务类别名（对应 embedding_config.category）。"""
         ...
 
     @abstractmethod
     def get_select_columns(self) -> list[str]:
-        """
-        返回 SELECT 中需要查询的列列表。
-        至少包含一个可作为唯一标识的 ID 列。
-        """
+        """返回 SELECT 中需要查询的列列表。"""
         ...
 
     @abstractmethod
@@ -98,12 +103,9 @@ class SearchProvider(ABC):
         """
         构建该类别特有的 WHERE 条件。
 
-        Args:
-            user_id: 当前用户 ID（权限隔离）
-            **kwargs: 类别特有的过滤参数
-
         Returns:
             (where_clauses, params) 元组
+            where_clauses 中的表别名: t = 主索引表, e = embedding 表
         """
         ...
 
@@ -113,6 +115,8 @@ class SearchProvider(ABC):
         ...
 ```
 
+> **变更说明**：相比旧接口，`get_embedding_column()` 被移除，新增 `get_embedding_table()` 和 `get_category()`。向量列统一在 `message_embedding.embedding` 中，由引擎自动处理。
+
 ## 4. HybridSearchEngine 通用实现
 
 ```python
@@ -120,13 +124,12 @@ class SearchProvider(ABC):
 
 from typing import Optional
 from uuid import UUID
-from datetime import datetime
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from loguru import logger
 
-from app.service.embedding import EmbeddingService
+from app.service.embedding import EmbeddingService, get_active_embedding_service
 from app.service.search.provider import SearchProvider
 
 
@@ -135,13 +138,10 @@ class HybridSearchEngine:
     通用混合搜索引擎。
 
     封装 pg_trgm 模糊搜索、pgvector 向量搜索和 RRF 融合算法。
-    不绑定具体业务类别——通过 SearchProvider 注入表结构和过滤逻辑。
+    向量搜索通过 JOIN embedding 表 + 动态 halfvec cast 实现多模型支持。
     """
 
     RRF_K = 60
-
-    def __init__(self):
-        self._embedding_service = EmbeddingService()
 
     def search(
         self,
@@ -165,12 +165,9 @@ class HybridSearchEngine:
             query: 搜索查询
             mode: fuzzy | vector | hybrid
             top_k: 返回数量
-            fuzzy_weight / vector_weight: 权重
+            fuzzy_weight / vector_weight: RRF 权重
             similarity_threshold / vector_threshold: 阈值
             extra_filters: Provider 构建的 (where_clauses, params)
-
-        Returns:
-            排序后的结果列表
         """
         filters = extra_filters or ([], {})
 
@@ -200,7 +197,7 @@ class HybridSearchEngine:
         top_k: int,
         similarity_threshold: float,
     ) -> list[dict]:
-        """通用 pg_trgm 模糊搜索。"""
+        """通用 pg_trgm 模糊搜索（不涉及 embedding 表）。"""
         table = provider.get_table_name()
         content_col = provider.get_content_column()
         select_cols = ", ".join(
@@ -249,16 +246,29 @@ class HybridSearchEngine:
         top_k: int,
         vector_threshold: float,
     ) -> list[dict]:
-        """通用 pgvector 向量搜索。"""
-        query_embedding = self._embedding_service.generate_query_embedding(
-            query
+        """
+        通用 pgvector 向量搜索。
+
+        核心变更：
+        1. 从 embedding_config 查活跃 model_id
+        2. 从注册表获取 model_config → index_cast, cosine_ops
+        3. JOIN embedding 表 + WHERE model_id 过滤
+        4. 使用 dynamic cast 表达式匹配 HNSW 部分索引
+        """
+        # 获取活跃模型配置
+        embedding_svc, model_config = get_active_embedding_service(
+            db, provider.get_category()
         )
+
+        # 生成查询向量
+        query_embedding = embedding_svc.generate_query_embedding(query)
         if query_embedding is None:
             logger.warning(f"Failed to generate query embedding: {query}")
             return []
 
         table = provider.get_table_name()
-        embedding_col = provider.get_embedding_column()
+        emb_table = provider.get_embedding_table()
+        cast = model_config.index_cast  # e.g. "halfvec(3072)"
         select_cols = ", ".join(
             f"t.{c}" for c in provider.get_select_columns()
         )
@@ -267,24 +277,27 @@ class HybridSearchEngine:
         where_clauses = where_clauses.copy()
         params = {**params}
 
+        # 添加 embedding 特有的过滤
         where_clauses.extend([
-            f"t.{embedding_col} IS NOT NULL",
-            "t.embedding_status = 'completed'",
-            f"(1 - (t.{embedding_col} <=> :query_vec)) > :threshold",
+            f"e.model_id = :model_id",
+            f"e.status = 'completed'",
+            f"(1 - (e.embedding::{cast} <=> :query_vec::{cast})) > :threshold",
         ])
+        params["model_id"] = model_config.model_id
         params["query_vec"] = str(query_embedding)
         params["threshold"] = vector_threshold
         params["top_k"] = top_k
 
-        where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+        where_sql = " AND ".join(where_clauses)
 
         sql = text(f"""
             SELECT
                 {select_cols},
-                (1 - (t.{embedding_col} <=> :query_vec)) AS vector_score
+                (1 - (e.embedding::{cast} <=> :query_vec::{cast})) AS vector_score
             FROM {table} t
+            JOIN {emb_table} e ON e.search_index_id = t.id
             WHERE {where_sql}
-            ORDER BY t.{embedding_col} <=> :query_vec
+            ORDER BY e.embedding::{cast} <=> :query_vec::{cast}
             LIMIT :top_k
         """)
 
@@ -399,8 +412,11 @@ class MessageSearchProvider(SearchProvider):
     def get_content_column(self) -> str:
         return "content_text"
 
-    def get_embedding_column(self) -> str:
-        return "embedding"
+    def get_embedding_table(self) -> str:
+        return "message_embedding"
+
+    def get_category(self) -> str:
+        return "message"
 
     def get_select_columns(self) -> list[str]:
         return [
@@ -476,7 +492,7 @@ class MessageSearchProvider(SearchProvider):
 ## 6. 对外入口：SearchService（便捷层）
 
 ```python
-# app/service/search.py
+# app/service/search/search_service.py
 
 from typing import Optional
 from uuid import UUID
@@ -489,12 +505,7 @@ from app.service.search.message_provider import MessageSearchProvider
 
 
 class SearchService:
-    """
-    搜索服务入口。
-
-    封装 Provider + Engine 的组合调用，提供简洁的 API。
-    未来添加新类别时在此注册新方法即可。
-    """
+    """搜索服务入口。封装 Provider + Engine 的组合调用。"""
 
     def __init__(self):
         self._engine = HybridSearchEngine()
@@ -532,16 +543,6 @@ class SearchService:
             top_k=top_k,
             extra_filters=filters,
         )
-
-    # --- 未来扩展示例 ---
-    #
-    # def search_documents(self, db, user_id, query, ...) -> list[dict]:
-    #     filters = self._doc_provider.build_base_filters(user_id, ...)
-    #     return self._engine.search(db, self._doc_provider, query, ...)
-    #
-    # def search_activities(self, db, user_id, query, ...) -> list[dict]:
-    #     filters = self._activity_provider.build_base_filters(user_id, ...)
-    #     return self._engine.search(db, self._activity_provider, query, ...)
 ```
 
 ## 7. 扩展新类别的步骤清单
@@ -549,27 +550,28 @@ class SearchService:
 以添加"文档搜索"为例：
 
 ```
-1. 创建索引表
-   → alembic migration: document_search_index
-   → 字段: doc_id, user_id, title, content_text, embedding,
-           folder, tags, doc_type, created_at, embedding_status
+1. 创建索引表 (2 张)
+   → alembic migration: document_search_index + document_embedding
+   → document_search_index: doc_id, user_id, title, content_text, ...
+   → document_embedding: search_index_id, model_id, embedding(halfvec), status
 
-2. 实现 Provider
-   → app/service/search/document_provider.py
+2. 添加 HNSW 部分索引
+   → 与 message_embedding 相同的模式，每模型一个 HNSW 部分索引
+
+3. 实现 Provider
    → class DocumentSearchProvider(SearchProvider)
-   → 定义 table, columns, filters (folder, tags, doc_type)
+   → get_table_name() → "document_search_index"
+   → get_embedding_table() → "document_embedding"
+   → get_category() → "document"
 
-3. 注册到 SearchService
-   → SearchService.__init__: self._doc_provider = DocumentSearchProvider()
+4. 注册到 SearchService
    → SearchService.search_documents(...)
 
-4. 创建 Agent Tool
-   → app/agent/tools/builtin/document_search.py
+5. 创建 Agent Tool
    → @ToolRegistry.register("search_documents", ...)
 
-5. 实现索引管线
-   → DocumentIndexerService (参考 SearchIndexerService)
-   → 文本提取 + embedding 生成
+6. 添加 embedding_config 记录
+   → INSERT INTO embedding_config (category, model_id) VALUES ('document', 'openai-3-large')
 ```
 
 不需要修改 `HybridSearchEngine`、`EmbeddingService` 或 RRF 算法。
@@ -579,16 +581,19 @@ class SearchService:
 ```
 app/service/search/
 ├── __init__.py
-├── provider.py              # SearchProvider ABC
-├── engine.py                # HybridSearchEngine (通用)
-├── message_provider.py      # 消息搜索 Provider
-└── document_provider.py     # 未来: 文档搜索 Provider
+├── provider.py              # SearchProvider ABC (updated: +get_embedding_table, +get_category)
+├── engine.py                # HybridSearchEngine (updated: JOIN + dynamic cast)
+├── message_provider.py      # 消息搜索 Provider (updated)
+└── search_service.py        # SearchService 入口
 
 app/service/
-├── search.py                # SearchService 入口（组合 Provider + Engine）
-├── embedding.py             # EmbeddingService (通用，所有类别共用)
+├── embedding.py             # EmbeddingProvider ABC + OpenAI/HTTP + EmbeddingService + factory
 ├── context_retrieval.py     # 消息上下文检索
-└── search_indexer.py        # 消息索引管线
+└── search_indexer.py        # 消息索引管线 (updated: 双表写入)
+
+app/config/
+├── __init__.py
+└── embedding.py             # EmbeddingModelConfig 注册表
 ```
 
 ## 9. 搜索模式对比
@@ -603,11 +608,12 @@ app/service/
 
 ### 查询优化
 - pg_trgm 使用 GIN 索引，`similarity()` 查询走索引扫描
-- pgvector 使用 HNSW 索引，`<=>` 运算符走近似搜索
+- pgvector 使用 HNSW 部分索引，`<=>` + WHERE model_id 走近似搜索
 - 结构化过滤先缩小候选集，再做文本/向量搜索
+- halfvec cast 表达式匹配 HNSW 部分索引，避免全表扫描
 
 ### 搜索性能参考
 - 纯结构化过滤：10 万条 < 10ms
 - pg_trgm 查询：10 万条 < 50ms（GIN 索引）
-- pgvector HNSW 查询：10 万条 < 20ms
+- pgvector HNSW 查询：10 万条 < 20ms（部分索引 + halfvec）
 - 混合搜索总延迟：~100ms（纯文本）/ ~300ms（含 embedding API）
