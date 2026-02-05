@@ -73,6 +73,69 @@ class DeepAgentService:
         tool_names = self.config.get("tools") or []
         return ToolRegistry.get_tools(tool_names)
 
+    async def _get_mcp_tools(self) -> list:
+        """
+        从配置的 MCP Server 获取工具列表.
+
+        Returns:
+            LangChain BaseTool 列表，获取失败返回空列表
+        """
+        mcp_servers = self.config.get("mcp_servers") or []
+        if not mcp_servers:
+            return []
+
+        from app.agent.mcp import get_mcp_client_manager
+
+        manager = get_mcp_client_manager()
+
+        # 使用 agent_id 作为缓存 key
+        agent_id = self.config.get("_agent_id")
+        if not agent_id:
+            logger.warning("No agent_id in config, MCP tool cache disabled")
+            # 直接获取不缓存
+            from uuid import uuid4
+
+            agent_id = uuid4()
+
+        try:
+            tools = await manager.get_tools(agent_id, mcp_servers)
+            logger.info(f"Loaded {len(tools)} MCP tools")
+            return tools
+        except Exception as e:
+            logger.error(f"Failed to load MCP tools: {e}")
+            return []
+
+    def _merge_tools(
+        self,
+        builtin_tools: list,
+        mcp_tools: list,
+    ) -> list:
+        """
+        合并内置工具和 MCP 工具.
+
+        内置工具优先：如果 MCP 工具与内置工具同名，跳过 MCP 工具。
+
+        Args:
+            builtin_tools: ToolRegistry 提供的内置工具
+            mcp_tools: MCPClientManager 提供的 MCP 工具
+
+        Returns:
+            合并后的工具列表
+        """
+        builtin_names = {t.name for t in builtin_tools}
+        merged = list(builtin_tools)
+
+        for tool in mcp_tools:
+            if tool.name in builtin_names:
+                logger.warning(
+                    f"MCP tool '{tool.name}' conflicts with built-in tool, skipped"
+                )
+                continue
+            merged.append(tool)
+            builtin_names.add(tool.name)  # 防止 MCP 工具间重复
+
+        return merged
+
     def _build_backend(self):
         """
         Build CompositeBackend with persistent memory routes.
@@ -163,7 +226,7 @@ class DeepAgentService:
             model=summarization_config.get("model"),
         )
 
-    def _get_agent(self):
+    async def _get_agent(self):
         """
         Create deep agent with all features enabled.
 
@@ -171,16 +234,17 @@ class DeepAgentService:
         - Planning: write_todos, read_todos
         - Filesystem: ls, read_file, write_file, edit_file, glob, grep
         - SubAgent: task (if subagents configured)
+        - MCP tools: dynamically loaded from configured MCP Servers
         """
         if self._agent is None:
             # Build middleware list
             middleware = []
-            
+
             # SubAgent middleware
             subagent_mw = self._build_subagent_middleware()
             if subagent_mw:
                 middleware.append(subagent_mw)
-            
+
             # Summarization middleware
             summarization_mw = self._build_summarization_middleware()
             if summarization_mw:
@@ -188,17 +252,24 @@ class DeepAgentService:
 
             # Build model with explicit API key
             from langchain.chat_models import init_chat_model
+
             model_string = self._get_model_string()
             model_kwargs = self._get_model_kwargs()
-            
+
             # Create model instance with API key
             model = init_chat_model(model_string, **model_kwargs)
+
+            # 获取工具 (内置 + MCP)
+            builtin_tools = self._get_tools()
+            mcp_tools = await self._get_mcp_tools()
+            all_tools = self._merge_tools(builtin_tools, mcp_tools)
 
             # Agent kwargs
             agent_kwargs = {
                 "model": model,  # Pass model instance instead of string
-                "tools": self._get_tools(),
-                "system_prompt": self.config.get("system_prompt") or (
+                "tools": all_tools,  # 使用合并后的工具列表
+                "system_prompt": self.config.get("system_prompt")
+                or (
                     "You are a helpful AI assistant with access to planning tools "
                     "(write_todos, read_todos) and file system tools "
                     "(ls, read_file, write_file, edit_file, glob, grep)."
@@ -224,7 +295,7 @@ class DeepAgentService:
 
             logger.info(
                 f"Creating deep agent: model={model_string}, "
-                f"tools={len(agent_kwargs['tools'])} custom, "
+                f"tools={len(builtin_tools)} builtin + {len(mcp_tools)} mcp, "
                 f"middleware={len(middleware)}, "
                 f"subagents={len(subagent_mw.subagents) if subagent_mw else 0}"
             )
@@ -255,12 +326,12 @@ class DeepAgentService:
         # 设置工具运行时上下文
         token = agent_user_id.set(user_id)
         try:
-            agent = self._get_agent()
+            agent = await self._get_agent()  # 添加 await
             cfg = {"configurable": {"thread_id": thread_id}}
 
             if user_id:
                 cfg["configurable"]["user_id"] = str(user_id)
-            
+
             # Enable session-level filesystem isolation
             if session_id:
                 if "metadata" not in cfg:
@@ -308,12 +379,12 @@ class DeepAgentService:
         # 设置工具运行时上下文
         token = agent_user_id.set(user_id)
         try:
-            agent = self._get_agent()
+            agent = await self._get_agent()  # 添加 await
             cfg = {"configurable": {"thread_id": thread_id}}
 
             if user_id:
                 cfg["configurable"]["user_id"] = str(user_id)
-            
+
             # Enable session-level filesystem isolation
             if session_id:
                 if "metadata" not in cfg:
@@ -350,6 +421,24 @@ class DeepAgentService:
                         tool_name = event.get("name", "unknown")
                         tool_input = event_data.get("input", {})
                         logger.info(f"Tool call: {tool_name}")
+                        
+                        # 安全地序列化 tool_input
+                        try:
+                            if isinstance(tool_input, dict):
+                                # 过滤掉不可序列化的值
+                                safe_input = {}
+                                for key, value in tool_input.items():
+                                    try:
+                                        import json
+                                        json.dumps(value)  # 测试是否可序列化
+                                        safe_input[key] = value
+                                    except (TypeError, ValueError):
+                                        safe_input[key] = str(value)
+                                tool_input = safe_input
+                        except Exception as e:
+                            logger.warning(f"Failed to serialize tool input: {e}")
+                            tool_input = {"error": "Failed to serialize input"}
+                        
                         yield {
                             "event": "tool_call",
                             "data": {
@@ -361,12 +450,35 @@ class DeepAgentService:
                     elif event_type == "on_tool_end":
                         # Tool execution completed
                         tool_output = event_data.get("output", "")
-                        logger.info(f"Tool result: {event.get('name', 'unknown')}")
+                        tool_name = event.get("name", "unknown")
+                        logger.info(f"Tool result: {tool_name}")
+                        
+                        # 安全地序列化 tool_output
+                        try:
+                            # 尝试转换为字符串
+                            if tool_output is None:
+                                result_str = ""
+                            elif isinstance(tool_output, (str, int, float, bool)):
+                                result_str = str(tool_output)
+                            elif isinstance(tool_output, (dict, list)):
+                                # 对于字典和列表，尝试 JSON 序列化
+                                import json
+                                try:
+                                    result_str = json.dumps(tool_output, ensure_ascii=False)
+                                except (TypeError, ValueError):
+                                    result_str = str(tool_output)
+                            else:
+                                # 对于其他类型，使用 str() 但捕获可能的错误
+                                result_str = str(tool_output)
+                        except Exception as e:
+                            logger.warning(f"Failed to serialize tool output: {e}")
+                            result_str = f"<output type: {type(tool_output).__name__}>"
+                        
                         yield {
                             "event": "tool_result",
                             "data": {
-                                "name": event.get("name", "unknown"),
-                                "result": str(tool_output) if tool_output else "",
+                                "name": tool_name,
+                                "result": result_str,
                             },
                         }
 
@@ -398,7 +510,7 @@ class DeepAgentService:
             return []
 
         config_dict = {"configurable": {"thread_id": thread_id}}
-        state = await self._get_agent().aget_state(config_dict)
+        state = await (await self._get_agent()).aget_state(config_dict)  # 添加 await
 
         if not state or not state.values:
             return []

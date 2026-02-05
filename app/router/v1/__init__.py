@@ -9,6 +9,7 @@ from .api_key import router as api_key_router
 from .webhook import router as webhook_router
 from .agent_chat import router as agent_chat_router
 from .agent import router as agent_router
+from .mcp_server import router as mcp_server_router
 from .im_gateway import router as im_gateway_router
 from .filesystem import router as filesystem_router
 from .admin_embedding import router as admin_embedding_router
@@ -27,6 +28,7 @@ router.include_router(api_key_router, prefix="", tags=["api-key"])
 router.include_router(webhook_router, prefix="", tags=["webhooks"])
 router.include_router(agent_chat_router, prefix="", tags=["agent-chat"])
 router.include_router(agent_router, prefix="", tags=["agents"])
+router.include_router(mcp_server_router, prefix="", tags=["mcp-servers"])
 router.include_router(im_gateway_router, prefix="", tags=["im-gateway"])
 router.include_router(filesystem_router, prefix="", tags=["filesystem"])
 router.include_router(admin_embedding_router, prefix="", tags=["admin-embedding"])

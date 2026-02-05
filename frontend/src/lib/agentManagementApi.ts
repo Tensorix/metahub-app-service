@@ -3,6 +3,7 @@
  */
 
 import { api } from './api';
+import type { McpServerResponse } from '../types/mcpServer';
 
 /**
  * SubAgent - 子代理配置
@@ -58,6 +59,7 @@ export interface Agent {
   skills?: SkillContent[];
   memory_files?: MemoryContent[];
   subagents?: SubAgent[];
+  mcp_servers?: McpServerResponse[];
   summarization?: SummarizationConfig;
   metadata?: Record<string, any>;
   created_at: string;

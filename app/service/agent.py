@@ -5,7 +5,7 @@ Agent service - Business logic for agent management.
 from typing import Optional
 from uuid import UUID
 from sqlalchemy import select, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.model.agent import Agent
 from app.db.model.subagent import SubAgent
@@ -58,7 +58,9 @@ class AgentService:
         agent_id: UUID
     ) -> Optional[Agent]:
         """Get agent by ID."""
-        return db.query(Agent).filter(
+        return db.query(Agent).options(
+            joinedload(Agent.mcp_servers)
+        ).filter(
             Agent.id == agent_id,
             Agent.is_deleted == False
         ).first()
@@ -71,7 +73,9 @@ class AgentService:
         search: Optional[str] = None
     ) -> tuple[list[Agent], int]:
         """List agents with pagination."""
-        query = db.query(Agent).filter(Agent.is_deleted == False)
+        query = db.query(Agent).options(
+            joinedload(Agent.mcp_servers)
+        ).filter(Agent.is_deleted == False)
         
         # Search by name
         if search:

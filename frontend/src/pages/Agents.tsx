@@ -111,9 +111,22 @@ export default function Agents() {
     setDialogOpen(true);
   };
 
-  const openEditDialog = (agent: Agent) => {
-    setEditingAgent(agent);
-    setDialogOpen(true);
+  const openEditDialog = async (agent: Agent) => {
+    // 重新获取完整的 agent 数据，确保包含 mcp_servers
+    try {
+      const fullAgent = await agentManagementApi.getAgent(agent.id);
+      console.log('Full agent data:', fullAgent);
+      console.log('MCP Servers:', fullAgent.mcp_servers);
+      setEditingAgent(fullAgent);
+      setDialogOpen(true);
+    } catch (error) {
+      console.error('Failed to load agent details:', error);
+      toast({
+        title: '加载失败',
+        description: '无法加载 Agent 详情',
+        variant: 'destructive',
+      });
+    }
   };
 
   return (

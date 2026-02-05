@@ -163,8 +163,15 @@ class AgentFactory:
             cache_key = str(agent_id)
             if cache_key in cls._agents:
                 del cls._agents[cache_key]
+            # 清除 MCP 工具缓存
+            from app.agent.mcp import get_mcp_client_manager
+
+            get_mcp_client_manager().invalidate_cache(agent_id)
         else:
             cls._agents.clear()
+            from app.agent.mcp import get_mcp_client_manager
+
+            get_mcp_client_manager().clear_cache()
 
     @classmethod
     async def shutdown(cls):
@@ -190,6 +197,7 @@ class AgentFactory:
             Configuration dictionary for DeepAgentService
         """
         agent_config = {
+            "_agent_id": agent.id,  # 用于 MCP 缓存 key
             "name": agent.name,
             "model": agent.model,
             "model_provider": agent.model_provider,
@@ -224,5 +232,19 @@ class AgentFactory:
         # Add summarization config
         if agent.summarization_config:
             agent_config["summarization"] = agent.summarization_config
+
+        # Add MCP Servers configuration
+        if agent.mcp_servers:
+            agent_config["mcp_servers"] = [
+                {
+                    "name": ms.name,
+                    "transport": ms.transport,  # 添加 transport 字段
+                    "url": ms.url,
+                    "headers": ms.headers,
+                    "is_enabled": ms.is_enabled,
+                }
+                for ms in agent.mcp_servers
+                if not ms.is_deleted
+            ]
 
         return agent_config

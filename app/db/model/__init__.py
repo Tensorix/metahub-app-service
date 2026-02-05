@@ -8,6 +8,7 @@ from .message_part import MessagePart
 from .message_sender import MessageSender
 from .message_search_index import MessageSearchIndex
 from .agent import Agent
+from .agent_mcp_server import AgentMcpServer
 from .subagent import SubAgent
 from .agent_version import AgentVersion
 from .user import User, UserToken

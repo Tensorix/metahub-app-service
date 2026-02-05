@@ -7,6 +7,8 @@ from typing import Optional
 from uuid import UUID
 from pydantic import BaseModel, Field, ConfigDict
 
+from app.schema.mcp_server import McpServerResponse
+
 
 class SubAgentSchema(BaseModel):
     """SubAgent schema."""
@@ -88,6 +90,9 @@ class AgentResponse(AgentBase):
     updated_at: datetime
     is_deleted: bool
     subagents: list[SubAgentSchema] = Field(default_factory=list, description="子代理列表")
+    mcp_servers: list[McpServerResponse] = Field(
+        default_factory=list, description="MCP Server 配置列表"
+    )
     
     model_config = ConfigDict(
         from_attributes=True,

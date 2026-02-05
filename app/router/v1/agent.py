@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.deps import get_current_user
 from app.db.model.user import User
+from app.db.model.agent import Agent
 from app.schema.agent import (
     AgentCreate,
     AgentUpdate,
@@ -30,16 +31,8 @@ class AgentListResponse(BaseModel):
     page_size: int
 
 
-@router.post("", response_model=AgentResponse, status_code=201)
-def create_agent(
-    agent_data: AgentCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Create a new agent."""
-    agent = AgentService.create_agent(db, agent_data)
-    
-    # Manually construct response to avoid metadata conflict
+def _agent_to_response(agent: Agent) -> dict:
+    """Convert Agent model to response dict."""
     return {
         "id": agent.id,
         "name": agent.name,
@@ -66,8 +59,38 @@ def create_agent(
             }
             for sa in agent.subagents if not sa.is_deleted
         ],
+        "mcp_servers": [
+            {
+                "id": mcp.id,
+                "agent_id": mcp.agent_id,
+                "name": mcp.name,
+                "description": mcp.description,
+                "transport": mcp.transport,
+                "url": mcp.url,
+                "headers": mcp.headers,
+                "is_enabled": mcp.is_enabled,
+                "sort_order": mcp.sort_order,
+                "last_connected_at": mcp.last_connected_at,
+                "last_error": mcp.last_error,
+                "cached_tools": mcp.cached_tools,
+                "created_at": mcp.created_at,
+                "updated_at": mcp.updated_at,
+            }
+            for mcp in agent.mcp_servers if not mcp.is_deleted
+        ],
         "summarization": agent.summarization_config
     }
+
+
+@router.post("", response_model=AgentResponse, status_code=201)
+def create_agent(
+    agent_data: AgentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new agent."""
+    agent = AgentService.create_agent(db, agent_data)
+    return _agent_to_response(agent)
 
 
 @router.get("", response_model=AgentListResponse)
@@ -81,38 +104,7 @@ def list_agents(
     """List all agents with pagination."""
     agents, total = AgentService.list_agents(db, page, page_size, search)
     
-    # Manually construct response to avoid metadata conflict
-    items = []
-    for agent in agents:
-        agent_dict = {
-            "id": agent.id,
-            "name": agent.name,
-            "system_prompt": agent.system_prompt,
-            "model": agent.model,
-            "model_provider": agent.model_provider,
-            "temperature": agent.temperature,
-            "max_tokens": agent.max_tokens,
-            "tools": agent.tools or [],
-            "skills": agent.skills,
-            "memory_files": agent.memory_files,
-            "metadata": agent.metadata_,  # Use metadata_ field
-            "created_at": agent.created_at,
-            "updated_at": agent.updated_at,
-            "is_deleted": agent.is_deleted,
-            "subagents": [
-                {
-                    "id": sa.id,
-                    "name": sa.name,
-                    "description": sa.description,
-                    "system_prompt": sa.system_prompt,
-                    "model": sa.model,
-                    "tools": sa.tools or []
-                }
-                for sa in agent.subagents if not sa.is_deleted
-            ],
-            "summarization": agent.summarization_config
-        }
-        items.append(agent_dict)
+    items = [_agent_to_response(agent) for agent in agents]
     
     return {
         "items": items,
@@ -133,35 +125,7 @@ def get_agent(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    # Manually construct response to avoid metadata conflict
-    return {
-        "id": agent.id,
-        "name": agent.name,
-        "system_prompt": agent.system_prompt,
-        "model": agent.model,
-        "model_provider": agent.model_provider,
-        "temperature": agent.temperature,
-        "max_tokens": agent.max_tokens,
-        "tools": agent.tools or [],
-        "skills": agent.skills,
-        "memory_files": agent.memory_files,
-        "metadata": agent.metadata_,  # Use metadata_ field
-        "created_at": agent.created_at,
-        "updated_at": agent.updated_at,
-        "is_deleted": agent.is_deleted,
-        "subagents": [
-            {
-                "id": sa.id,
-                "name": sa.name,
-                "description": sa.description,
-                "system_prompt": sa.system_prompt,
-                "model": sa.model,
-                "tools": sa.tools or []
-            }
-            for sa in agent.subagents if not sa.is_deleted
-        ],
-        "summarization": agent.summarization_config
-    }
+    return _agent_to_response(agent)
 
 
 @router.put("/{agent_id}", response_model=AgentResponse)
@@ -180,35 +144,7 @@ def update_agent(
     from app.agent.factory import AgentFactory
     AgentFactory.clear_cache(agent_id)
     
-    # Manually construct response to avoid metadata conflict
-    return {
-        "id": agent.id,
-        "name": agent.name,
-        "system_prompt": agent.system_prompt,
-        "model": agent.model,
-        "model_provider": agent.model_provider,
-        "temperature": agent.temperature,
-        "max_tokens": agent.max_tokens,
-        "tools": agent.tools or [],
-        "skills": agent.skills,
-        "memory_files": agent.memory_files,
-        "metadata": agent.metadata_,
-        "created_at": agent.created_at,
-        "updated_at": agent.updated_at,
-        "is_deleted": agent.is_deleted,
-        "subagents": [
-            {
-                "id": sa.id,
-                "name": sa.name,
-                "description": sa.description,
-                "system_prompt": sa.system_prompt,
-                "model": sa.model,
-                "tools": sa.tools or []
-            }
-            for sa in agent.subagents if not sa.is_deleted
-        ],
-        "summarization": agent.summarization_config
-    }
+    return _agent_to_response(agent)
 
 
 @router.delete("/{agent_id}", status_code=204)

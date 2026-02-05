@@ -12,8 +12,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import type { Agent, AgentCreate, AgentUpdate, SubAgent } from '@/lib/agentManagementApi';
+import type { McpServerResponse } from '@/types/mcpServer';
 import { X, Plus } from 'lucide-react';
 import { useTools } from '@/hooks/useTools';
+import { MCPServerConfig } from './MCPServerConfig';
 
 interface AgentDialogProps {
   open: boolean;
@@ -55,7 +57,8 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
     },
   });
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'basic' | 'advanced' | 'subagents' | 'summarization'>('basic');
+  const [activeTab, setActiveTab] = useState<'basic' | 'advanced' | 'subagents' | 'summarization' | 'mcp'>('basic');
+  const [mcpServers, setMcpServers] = useState<McpServerResponse[]>([]);
 
   // Skill/Memory editing states
   const [editingSkill, setEditingSkill] = useState<{ name: string; content: string } | null>(null);
@@ -90,6 +93,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
           keep_last_n: 20,
         },
       });
+      setMcpServers(agent.mcp_servers || []);
     } else {
       setFormData({
         name: '',
@@ -108,6 +112,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
           keep_last_n: 20,
         },
       });
+      setMcpServers([]);
     }
     setActiveTab('basic');
   }, [agent, open]);
@@ -255,6 +260,13 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
             onClick={() => setActiveTab('subagents')}
           >
             子代理 ({(formData.subagents || []).length})
+          </button>
+          <button
+            type="button"
+            className={`px-4 py-2 ${activeTab === 'mcp' ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground'}`}
+            onClick={() => setActiveTab('mcp')}
+          >
+            MCP Servers ({mcpServers.length})
           </button>
           <button
             type="button"
@@ -770,6 +782,15 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                   )}
                 </div>
               </>
+            )}
+
+            {/* MCP Servers Tab */}
+            {activeTab === 'mcp' && (
+              <MCPServerConfig
+                agentId={agent?.id}
+                servers={mcpServers}
+                onChange={setMcpServers}
+              />
             )}
 
             {/* Summarization Tab */}

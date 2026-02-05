@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from app.db.model.session import Session
     from app.db.model.subagent import SubAgent
     from app.db.model.agent_version import AgentVersion
+    from app.db.model.agent_mcp_server import AgentMcpServer
 
 
 class Agent(Base):
@@ -91,4 +92,10 @@ class Agent(Base):
         back_populates="agent",
         cascade="all, delete-orphan",
         order_by="AgentVersion.version.desc()"
+    )
+    mcp_servers: Mapped[list["AgentMcpServer"]] = relationship(
+        "AgentMcpServer",
+        back_populates="agent",
+        cascade="all, delete-orphan",
+        lazy="selectin"
     )

@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     # 需要索引的 session 类型
     SEARCH_INDEXABLE_SESSION_TYPES: list[str] = ["pm", "group"]
 
+    # ============ MCP Client 配置 ============
+    MCP_CLIENT_TIMEOUT: int = 30            # MCP 工具调用超时（秒）
+    MCP_CONNECTION_TIMEOUT: int = 10        # MCP Server 连接超时（秒）
+    MCP_MAX_RETRIES: int = 3               # MCP 调用失败重试次数
+    MCP_TOOL_CACHE_TTL: int = 300          # MCP 工具列表缓存时间（秒）
+    MCP_MAX_SERVERS_PER_AGENT: int = 10    # 每个 Agent 最多连接的 MCP Server 数
+
     @computed_field
     @property
     def sqlalchemy_database_uri(self) -> str:
