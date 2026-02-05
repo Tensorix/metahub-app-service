@@ -34,6 +34,25 @@ function MessageItem({ message, onDelete }: { message: Message; onDelete: (id: s
   const isUserSide = message.role === 'user' || message.role === 'self';
   const isAssistant = message.role === 'assistant';
   const isSystem = message.role === 'system';
+  
+  // 获取发送者名称
+  const getSenderName = () => {
+    // 优先从 sender 对象获取
+    if (message.sender?.name) {
+      return message.sender.name;
+    }
+    // 备用：从 metadata 中获取
+    if (message.parts[0]?.metadata?.sender_name) {
+      return message.parts[0].metadata.sender_name;
+    }
+    // 默认值
+    if (isUserSide) return '我';
+    if (isAssistant) return 'AI';
+    if (isSystem) return '系统';
+    return '未知用户';
+  };
+  
+  const senderName = getSenderName();
 
   return (
     <div className={cn("flex w-full gap-3", isUserSide ? "flex-row-reverse" : "flex-row")}>
@@ -56,6 +75,14 @@ function MessageItem({ message, onDelete }: { message: Message; onDelete: (id: s
         "group relative flex max-w-[80%] flex-col gap-2",
         isUserSide ? "items-end" : "items-start"
       )}>
+        {/* 显示发送者名称 */}
+        <div className={cn(
+          "text-xs text-muted-foreground px-1",
+          isUserSide ? "text-right" : "text-left"
+        )}>
+          {senderName}
+        </div>
+        
         <div className={cn(
           "rounded-lg px-4 py-2 text-sm shadow-sm",
           isUserSide 

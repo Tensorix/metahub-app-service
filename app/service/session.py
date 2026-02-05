@@ -232,10 +232,12 @@ class MessageService:
 
     @staticmethod
     def get_messages(db: Session, session_id: UUID, query: MessageListQuery) -> tuple[list[Message], int]:
+        from sqlalchemy.orm import joinedload
+        
         q = db.query(Message).filter(
             Message.session_id == session_id,
             Message.is_deleted == query.is_deleted
-        )
+        ).options(joinedload(Message.sender))  # 预加载 sender 关系
         
         if query.topic_id:
             q = q.filter(Message.topic_id == query.topic_id)

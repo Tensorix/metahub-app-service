@@ -7,7 +7,24 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SessionDialog } from '@/components/SessionDialog';
 import { cn } from '@/lib/utils';
-import { MessageSquare, Search } from 'lucide-react';
+import { MessageSquare, Search, Upload, Archive, Trash2, MoreVertical } from 'lucide-react';
+import { SessionImportDialog, BatchExportDialog } from '@/components/session-transfer';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 interface SessionSidebarProps {
   onSessionSelect?: () => void;
@@ -17,12 +34,15 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const sessions = useChatStore((state) => state.sessions);
   const sessionsLoading = useChatStore((state) => state.sessionsLoading);
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const loadSessions = useChatStore((state) => state.loadSessions);
   const selectSession = useChatStore((state) => state.selectSession);
   const createSession = useChatStore((state) => state.createSession);
+  const deleteSession = useChatStore((state) => state.deleteSession);
 
   useEffect(() => {
     void loadSessions();
@@ -69,6 +89,24 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
     });
   }, [sessions, searchQuery, typeFilter]);
 
+  const handleDeleteClick = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSessionToDelete(sessionId);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (sessionToDelete) {
+      try {
+        await deleteSession(sessionToDelete);
+        setDeleteDialogOpen(false);
+        setSessionToDelete(null);
+      } catch (error) {
+        console.error('Failed to delete session:', error);
+      }
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
@@ -76,13 +114,35 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
           <MessageSquare className="h-4 w-4" />
           <span className="font-semibold">会话</span>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setShowCreateDialog(true)}
-        >
-          新建
-        </Button>
+        <div className="flex items-center gap-1">
+          <SessionImportDialog
+            trigger={
+              <Button size="sm" variant="ghost" title="导入会话">
+                <Upload className="h-4 w-4" />
+              </Button>
+            }
+            onSuccess={(ids) => {
+              void loadSessions();
+              if (ids.length === 1) {
+                void selectSession(ids[0]);
+              }
+            }}
+          />
+          <BatchExportDialog
+            trigger={
+              <Button size="sm" variant="ghost" title="批量导出">
+                <Archive className="h-4 w-4" />
+              </Button>
+            }
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowCreateDialog(true)}
+          >
+            新建
+          </Button>
+        </div>
       </div>
 
       <div className="border-b px-3 py-2 space-y-2">
@@ -121,46 +181,76 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
             </div>
           )}
           {!sessionsLoading && filteredSessions.map((session) => (
-            <button
+            <div
               key={session.id}
-              type="button"
-              onClick={() => {
-                void selectSession(session.id);
-                onSessionSelect?.();
-              }}
               className={cn(
-                'w-full rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-accent',
+                'group relative w-full rounded-md transition-colors hover:bg-accent',
                 currentSessionId === session.id && 'bg-accent',
               )}
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="line-clamp-1 font-medium">
-                  {session.name || '未命名会话'}
-                </span>
-                <Badge
-                  variant={getTypeBadgeVariant(session.type)}
-                  className="ml-1 h-5 px-1.5 text-[10px]"
-                >
-                  {getTypeLabel(session.type)}
-                </Badge>
-              </div>
-              <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
-                <span className="line-clamp-1">
-                  {session.source || '默认来源'}
-                </span>
-                {session.last_visited_at && (
-                  <span>
-                    {new Date(session.last_visited_at).toLocaleTimeString(
-                      'zh-CN',
-                      {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      },
-                    )}
-                  </span>
-                )}
-              </div>
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void selectSession(session.id);
+                  onSessionSelect?.();
+                }}
+                className="w-full px-3 py-2 text-left text-sm"
+              >
+                <div className="flex items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="line-clamp-1 font-medium">
+                      {session.name || '未命名会话'}
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <Badge
+                        variant={getTypeBadgeVariant(session.type)}
+                        className="h-4 px-1 text-[10px]"
+                      >
+                        {getTypeLabel(session.type)}
+                      </Badge>
+                      <span className="line-clamp-1 flex-1">
+                        {session.source || '默认来源'}
+                      </span>
+                      {session.last_visited_at && (
+                        <span className="flex-shrink-0">
+                          {new Date(session.last_visited_at).toLocaleTimeString(
+                            'zh-CN',
+                            {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            },
+                          )}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div 
+                    className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        <MoreVertical className="h-3 w-3" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          className="text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteClick(session.id, e);
+                          }}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          删除会话
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+              </button>
+            </div>
           ))}
 
           {!sessionsLoading && filteredSessions.length === 0 && sessions.length > 0 && (
@@ -181,6 +271,26 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
         onOpenChange={setShowCreateDialog}
         onSubmit={handleCreateSession}
       />
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除会话</AlertDialogTitle>
+            <AlertDialogDescription>
+              此操作将删除该会话及其所有消息和话题。此操作无法撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

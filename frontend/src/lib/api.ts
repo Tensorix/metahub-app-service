@@ -242,12 +242,20 @@ export interface MessagePart {
   created_at: string;
 }
 
+export interface MessageSender {
+  id: string;
+  name: string;
+  external_id?: string;
+  created_at: string;
+}
+
 export interface Message {
   id: string;
   session_id: string;
   topic_id?: string;
   role: string;
   sender_id?: string;
+  sender?: MessageSender;
   created_at: string;
   updated_at: string;
   is_deleted: boolean;
@@ -368,6 +376,212 @@ export const sessionApi = {
     error?: string;
   }> {
     const response = await api.post(`/api/v1/sessions/${sessionId}/messages/send`, data);
+    return response.data;
+  },
+};
+
+
+// ============ Session Transfer Types ============
+
+export interface ResourceRef {
+  type: string;
+  url: string;
+  cached: boolean;
+  cache_path?: string;
+}
+
+export interface ExportStatistics {
+  total_messages: number;
+  total_topics: number;
+  total_senders: number;
+  date_range: {
+    earliest?: string;
+    latest?: string;
+  };
+  filter_applied?: {
+    start_date?: string;
+    end_date?: string;
+  };
+}
+
+export interface ImportStatistics {
+  imported_messages: number;
+  imported_topics: number;
+  imported_senders: number;
+  merged_senders: number;
+  skipped_messages: number;
+}
+
+export interface ImportedSessionInfo {
+  session_id: string;
+  original_id: string;
+  name?: string;
+  type: string;
+  statistics: ImportStatistics;
+}
+
+export interface SessionImportResponse {
+  success: boolean;
+  imported_sessions: ImportedSessionInfo[];
+  total_statistics: ImportStatistics;
+}
+
+export interface DuplicateCheck {
+  has_duplicates: boolean;
+  duplicate_export_ids: string[];
+  affected_sessions: string[];
+}
+
+export interface SessionPreview {
+  original_id: string;
+  name?: string;
+  type: string;
+  message_count: number;
+  topic_count: number;
+}
+
+export interface ImportPreviewResponse {
+  valid: boolean;
+  format: string;
+  version: string;
+  export_id?: string;
+  sessions: SessionPreview[];
+  total_statistics?: ExportStatistics;
+  duplicate_check?: DuplicateCheck;
+  warnings: string[];
+  errors: string[];
+}
+
+export interface ExportOptions {
+  format?: 'json' | 'jsonl';
+  includeDeleted?: boolean;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface BatchExportOptions extends ExportOptions {
+  sessionIds?: string[];
+  typeFilter?: string[];
+  groupByType?: boolean;
+}
+
+export interface ImportOptions {
+  format?: string;
+  mergeSenders?: boolean;
+}
+
+// ============ Session Transfer API ============
+
+export const sessionTransferApi = {
+  /**
+   * 导出单个会话数据
+   * @param sessionId 会话 ID
+   * @param options 导出选项
+   * @returns Blob 数据和文件名
+   */
+  async exportSession(
+    sessionId: string,
+    options: ExportOptions = {}
+  ): Promise<{ blob: Blob; filename: string }> {
+    const params = new URLSearchParams();
+    if (options.format) params.append('format', options.format);
+    if (options.includeDeleted) params.append('include_deleted', 'true');
+    if (options.startDate) params.append('start_date', options.startDate);
+    if (options.endDate) params.append('end_date', options.endDate);
+    
+    const response = await api.get(
+      `/api/v1/sessions/${sessionId}/export?${params.toString()}`,
+      { responseType: 'blob' }
+    );
+    
+    // 从 Content-Disposition 获取文件名
+    const contentDisposition = response.headers['content-disposition'];
+    let filename = 'session_export.json';
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+      if (filenameMatch) {
+        filename = decodeURIComponent(filenameMatch[1]);
+      }
+    }
+    
+    return { blob: response.data, filename };
+  },
+
+  /**
+   * 批量导出会话数据
+   * @param options 批量导出选项
+   * @returns Blob 数据和文件名
+   */
+  async exportSessionsBatch(
+    options: BatchExportOptions = {}
+  ): Promise<{ blob: Blob; filename: string }> {
+    const response = await api.post(
+      '/api/v1/sessions/export/batch',
+      {
+        session_ids: options.sessionIds,
+        type_filter: options.typeFilter,
+        format: options.format || 'jsonl',
+        include_deleted: options.includeDeleted || false,
+        start_date: options.startDate,
+        end_date: options.endDate,
+        group_by_type: options.groupByType ?? true,
+      },
+      { responseType: 'blob' }
+    );
+    
+    const contentDisposition = response.headers['content-disposition'];
+    let filename = 'sessions_export.zip';
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+      if (filenameMatch) {
+        filename = decodeURIComponent(filenameMatch[1]);
+      }
+    }
+    
+    return { blob: response.data, filename };
+  },
+
+  /**
+   * 导入会话数据
+   * @param file 导出文件
+   * @param options 导入选项
+   */
+  async importSessions(
+    file: File,
+    options: ImportOptions = {}
+  ): Promise<SessionImportResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const params = new URLSearchParams();
+    if (options.format) params.append('format', options.format);
+    if (options.mergeSenders !== undefined) {
+      params.append('merge_senders', String(options.mergeSenders));
+    }
+    
+    const response = await api.post(
+      `/api/v1/sessions/import?${params.toString()}`,
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }
+    );
+    
+    return response.data;
+  },
+
+  /**
+   * 预览导入文件
+   * @param file 导出文件
+   */
+  async previewImport(file: File): Promise<ImportPreviewResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const response = await api.post('/api/v1/sessions/import/preview', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    
     return response.data;
   },
 };

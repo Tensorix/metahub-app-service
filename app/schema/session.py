@@ -119,6 +119,7 @@ class MessageResponse(MessageBase):
     updated_at: datetime = Field(..., description="更新时间")
     is_deleted: bool = Field(..., description="是否删除")
     parts: list[MessagePartResponse] = Field(default_factory=list, description="消息内容部分")
+    sender: Optional["MessageSenderResponse"] = Field(None, description="发送者信息")
 
 
 class MessageListQuery(BaseModel):

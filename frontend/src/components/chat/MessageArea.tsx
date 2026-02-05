@@ -14,6 +14,7 @@ import { TopicSelector } from './TopicSelector';
 import { TopicSidebar } from './TopicSidebar';
 import { FileExplorer } from './FileExplorer';
 import { SessionDialog } from '@/components/SessionDialog';
+import { SessionExportButton, SessionExportDialog } from '@/components/session-transfer';
 import { ResizableHandle } from '@/components/ui/resizable';
 import { cn } from '@/lib/utils';
 import { ChevronUp, ChevronDown, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2, ArrowLeft, FolderOpen } from 'lucide-react';
@@ -121,8 +122,8 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   const [canSwitchNext, setCanSwitchNext] = useState(false);
   const [topHint, setTopHint] = useState<string | null>(null);
   const [bottomHint, setBottomHint] = useState<string | null>(null);
-  const prevHintTimeoutRef = useRef<ReturnType<typeof setTimeout>>(null);
-  const nextHintTimeoutRef = useRef<ReturnType<typeof setTimeout>>(null);
+  const prevHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nextHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resetTopHint = () => {
     setTopHint(null);
@@ -284,14 +285,26 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
               </Button>
             )}
             {currentSession && (
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={() => setIsSessionSettingsOpen(true)}
-                title="会话设置"
-              >
-                <Settings2 className="h-5 w-5" />
-              </Button>
+              <>
+                <SessionExportButton
+                  sessionId={currentSession.id}
+                  sessionName={currentSession.name}
+                  size="icon"
+                  variant="ghost"
+                />
+                <SessionExportDialog
+                  sessionId={currentSession.id}
+                  sessionName={currentSession.name}
+                />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => setIsSessionSettingsOpen(true)}
+                  title="会话设置"
+                >
+                  <Settings2 className="h-5 w-5" />
+                </Button>
+              </>
             )}
             {/* 移动端和平板端显示话题抽屉按钮 */}
             {!isDesktop && (
@@ -322,7 +335,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
         <div className="flex-1 flex flex-col min-w-0 h-full relative group/message-area">
           {/* 消息列表 */}
           <div
-            ref={messageContainerRef}
+            ref={messageContainerRef as React.RefObject<HTMLDivElement>}
             className={cn(
               'flex-1 overflow-y-auto px-4 py-3 scroll-smooth',
               !currentSession && 'flex items-center justify-center',

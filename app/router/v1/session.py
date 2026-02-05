@@ -203,8 +203,17 @@ def get_messages(
     messages, total = MessageService.get_messages(db, session_id, query)
     pages = ceil(total / size) if total > 0 else 0
     
+    # 构建响应，包含 sender 信息
+    items = []
+    for m in messages:
+        msg_resp = MessageResponse.model_validate(m)
+        # 如果有 sender_id，添加 sender 信息
+        if m.sender:
+            msg_resp.sender = MessageSenderResponse.model_validate(m.sender)
+        items.append(msg_resp)
+    
     return MessageListResponse(
-        items=[MessageResponse.model_validate(m) for m in messages],
+        items=items,
         total=total, page=page, size=size, pages=pages
     )
 

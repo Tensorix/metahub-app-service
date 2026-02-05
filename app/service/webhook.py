@@ -164,19 +164,36 @@ class WebhookService:
         db: Session,
         sender_data: dict
     ) -> MessageSender:
-        """获取或创建 MessageSender"""
+        """获取或创建 MessageSender（使用 external_id 去重）"""
         sender_name = sender_data.get("nickname", sender_data.get("user_id", "Unknown"))
+        sender_external_id = sender_data.get("user_id")  # 使用 user_id 作为 external_id
         
-        # 尝试查找现有 sender
-        sender = db.query(MessageSender).filter(
-            MessageSender.name == sender_name
-        ).first()
+        # 优先使用 external_id 查找
+        sender = None
+        if sender_external_id:
+            sender = db.query(MessageSender).filter(
+                MessageSender.external_id == sender_external_id
+            ).first()
+        
+        # 如果没有找到，再尝试按名称查找
+        if not sender:
+            sender = db.query(MessageSender).filter(
+                MessageSender.name == sender_name
+            ).first()
+            
+            # 如果找到了但没有 external_id，更新它
+            if sender and sender_external_id and not sender.external_id:
+                sender.external_id = sender_external_id
+                db.flush()
         
         if sender:
             return sender
         
         # 创建新 sender
-        sender = MessageSender(name=sender_name)
+        sender = MessageSender(
+            name=sender_name,
+            external_id=sender_external_id
+        )
         db.add(sender)
         db.flush()
         return sender

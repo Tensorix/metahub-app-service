@@ -13,6 +13,7 @@ from .im_gateway import router as im_gateway_router
 from .filesystem import router as filesystem_router
 from .admin_embedding import router as admin_embedding_router
 from .tools import router as tools_router
+from .session_transfer import router as session_transfer_router
 
 router = APIRouter()
 router.include_router(experimental_router, prefix="", tags=["v1"])
@@ -29,3 +30,4 @@ router.include_router(im_gateway_router, prefix="", tags=["im-gateway"])
 router.include_router(filesystem_router, prefix="", tags=["filesystem"])
 router.include_router(admin_embedding_router, prefix="", tags=["admin-embedding"])
 router.include_router(tools_router, prefix="", tags=["tools"])
+router.include_router(session_transfer_router, prefix="", tags=["session-transfer"])

@@ -31,6 +31,24 @@ export function AIMessageList({ className }: { className?: string }) {
           .filter((p) => p.type === 'text')
           .map((p) => p.content)
           .join('');
+        
+        // 获取发送者名称
+        const getSenderName = () => {
+          // 优先从 sender 对象获取
+          if (message.sender?.name) {
+            return message.sender.name;
+          }
+          // 备用：从 metadata 中获取
+          if (message.parts[0]?.metadata?.sender_name) {
+            return message.parts[0].metadata.sender_name;
+          }
+          // 默认值
+          if (isUserSide) return '我';
+          if (isAssistant) return 'AI';
+          return '未知用户';
+        };
+        
+        const senderName = getSenderName();
 
         return (
           <div
@@ -61,6 +79,14 @@ export function AIMessageList({ className }: { className?: string }) {
                 isUserSide && 'items-end'
               )}
             >
+              {/* 显示发送者名称 */}
+              <div className={cn(
+                "text-xs text-muted-foreground px-1 mb-1",
+                isUserSide ? "text-right" : "text-left"
+              )}>
+                {senderName}
+              </div>
+              
               <div
                 className={cn(
                   'rounded-lg px-4 py-2',
