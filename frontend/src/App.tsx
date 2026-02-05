@@ -10,7 +10,6 @@ import { Home } from './pages/Home';
 import { Sessions } from './pages/Sessions';
 import { Settings } from './pages/Settings';
 import Agents from './pages/Agents';
-import EmbeddingManagement from './pages/EmbeddingManagement';
 
 function App() {
   const { initialize } = useAuthStore();
@@ -36,7 +35,6 @@ function App() {
           <Route index element={<Home />} />
           <Route path="sessions" element={<Sessions />} />
           <Route path="agents" element={<Agents />} />
-          <Route path="embedding" element={<EmbeddingManagement />} />
           <Route path="settings" element={<Settings />} />
         </Route>
         
