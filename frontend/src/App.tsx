@@ -10,6 +10,7 @@ import { Home } from './pages/Home';
 import { Sessions } from './pages/Sessions';
 import { Settings } from './pages/Settings';
 import Agents from './pages/Agents';
+import Activities from './pages/Activities';
 
 function App() {
   const { initialize } = useAuthStore();
@@ -35,6 +36,7 @@ function App() {
           <Route index element={<Home />} />
           <Route path="sessions" element={<Sessions />} />
           <Route path="agents" element={<Agents />} />
+          <Route path="activities" element={<Activities />} />
           <Route path="settings" element={<Settings />} />
         </Route>
         

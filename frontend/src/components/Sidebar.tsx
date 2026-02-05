@@ -1,4 +1,4 @@
-import { Home, MessageSquare, Settings, LogOut, ChevronLeft, Menu, Bot, X } from 'lucide-react';
+import { Home, MessageSquare, Settings, LogOut, ChevronLeft, Menu, Bot, X, CheckSquare } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
@@ -22,6 +22,7 @@ const menuItems = [
   { icon: Home, label: '首页', path: '/' },
   { icon: MessageSquare, label: '会话', path: '/sessions' },
   { icon: Bot, label: 'Agents', path: '/agents' },
+  { icon: CheckSquare, label: '活动', path: '/activities' },
   { icon: Settings, label: '设置', path: '/settings' },
 ];
 
