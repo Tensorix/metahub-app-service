@@ -17,12 +17,13 @@ from app.db.session import SessionLocal
         "Supports keyword fuzzy matching and semantic search. "
         "Can filter by sender name, group/chat name, time range, "
         "and message type (pm/group). "
-        "Returns matched messages with surrounding context."
+        "Query is optional - leave empty to retrieve messages by filters only (e.g., time range). "
+        "Returns matched messages with message IDs and surrounding context."
     ),
     category="data",
 )
 def search_messages(
-    query: str,
+    query: str = "",
     sender: str = "",
     group_name: str = "",
     session_type: str = "",
@@ -35,7 +36,8 @@ def search_messages(
     Search user's chat messages with hybrid fuzzy + semantic search.
 
     Args:
-        query: Search keywords or natural language query.
+        query: Search keywords or natural language query. 
+               Leave empty to retrieve messages by filters only (e.g., time range).
         sender: Filter by sender name (partial match supported).
                 Example: "张三" or "Zhang"
         group_name: Filter by group/chat name (partial match supported).
@@ -51,7 +53,7 @@ def search_messages(
                          for context (default: true).
 
     Returns:
-        Formatted search results with message content, sender,
+        Formatted search results with message IDs, content, sender,
         time, and optional context messages.
     """
     from uuid import UUID
@@ -119,7 +121,10 @@ def search_messages(
             )
 
         if not results:
-            return f"No messages found matching query: '{query}'"
+            if query.strip():
+                return f"No messages found matching query: '{query}'"
+            else:
+                return "No messages found matching the specified filters."
 
         # 4. 获取上下文
         if include_context:
@@ -274,7 +279,7 @@ def _format_results_with_context(results_with_context: list[dict]) -> str:
                     text_parts.append(f"@{part.content}")
 
             content = " ".join(text_parts)[:200]
-            lines.append(f"    [{msg_time}] {msg_sender}: {content}{is_hit}")
+            lines.append(f"    [{msg_time}] {msg_sender} (ID: {msg.id}): {content}{is_hit}")
 
         lines.append("")  # 空行分隔
 
@@ -308,6 +313,6 @@ def _format_context(context: dict) -> str:
                 text_parts.append(f"@{part.content}")
 
         content = " ".join(text_parts)[:300]
-        lines.append(f"[{msg_time}] {msg_sender}: {content}{is_hit}")
+        lines.append(f"[{msg_time}] {msg_sender} (ID: {msg.id}): {content}{is_hit}")
 
     return "\n".join(lines)
