@@ -46,18 +46,27 @@ class SearchIndexerService:
     # ========== Real-time Indexing ==========
 
     def index_message(
-        self, db: Session, message: Message
+        self,
+        db: Session,
+        message: Message,
+        skip_embedding: bool = False,
     ) -> Optional[MessageSearchIndex]:
         """
         Create search index for a single message.
         Called after MessageService.create_message().
 
+        Args:
+            db: Database session
+            message: Message to index
+            skip_embedding: If True, only create text index without embedding
+                           (useful for bulk import to save costs)
+
         Flow:
         1. Check session type (only index pm/group)
         2. Extract text content
         3. Write message_search_index (text + metadata)
-        4. Get active embedding model
-        5. Generate embedding → write message_embedding
+        4. Get active embedding model (unless skip_embedding)
+        5. Generate embedding → write message_embedding (unless skip_embedding)
         """
         session = message.session
         if session.type not in ("pm", "group"):
@@ -86,14 +95,15 @@ class SearchIndexerService:
         db.add(search_index)
         db.flush()  # Get search_index.id
 
-        # 2. 创建 embedding 记录（在后台任务中调用时才生成向量）
-        # 注意：此方法在后台任务中调用，不会阻塞消息创建接口
-        if config.SEARCH_SYNC_EMBEDDING:
-            # 立即生成 embedding（在后台任务中执行，不阻塞）
-            self._generate_embedding_for_index(db, search_index, content_text)
-        else:
-            # 创建 pending 状态，等待定时任务处理
-            self._create_pending_embedding(db, search_index)
+        # 2. 创建 embedding 记录（除非 skip_embedding=True）
+        if not skip_embedding:
+            if config.SEARCH_SYNC_EMBEDDING:
+                # 立即生成 embedding（在后台任务中执行，不阻塞）
+                self._generate_embedding_for_index(db, search_index, content_text)
+            else:
+                # 创建 pending 状态，等待定时任务处理
+                self._create_pending_embedding(db, search_index)
+        # skip_embedding=True 时，不创建 embedding 记录，后续可手动补建
 
         db.commit()
         db.refresh(search_index)
@@ -217,16 +227,25 @@ class SearchIndexerService:
         user_id: UUID,
         session_id: Optional[UUID] = None,
         regenerate_embeddings: bool = False,
+        skip_embedding: bool = False,
         batch_size: int = 100,
     ) -> dict:
         """
         Batch rebuild search indexes.
 
+        Args:
+            db: 数据库会话
+            user_id: 用户ID
+            session_id: 可选，限制到特定会话
+            regenerate_embeddings: 是否重新生成已有索引的 embedding
+            skip_embedding: 是否跳过 embedding 生成（只创建文本索引，节省成本）
+            batch_size: 每批处理数量
+
         Flow:
         1. Query all qualifying messages
         2. Batch create message_search_index records
-        3. Get active model
-        4. Batch generate embeddings → write message_embedding
+        3. Get active model (unless skip_embedding)
+        4. Batch generate embeddings → write message_embedding (unless skip_embedding)
         """
         stats = {
             "status": "started",
@@ -261,8 +280,11 @@ class SearchIndexerService:
         else:
             existing_ids = set()
 
-        # Get active model
-        embedding_svc, model_config = get_active_embedding_service(db)
+        # Get active model (skip if not needed)
+        embedding_svc = None
+        model_config = None
+        if not skip_embedding:
+            embedding_svc, model_config = get_active_embedding_service(db)
 
         offset = 0
         while True:
@@ -308,9 +330,9 @@ class SearchIndexerService:
                 )
                 texts_to_embed.append(content_text)
 
-            # Batch generate embeddings
+            # Batch generate embeddings (skip if skip_embedding=True)
             embeddings = []
-            if texts_to_embed:
+            if texts_to_embed and not skip_embedding and embedding_svc:
                 try:
                     embeddings = embedding_svc.generate_embeddings_batch(
                         texts_to_embed
@@ -543,3 +565,104 @@ class SearchIndexerService:
             "embedding_failed": status_counts.get("failed", 0),
             "no_embedding": total - sum(status_counts.values()),
         }
+
+    # ========== Backfill Embeddings ==========
+
+    def backfill_embeddings(
+        self,
+        db: Session,
+        user_id: Optional[UUID] = None,
+        session_id: Optional[UUID] = None,
+        batch_size: int = 50,
+    ) -> dict:
+        """
+        为没有 embedding 的搜索索引补建 embedding。
+        
+        用于导入时选择 skip_embedding=True 后，后续按需补建向量索引。
+        
+        Args:
+            db: 数据库会话
+            user_id: 可选，限制到特定用户
+            session_id: 可选，限制到特定会话
+            batch_size: 每批处理数量
+            
+        Returns:
+            统计信息 dict
+        """
+        stats = {
+            "status": "started",
+            "total_missing": 0,
+            "processed": 0,
+            "succeeded": 0,
+            "failed": 0,
+        }
+        
+        # 查询没有 embedding 的搜索索引
+        query = (
+            db.query(MessageSearchIndex)
+            .outerjoin(
+                MessageEmbedding,
+                MessageEmbedding.search_index_id == MessageSearchIndex.id,
+            )
+            .filter(MessageEmbedding.id.is_(None))  # 没有对应的 embedding 记录
+        )
+        
+        if user_id:
+            query = query.filter(MessageSearchIndex.user_id == user_id)
+        if session_id:
+            query = query.filter(MessageSearchIndex.session_id == session_id)
+        
+        # 获取总数
+        stats["total_missing"] = query.count()
+        
+        if stats["total_missing"] == 0:
+            stats["status"] = "completed"
+            return stats
+        
+        # 获取 embedding 服务
+        try:
+            embedding_svc, model_config = get_active_embedding_service(db)
+        except Exception as e:
+            logger.error(f"Failed to get embedding service: {e}")
+            stats["status"] = "failed"
+            stats["error"] = str(e)
+            return stats
+        
+        offset = 0
+        while True:
+            indices = query.offset(offset).limit(batch_size).all()
+            if not indices:
+                break
+            
+            texts = [idx.content_text for idx in indices]
+            
+            try:
+                embeddings = embedding_svc.generate_embeddings_batch(texts)
+                
+                for i, search_index in enumerate(indices):
+                    embedding = embeddings[i] if i < len(embeddings) else None
+                    stats["processed"] += 1
+                    
+                    if embedding:
+                        emb_record = MessageEmbedding(
+                            search_index_id=search_index.id,
+                            model_id=model_config.model_id,
+                            embedding=embedding,
+                            status="completed",
+                        )
+                        db.add(emb_record)
+                        stats["succeeded"] += 1
+                    else:
+                        # Text too short or embedding failed
+                        stats["failed"] += 1
+                        
+            except Exception as e:
+                logger.error(f"Batch embedding failed at offset {offset}: {e}")
+                stats["failed"] += len(indices)
+                stats["processed"] += len(indices)
+            
+            db.commit()
+            offset += batch_size
+        
+        stats["status"] = "completed"
+        return stats

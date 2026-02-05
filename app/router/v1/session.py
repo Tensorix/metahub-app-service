@@ -224,3 +224,202 @@ def delete_message(message_id: UUID, hard_delete: bool = Query(False), db: Sessi
     if not success:
         raise HTTPException(status_code=404, detail="消息不存在")
 
+
+# ============ Search Index APIs ============
+
+from app.schema.search_index import (
+    SearchIndexStatsResponse,
+    SessionSearchIndexStatsResponse,
+    ReindexRequest,
+    ReindexResponse,
+    BackfillEmbeddingsRequest,
+    BackfillEmbeddingsResponse,
+)
+from app.service.search_indexer import SearchIndexerService
+
+
+@router.get(
+    "/search-index/stats",
+    response_model=SearchIndexStatsResponse,
+    summary="获取用户搜索索引统计",
+    description="获取当前用户的搜索索引整体统计信息",
+)
+def get_user_search_index_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取用户搜索索引统计"""
+    indexer = SearchIndexerService()
+    stats = indexer.get_stats(db, current_user.id)
+    return SearchIndexStatsResponse(**stats)
+
+
+@router.get(
+    "/sessions/{session_id}/search-index/stats",
+    response_model=SessionSearchIndexStatsResponse,
+    summary="获取会话搜索索引统计",
+    description="获取指定会话的搜索索引统计信息",
+)
+def get_session_search_index_stats(
+    session_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取会话搜索索引统计"""
+    # 验证会话所有权
+    session = SessionService.get_session(db, session_id, current_user.id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    
+    from app.db.model.message import Message
+    from app.db.model.message_search_index import MessageSearchIndex
+    from app.db.model.message_embedding import MessageEmbedding
+    
+    # 查询会话消息总数
+    total_messages = db.query(Message).filter(
+        Message.session_id == session_id,
+        Message.is_deleted == False,
+    ).count()
+    
+    # 查询已索引消息数
+    indexed_messages = db.query(MessageSearchIndex).filter(
+        MessageSearchIndex.session_id == session_id,
+    ).count()
+    
+    # 查询有 embedding 的数量
+    embedding_completed = db.query(MessageEmbedding).join(
+        MessageSearchIndex,
+        MessageEmbedding.search_index_id == MessageSearchIndex.id,
+    ).filter(
+        MessageSearchIndex.session_id == session_id,
+        MessageEmbedding.status == "completed",
+    ).count()
+    
+    no_embedding = indexed_messages - embedding_completed
+    index_coverage = indexed_messages / total_messages if total_messages > 0 else 0
+    
+    return SessionSearchIndexStatsResponse(
+        session_id=str(session_id),
+        total_messages=total_messages,
+        indexed_messages=indexed_messages,
+        embedding_completed=embedding_completed,
+        no_embedding=no_embedding,
+        index_coverage=round(index_coverage, 4),
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/search-index/reindex",
+    response_model=ReindexResponse,
+    summary="重建会话搜索索引",
+    description="为会话中未索引的消息创建搜索索引。可选择跳过 embedding 生成以节省成本",
+)
+def reindex_session(
+    session_id: UUID,
+    request: ReindexRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """重建会话搜索索引"""
+    # 验证会话所有权
+    session = SessionService.get_session(db, session_id, current_user.id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    
+    try:
+        indexer = SearchIndexerService()
+        stats = indexer.reindex(
+            db=db,
+            user_id=current_user.id,
+            session_id=session_id,
+            regenerate_embeddings=request.regenerate_embeddings,
+            skip_embedding=request.skip_embedding,
+        )
+        return ReindexResponse(**stats)
+    except Exception as e:
+        logger.error(f"Reindex session {session_id} failed: {e}")
+        raise HTTPException(status_code=500, detail=f"重建索引失败: {str(e)}")
+
+
+@router.post(
+    "/search-index/reindex",
+    response_model=ReindexResponse,
+    summary="重建用户所有搜索索引",
+    description="为用户所有会话中未索引的消息创建搜索索引",
+)
+def reindex_all(
+    request: ReindexRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """重建用户所有搜索索引"""
+    try:
+        indexer = SearchIndexerService()
+        stats = indexer.reindex(
+            db=db,
+            user_id=current_user.id,
+            regenerate_embeddings=request.regenerate_embeddings,
+            skip_embedding=request.skip_embedding,
+        )
+        return ReindexResponse(**stats)
+    except Exception as e:
+        logger.error(f"Reindex all for user {current_user.id} failed: {e}")
+        raise HTTPException(status_code=500, detail=f"重建索引失败: {str(e)}")
+
+
+@router.post(
+    "/sessions/{session_id}/search-index/backfill-embeddings",
+    response_model=BackfillEmbeddingsResponse,
+    summary="补建会话 embedding",
+    description="为会话中已有文本索引但缺少 embedding 的记录补建向量索引",
+)
+def backfill_session_embeddings(
+    session_id: UUID,
+    request: BackfillEmbeddingsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """补建会话 embedding"""
+    # 验证会话所有权
+    session = SessionService.get_session(db, session_id, current_user.id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    
+    try:
+        indexer = SearchIndexerService()
+        stats = indexer.backfill_embeddings(
+            db=db,
+            user_id=current_user.id,
+            session_id=session_id,
+            batch_size=request.batch_size,
+        )
+        return BackfillEmbeddingsResponse(**stats)
+    except Exception as e:
+        logger.error(f"Backfill embeddings for session {session_id} failed: {e}")
+        raise HTTPException(status_code=500, detail=f"补建 embedding 失败: {str(e)}")
+
+
+@router.post(
+    "/search-index/backfill-embeddings",
+    response_model=BackfillEmbeddingsResponse,
+    summary="补建用户所有 embedding",
+    description="为用户所有已有文本索引但缺少 embedding 的记录补建向量索引",
+)
+def backfill_all_embeddings(
+    request: BackfillEmbeddingsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """补建用户所有 embedding"""
+    try:
+        indexer = SearchIndexerService()
+        stats = indexer.backfill_embeddings(
+            db=db,
+            user_id=current_user.id,
+            batch_size=request.batch_size,
+        )
+        return BackfillEmbeddingsResponse(**stats)
+    except Exception as e:
+        logger.error(f"Backfill all embeddings for user {current_user.id} failed: {e}")
+        raise HTTPException(status_code=500, detail=f"补建 embedding 失败: {str(e)}")
+

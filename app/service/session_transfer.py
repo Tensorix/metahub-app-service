@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from fastapi import UploadFile
+from loguru import logger
 
 from app.db.model.session import Session as SessionModel
 from app.db.model.topic import Topic
@@ -557,8 +558,18 @@ class SessionTransferService:
         user_id: UUID,
         format: str = "auto",
         merge_senders: bool = True,
+        skip_embedding: bool = False,
     ) -> SessionImportResponse:
-        """导入会话数据"""
+        """导入会话数据
+        
+        Args:
+            db: 数据库会话
+            file: 上传的导出文件
+            user_id: 用户ID
+            format: 导入格式（auto 自动检测）
+            merge_senders: 是否合并同名发送者
+            skip_embedding: 是否跳过 embedding 生成（只创建文本索引，节省成本）
+        """
         
         content = await file.read()
         filename = file.filename or ""
@@ -566,15 +577,15 @@ class SessionTransferService:
         # 根据文件类型处理
         if filename.endswith(".zip"):
             return await SessionTransferService._import_zip(
-                db, content, user_id, merge_senders
+                db, content, user_id, merge_senders, skip_embedding
             )
         elif filename.endswith(".jsonl"):
             return SessionTransferService._import_jsonl(
-                db, content, user_id, merge_senders
+                db, content, user_id, merge_senders, skip_embedding
             )
         else:
             return SessionTransferService._import_json(
-                db, content, user_id, format, merge_senders
+                db, content, user_id, format, merge_senders, skip_embedding
             )
     
     @staticmethod
@@ -584,6 +595,7 @@ class SessionTransferService:
         user_id: UUID,
         format: str,
         merge_senders: bool,
+        skip_embedding: bool = False,
     ) -> SessionImportResponse:
         """导入 JSON 格式"""
         try:
@@ -611,6 +623,7 @@ class SessionTransferService:
         result = SessionTransferService._do_import_single(
             db, normalized, user_id, merge_senders,
             export_id=data.get("export_id"),
+            skip_embedding=skip_embedding,
         )
         
         return SessionImportResponse(
@@ -625,6 +638,7 @@ class SessionTransferService:
         content: bytes,
         user_id: UUID,
         merge_senders: bool,
+        skip_embedding: bool = False,
     ) -> SessionImportResponse:
         """导入 JSONL 格式"""
         lines = content.decode("utf-8").strip().split("\n")
@@ -677,7 +691,8 @@ class SessionTransferService:
         
         for session_id, data in sessions_data.items():
             result = SessionTransferService._do_import_single(
-                db, data, user_id, merge_senders, export_id
+                db, data, user_id, merge_senders, export_id,
+                skip_embedding=skip_embedding,
             )
             imported.append(result)
             total_stats.imported_messages += result.statistics.imported_messages
@@ -697,6 +712,7 @@ class SessionTransferService:
         content: bytes,
         user_id: UUID,
         merge_senders: bool,
+        skip_embedding: bool = False,
     ) -> SessionImportResponse:
         """导入 ZIP 格式"""
         buffer = io.BytesIO(content)
@@ -716,7 +732,7 @@ class SessionTransferService:
                 if name.endswith(".jsonl"):
                     content = zf.read(name)
                     result = SessionTransferService._import_jsonl(
-                        db, content, user_id, merge_senders
+                        db, content, user_id, merge_senders, skip_embedding
                     )
                     imported.extend(result.imported_sessions)
                     total_stats.imported_messages += result.total_statistics.imported_messages
@@ -737,8 +753,18 @@ class SessionTransferService:
         user_id: UUID,
         merge_senders: bool,
         export_id: Optional[str] = None,
+        skip_embedding: bool = False,
     ) -> ImportedSessionInfo:
-        """执行单个会话导入"""
+        """执行单个会话导入
+        
+        Args:
+            db: 数据库会话
+            data: 标准化后的会话数据
+            user_id: 用户ID
+            merge_senders: 是否合并同名发送者
+            export_id: 导出ID
+            skip_embedding: 是否跳过 embedding 生成（只创建文本索引）
+        """
         stats = ImportStatistics()
         id_mapping = {"topics": {}, "senders": {}}
         
@@ -862,6 +888,30 @@ class SessionTransferService:
         
         db.commit()
         db.refresh(new_session)
+        
+        # 5. 为导入的消息创建搜索索引（仅针对 pm/group 类型）
+        if new_session.type in ("pm", "group"):
+            try:
+                from app.service.search_indexer import SearchIndexerService
+                indexer = SearchIndexerService()
+                
+                # 获取所有导入的消息
+                imported_messages = db.query(Message).filter(
+                    Message.session_id == new_session.id
+                ).all()
+                
+                # 批量创建索引
+                # skip_embedding=True 时只创建文本索引用于模糊搜索，不生成 embedding
+                for message in imported_messages:
+                    try:
+                        indexer.index_message(db, message, skip_embedding=skip_embedding)
+                    except Exception as e:
+                        logger.error(f"Failed to index imported message {message.id}: {e}")
+                
+                index_mode = "text-only (fuzzy search)" if skip_embedding else "full (fuzzy + vector search)"
+                logger.info(f"Created {index_mode} search index for {len(imported_messages)} imported messages")
+            except Exception as e:
+                logger.error(f"Failed to create search index for imported session {new_session.id}: {e}")
         
         return ImportedSessionInfo(
             session_id=new_session.id,

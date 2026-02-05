@@ -13,6 +13,9 @@ import {
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { SearchIndexManager } from './SearchIndexManager';
+import { Settings, Search } from 'lucide-react';
 
 interface SessionDialogProps {
   open: boolean;
@@ -81,105 +84,222 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
     }
   };
 
+  const isEditMode = !!session;
+  const showSearchIndex = isEditMode && (session.type === 'pm' || session.type === 'group');
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className={showSearchIndex ? 'max-w-2xl' : undefined}>
         <DialogHeader>
-          <DialogTitle>{session ? '编辑会话' : '创建会话'}</DialogTitle>
+          <DialogTitle>{session ? '会话设置' : '创建会话'}</DialogTitle>
           <DialogDescription>
-            {session ? '修改会话信息' : '创建一个新的会话'}
+            {session ? '管理会话信息和搜索设置' : '创建一个新的会话'}
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit}>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">会话名称</Label>
-              <Input
-                id="name"
-                placeholder="输入会话名称"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
+        {showSearchIndex ? (
+          <Tabs defaultValue="basic" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="basic" className="flex items-center gap-2">
+                <Settings className="h-4 w-4" />
+                基本信息
+              </TabsTrigger>
+              <TabsTrigger value="search" className="flex items-center gap-2">
+                <Search className="h-4 w-4" />
+                搜索索引
+              </TabsTrigger>
+            </TabsList>
 
-            <div className="space-y-2">
-              <Label htmlFor="type">会话类型</Label>
-              <select
-                id="type"
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                value={type}
-                onChange={(e) => setType(e.target.value)}
-              >
-                <option value="pm">私聊</option>
-                <option value="group">群聊</option>
-                <option value="ai">AI</option>
-              </select>
-            </div>
+            <TabsContent value="basic">
+              <form onSubmit={handleSubmit}>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">会话名称</Label>
+                    <Input
+                      id="name"
+                      placeholder="输入会话名称"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="source">来源</Label>
-              <Input
-                id="source"
-                placeholder="例如: astr_wechat, astr_qq"
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
-              />
-            </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="type">会话类型</Label>
+                    <select
+                      id="type"
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                      value={type}
+                      onChange={(e) => setType(e.target.value)}
+                    >
+                      <option value="pm">私聊</option>
+                      <option value="group">群聊</option>
+                      <option value="ai">AI</option>
+                    </select>
+                  </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="agent">关联 Agent (可选)</Label>
-              <select
-                id="agent"
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                value={agentId}
-                onChange={(e) => setAgentId(e.target.value)}
-              >
-                <option value="">无</option>
-                {agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="source">来源</Label>
+                    <Input
+                      id="source"
+                      placeholder="例如: astr_wechat, astr_qq"
+                      value={source}
+                      onChange={(e) => setSource(e.target.value)}
+                    />
+                  </div>
 
-            {/* IM 会话配置 */}
-            {(type === 'pm' || type === 'group') && (
-              <div className="space-y-2">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="autoSendIM"
-                    checked={autoSendIM}
-                    onChange={(e) => setAutoSendIM(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300"
-                  />
-                  <Label htmlFor="autoSendIM" className="cursor-pointer">
-                    自动发送到 IM 平台
-                  </Label>
+                  <div className="space-y-2">
+                    <Label htmlFor="agent">关联 Agent (可选)</Label>
+                    <select
+                      id="agent"
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                      value={agentId}
+                      onChange={(e) => setAgentId(e.target.value)}
+                    >
+                      <option value="">无</option>
+                      {agents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* IM 会话配置 */}
+                  {(type === 'pm' || type === 'group') && (
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="autoSendIM"
+                          checked={autoSendIM}
+                          onChange={(e) => setAutoSendIM(e.target.checked)}
+                          className="h-4 w-4 rounded border-gray-300"
+                        />
+                        <Label htmlFor="autoSendIM" className="cursor-pointer">
+                          自动发送到 IM 平台
+                        </Label>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        启用后，发送的消息会直接通过 IM Gateway 发送到对应平台（私聊/群聊）
+                      </p>
+                    </div>
+                  )}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  启用后，发送的消息会直接通过 IM Gateway 发送到对应平台（私聊/群聊）
-                </p>
-              </div>
-            )}
-          </div>
 
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={loading}
-            >
-              取消
-            </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? '保存中...' : '保存'}
-            </Button>
-          </DialogFooter>
-        </form>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => onOpenChange(false)}
+                    disabled={loading}
+                  >
+                    取消
+                  </Button>
+                  <Button type="submit" disabled={loading}>
+                    {loading ? '保存中...' : '保存'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </TabsContent>
+
+            <TabsContent value="search" className="mt-4">
+              <SearchIndexManager
+                sessionId={session.id}
+                sessionName={session.name}
+              />
+            </TabsContent>
+          </Tabs>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">会话名称</Label>
+                <Input
+                  id="name"
+                  placeholder="输入会话名称"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="type">会话类型</Label>
+                <select
+                  id="type"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  value={type}
+                  onChange={(e) => setType(e.target.value)}
+                >
+                  <option value="pm">私聊</option>
+                  <option value="group">群聊</option>
+                  <option value="ai">AI</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="source">来源</Label>
+                <Input
+                  id="source"
+                  placeholder="例如: astr_wechat, astr_qq"
+                  value={source}
+                  onChange={(e) => setSource(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="agent">关联 Agent (可选)</Label>
+                <select
+                  id="agent"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  value={agentId}
+                  onChange={(e) => setAgentId(e.target.value)}
+                >
+                  <option value="">无</option>
+                  {agents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* IM 会话配置 */}
+              {(type === 'pm' || type === 'group') && (
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="autoSendIM"
+                      checked={autoSendIM}
+                      onChange={(e) => setAutoSendIM(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                    <Label htmlFor="autoSendIM" className="cursor-pointer">
+                      自动发送到 IM 平台
+                    </Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    启用后，发送的消息会直接通过 IM Gateway 发送到对应平台（私聊/群聊）
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={loading}
+              >
+                取消
+              </Button>
+              <Button type="submit" disabled={loading}>
+                {loading ? '保存中...' : '保存'}
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   );

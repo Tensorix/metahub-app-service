@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Skeleton } from './ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,9 +20,12 @@ import {
   Edit,
   Trash2,
   Plus,
-  MoreVertical
+  MoreVertical,
+  Settings,
+  Info,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { SearchIndexManager } from './SearchIndexManager';
 
 interface SessionDetailProps {
   sessionId: string;
@@ -118,7 +122,7 @@ export function SessionDetail({ sessionId, onEdit, onDelete, onCreateTopic, onTo
 
   return (
     <Card className="h-full flex flex-col">
-      <CardHeader>
+      <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-2">
@@ -150,20 +154,35 @@ export function SessionDetail({ sessionId, onEdit, onDelete, onCreateTopic, onTo
         </div>
       </CardHeader>
 
-      <CardContent className="flex-1 space-y-6">
-        {/* 基本信息 */}
-        <div className="space-y-3">
-          <h3 className="font-semibold flex items-center gap-2">
-            <MessageSquare className="h-4 w-4" />
-            基本信息
-          </h3>
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-muted-foreground mb-1">会话类型</p>
-              <p className="font-medium">{getSessionTypeLabel(session.type)}</p>
-            </div>
-            {session.source && (
-              <div>
+      <Tabs defaultValue="info" className="flex-1 flex flex-col">
+        <div className="px-6">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="info" className="flex items-center gap-2">
+              <Info className="h-4 w-4" />
+              详情
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="flex items-center gap-2">
+              <Settings className="h-4 w-4" />
+              设置
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="info" className="flex-1 mt-0">
+          <CardContent className="space-y-6 pt-4">
+            {/* 基本信息 */}
+            <div className="space-y-3">
+              <h3 className="font-semibold flex items-center gap-2">
+                <MessageSquare className="h-4 w-4" />
+                基本信息
+              </h3>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-muted-foreground mb-1">会话类型</p>
+                  <p className="font-medium">{getSessionTypeLabel(session.type)}</p>
+                </div>
+                {session.source && (
+                  <div>
                 <p className="text-muted-foreground mb-1">来源</p>
                 <p className="font-medium">{session.source}</p>
               </div>
@@ -306,7 +325,29 @@ export function SessionDetail({ sessionId, onEdit, onDelete, onCreateTopic, onTo
             </div>
           )}
         </div>
-      </CardContent>
+          </CardContent>
+        </TabsContent>
+
+        <TabsContent value="settings" className="flex-1 mt-0">
+          <CardContent className="space-y-4 pt-4">
+            {/* 搜索索引管理 */}
+            {(session.type === 'pm' || session.type === 'group') && (
+              <SearchIndexManager 
+                sessionId={session.id} 
+                sessionName={session.name}
+              />
+            )}
+
+            {session.type === 'ai' && (
+              <Card>
+                <CardContent className="flex items-center justify-center py-8 text-muted-foreground">
+                  AI 会话暂不支持搜索索引
+                </CardContent>
+              </Card>
+            )}
+          </CardContent>
+        </TabsContent>
+      </Tabs>
     </Card>
   );
 }

@@ -585,3 +585,123 @@ export const sessionTransferApi = {
     return response.data;
   },
 };
+
+
+// ============ Search Index Types ============
+
+export interface SearchIndexStats {
+  total_indexed: number;
+  embedding_completed: number;
+  embedding_pending: number;
+  embedding_failed: number;
+  no_embedding: number;
+}
+
+export interface SessionSearchIndexStats {
+  session_id: string;
+  total_messages: number;
+  indexed_messages: number;
+  embedding_completed: number;
+  no_embedding: number;
+  index_coverage: number;
+}
+
+export interface ReindexRequest {
+  skip_embedding?: boolean;
+  regenerate_embeddings?: boolean;
+}
+
+export interface ReindexResponse {
+  status: string;
+  total_messages: number;
+  indexed_count: number;
+  skipped_count: number;
+  failed_count: number;
+  error?: string;
+}
+
+export interface BackfillEmbeddingsRequest {
+  batch_size?: number;
+}
+
+export interface BackfillEmbeddingsResponse {
+  status: string;
+  total_missing: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  error?: string;
+}
+
+// ============ Search Index API ============
+
+export const searchIndexApi = {
+  /**
+   * 获取用户搜索索引统计
+   */
+  async getUserStats(): Promise<SearchIndexStats> {
+    const response = await api.get('/api/v1/search-index/stats');
+    return response.data;
+  },
+
+  /**
+   * 获取会话搜索索引统计
+   * @param sessionId 会话 ID
+   */
+  async getSessionStats(sessionId: string): Promise<SessionSearchIndexStats> {
+    const response = await api.get(`/api/v1/sessions/${sessionId}/search-index/stats`);
+    return response.data;
+  },
+
+  /**
+   * 重建会话搜索索引
+   * @param sessionId 会话 ID
+   * @param options 重建选项
+   */
+  async reindexSession(
+    sessionId: string,
+    options: ReindexRequest = {}
+  ): Promise<ReindexResponse> {
+    const response = await api.post(
+      `/api/v1/sessions/${sessionId}/search-index/reindex`,
+      options
+    );
+    return response.data;
+  },
+
+  /**
+   * 重建用户所有搜索索引
+   * @param options 重建选项
+   */
+  async reindexAll(options: ReindexRequest = {}): Promise<ReindexResponse> {
+    const response = await api.post('/api/v1/search-index/reindex', options);
+    return response.data;
+  },
+
+  /**
+   * 补建会话 embedding
+   * @param sessionId 会话 ID
+   * @param options 补建选项
+   */
+  async backfillSessionEmbeddings(
+    sessionId: string,
+    options: BackfillEmbeddingsRequest = {}
+  ): Promise<BackfillEmbeddingsResponse> {
+    const response = await api.post(
+      `/api/v1/sessions/${sessionId}/search-index/backfill-embeddings`,
+      options
+    );
+    return response.data;
+  },
+
+  /**
+   * 补建用户所有 embedding
+   * @param options 补建选项
+   */
+  async backfillAllEmbeddings(
+    options: BackfillEmbeddingsRequest = {}
+  ): Promise<BackfillEmbeddingsResponse> {
+    const response = await api.post('/api/v1/search-index/backfill-embeddings', options);
+    return response.data;
+  },
+};

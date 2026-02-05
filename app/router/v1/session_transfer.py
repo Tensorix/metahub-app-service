@@ -100,6 +100,10 @@ async def import_session(
     file: UploadFile = File(..., description="导出文件"),
     format: str = Query("auto", description="导入格式，auto 自动检测"),
     merge_senders: bool = Query(True, description="是否合并同名发送者"),
+    skip_embedding: bool = Query(
+        False,
+        description="是否跳过 embedding 生成（只创建文本索引用于模糊搜索，可大幅节省 API 成本）",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -111,6 +115,7 @@ async def import_session(
             user_id=current_user.id,
             format=format,
             merge_senders=merge_senders,
+            skip_embedding=skip_embedding,
         )
         return result
     except ValueError as e:
