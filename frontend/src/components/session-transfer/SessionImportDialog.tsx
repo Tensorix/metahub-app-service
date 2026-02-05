@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Upload, AlertCircle, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle2, Loader2, AlertTriangle, Info } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -16,6 +16,12 @@ import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { useSessionTransfer } from '@/hooks/useSessionTransfer';
 import { formatFileSize, getSessionTypeLabel } from '@/lib/utils';
@@ -29,6 +35,8 @@ export function SessionImportDialog({ onSuccess, trigger }: SessionImportDialogP
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [mergeSenders, setMergeSenders] = useState(true);
+  const [skipEmbedding, setSkipEmbedding] = useState(true); // 默认跳过 embedding 以节省成本
+  const [autoIndex, setAutoIndex] = useState(true);
   const [step, setStep] = useState<'select' | 'preview' | 'importing'>('select');
   
   const {
@@ -65,12 +73,16 @@ export function SessionImportDialog({ onSuccess, trigger }: SessionImportDialogP
     
     setStep('importing');
     try {
-      const result = await importSessions(file, { mergeSenders });
+      const result = await importSessions(file, { 
+        mergeSenders,
+        skipEmbedding,
+        autoIndex,
+      });
       
       if (result) {
         toast({
           title: '导入成功',
-          description: `已导入 ${result.imported_sessions.length} 个会话`,
+          description: `已导入 ${result.imported_sessions.length} 个会话${autoIndex ? '，索引任务正在后台执行' : ''}`,
         });
         setOpen(false);
         resetState();
@@ -89,6 +101,8 @@ export function SessionImportDialog({ onSuccess, trigger }: SessionImportDialogP
   const resetState = () => {
     setFile(null);
     setMergeSenders(true);
+    setSkipEmbedding(true);
+    setAutoIndex(true);
     setStep('select');
     clearErrors();
     clearPreview();
@@ -230,19 +244,80 @@ export function SessionImportDialog({ onSuccess, trigger }: SessionImportDialogP
 
           {/* 导入选项 */}
           {previewResult?.valid && step === 'preview' && (
-            <div className="flex items-center justify-between pt-2">
-              <div className="space-y-0.5">
-                <Label htmlFor="merge">合并发送者</Label>
-                <p className="text-xs text-muted-foreground">
-                  相同名称的发送者将复用已有记录
-                </p>
+            <div className="space-y-4 pt-2">
+              {/* 合并发送者 */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="merge">合并发送者</Label>
+                  <p className="text-xs text-muted-foreground">
+                    相同名称的发送者将复用已有记录
+                  </p>
+                </div>
+                <Switch
+                  id="merge"
+                  checked={mergeSenders}
+                  onCheckedChange={setMergeSenders}
+                  disabled={importing}
+                />
               </div>
-              <Switch
-                id="merge"
-                checked={mergeSenders}
-                onCheckedChange={setMergeSenders}
-                disabled={importing}
-              />
+              
+              {/* 自动索引 */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1">
+                    <Label htmlFor="autoIndex">自动创建搜索索引</Label>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[280px]">
+                          <p>索引任务将在后台执行，不会阻塞导入操作。可稍后在会话设置中手动创建索引。</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    导入后自动为消息创建搜索索引
+                  </p>
+                </div>
+                <Switch
+                  id="autoIndex"
+                  checked={autoIndex}
+                  onCheckedChange={setAutoIndex}
+                  disabled={importing}
+                />
+              </div>
+              
+              {/* 跳过向量索引（仅在自动索引开启时显示） */}
+              {autoIndex && (
+                <div className="flex items-center justify-between pl-4 border-l-2 border-muted">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-1">
+                      <Label htmlFor="skipEmbedding">仅文本索引</Label>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-[280px]">
+                            <p>文本索引支持关键词搜索。向量索引额外支持语义搜索，但会产生 API 费用。可稍后在会话设置中补建向量索引。</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      跳过向量生成，节省 API 成本
+                    </p>
+                  </div>
+                  <Switch
+                    id="skipEmbedding"
+                    checked={skipEmbedding}
+                    onCheckedChange={setSkipEmbedding}
+                    disabled={importing}
+                  />
+                </div>
+              )}
             </div>
           )}
 

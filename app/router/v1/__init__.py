@@ -14,6 +14,7 @@ from .filesystem import router as filesystem_router
 from .admin_embedding import router as admin_embedding_router
 from .tools import router as tools_router
 from .session_transfer import router as session_transfer_router
+from .background_task import router as background_task_router
 
 router = APIRouter()
 router.include_router(experimental_router, prefix="", tags=["v1"])
@@ -31,3 +32,4 @@ router.include_router(filesystem_router, prefix="", tags=["filesystem"])
 router.include_router(admin_embedding_router, prefix="", tags=["admin-embedding"])
 router.include_router(tools_router, prefix="", tags=["tools"])
 router.include_router(session_transfer_router, prefix="", tags=["session-transfer"])
+router.include_router(background_task_router, prefix="", tags=["background-tasks"])

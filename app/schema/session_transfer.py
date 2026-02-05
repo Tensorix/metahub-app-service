@@ -138,6 +138,7 @@ class SessionImportResponse(BaseModel):
     success: bool
     imported_sessions: list[ImportedSessionInfo]
     total_statistics: ImportStatistics
+    message: Optional[str] = None  # 可选的附加消息
 
 
 class DuplicateCheck(BaseModel):

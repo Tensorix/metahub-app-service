@@ -9,6 +9,11 @@ from app.db.session import get_db
 from app.db.model.user import User
 from app.deps import get_current_user
 from app.service.session_transfer import SessionTransferService
+from app.service.background_task import (
+    BackgroundTaskService,
+    run_task_in_background,
+    execute_index_session_task,
+)
 from app.schema.session_transfer import (
     BatchExportRequest,
     SessionImportResponse,
@@ -94,7 +99,7 @@ async def export_sessions_batch(
     "/sessions/import",
     response_model=SessionImportResponse,
     summary="导入会话",
-    description="从导出文件导入会话数据，支持 JSON/JSONL/ZIP 格式",
+    description="从导出文件导入会话数据，支持 JSON/JSONL/ZIP 格式。索引操作在后台异步执行，不阻塞导入。",
 )
 async def import_session(
     file: UploadFile = File(..., description="导出文件"),
@@ -104,10 +109,18 @@ async def import_session(
         False,
         description="是否跳过 embedding 生成（只创建文本索引用于模糊搜索，可大幅节省 API 成本）",
     ),
+    auto_index: bool = Query(
+        True,
+        description="是否自动创建搜索索引（后台任务）。设为 False 可稍后手动触发。",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """导入会话数据"""
+    """导入会话数据
+    
+    导入完成后会自动创建后台任务为消息建立搜索索引。
+    可以通过 /background-tasks 接口查看任务进度。
+    """
     try:
         result = await SessionTransferService.import_sessions(
             db=db,
@@ -117,6 +130,33 @@ async def import_session(
             merge_senders=merge_senders,
             skip_embedding=skip_embedding,
         )
+        
+        # 为每个导入的 pm/group 会话创建后台索引任务
+        if auto_index and result.imported_sessions:
+            task_ids = []
+            for session_info in result.imported_sessions:
+                if session_info.type in ("pm", "group"):
+                    task = BackgroundTaskService.create_task(
+                        db=db,
+                        user_id=current_user.id,
+                        task_type="index_session",
+                        session_id=session_info.session_id,
+                        params={
+                            "skip_embedding": skip_embedding,
+                        },
+                    )
+                    run_task_in_background(
+                        execute_index_session_task,
+                        task.id,
+                        user_id=current_user.id,
+                        session_id=session_info.session_id,
+                        skip_embedding=skip_embedding,
+                    )
+                    task_ids.append(str(task.id))
+            
+            if task_ids:
+                result.message = f"{result.message}。索引任务已创建（{len(task_ids)} 个），正在后台执行。"
+        
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

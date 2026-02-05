@@ -14,3 +14,4 @@ from .user import User, UserToken
 from .embedding_config import EmbeddingConfig
 from .message_search_index import MessageSearchIndex
 from .message_embedding import MessageEmbedding
+from .background_task import BackgroundTask

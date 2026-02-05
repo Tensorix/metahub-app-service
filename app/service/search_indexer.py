@@ -568,6 +568,29 @@ class SearchIndexerService:
 
     # ========== Backfill Embeddings ==========
 
+    def get_missing_embeddings_count(
+        self,
+        db: Session,
+        user_id: Optional[UUID] = None,
+        session_id: Optional[UUID] = None,
+    ) -> int:
+        """获取没有 embedding 的搜索索引数量。"""
+        query = (
+            db.query(MessageSearchIndex)
+            .outerjoin(
+                MessageEmbedding,
+                MessageEmbedding.search_index_id == MessageSearchIndex.id,
+            )
+            .filter(MessageEmbedding.id.is_(None))
+        )
+        
+        if user_id:
+            query = query.filter(MessageSearchIndex.user_id == user_id)
+        if session_id:
+            query = query.filter(MessageSearchIndex.session_id == session_id)
+        
+        return query.count()
+
     def backfill_embeddings(
         self,
         db: Session,

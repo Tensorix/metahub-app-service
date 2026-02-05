@@ -73,3 +73,4 @@ class Session(Base):
     topics: Mapped[list["Topic"]] = relationship("Topic", back_populates="session", lazy="dynamic")
     messages: Mapped[list["Message"]] = relationship("Message", back_populates="session", lazy="dynamic")
     agent: Mapped[Optional["Agent"]] = relationship("Agent", back_populates="sessions")
+    background_tasks: Mapped[list["BackgroundTask"]] = relationship("BackgroundTask", back_populates="session")

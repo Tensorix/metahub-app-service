@@ -468,6 +468,10 @@ export interface BatchExportOptions extends ExportOptions {
 export interface ImportOptions {
   format?: string;
   mergeSenders?: boolean;
+  /** 是否跳过 embedding 生成（只创建文本索引，节省成本） */
+  skipEmbedding?: boolean;
+  /** 是否自动创建搜索索引（后台任务），默认 true */
+  autoIndex?: boolean;
 }
 
 // ============ Session Transfer API ============
@@ -558,6 +562,12 @@ export const sessionTransferApi = {
     if (options.mergeSenders !== undefined) {
       params.append('merge_senders', String(options.mergeSenders));
     }
+    if (options.skipEmbedding !== undefined) {
+      params.append('skip_embedding', String(options.skipEmbedding));
+    }
+    if (options.autoIndex !== undefined) {
+      params.append('auto_index', String(options.autoIndex));
+    }
     
     const response = await api.post(
       `/api/v1/sessions/import?${params.toString()}`,
@@ -647,9 +657,10 @@ export const searchIndexApi = {
   /**
    * 获取会话搜索索引统计
    * @param sessionId 会话 ID
+   * @param signal 可选的 AbortSignal 用于取消请求
    */
-  async getSessionStats(sessionId: string): Promise<SessionSearchIndexStats> {
-    const response = await api.get(`/api/v1/sessions/${sessionId}/search-index/stats`);
+  async getSessionStats(sessionId: string, signal?: AbortSignal): Promise<SessionSearchIndexStats> {
+    const response = await api.get(`/api/v1/sessions/${sessionId}/search-index/stats`, { signal });
     return response.data;
   },
 
@@ -702,6 +713,125 @@ export const searchIndexApi = {
     options: BackfillEmbeddingsRequest = {}
   ): Promise<BackfillEmbeddingsResponse> {
     const response = await api.post('/api/v1/search-index/backfill-embeddings', options);
+    return response.data;
+  },
+};
+// ============ Background Task API Types ============
+
+export interface BackgroundTask {
+  id: string;
+  task_type: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  session_id?: string;
+  total_items: number;
+  processed_items: number;
+  failed_items: number;
+  progress_percent: number;
+  result?: string;
+  error?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+}
+
+export interface BackgroundTaskListResponse {
+  tasks: BackgroundTask[];
+  total: number;
+}
+
+export interface TaskStartedResponse {
+  task_id: string;
+  task_type: string;
+  status: string;
+  message: string;
+}
+
+// ============ Background Task API ============
+
+export const backgroundTaskApi = {
+  /**
+   * 获取后台任务列表
+   */
+  async listTasks(params?: {
+    status?: string;
+    task_type?: string;
+    limit?: number;
+  }): Promise<BackgroundTaskListResponse> {
+    const response = await api.get('/api/v1/background-tasks', { params });
+    return response.data;
+  },
+
+  /**
+   * 获取任务详情
+   */
+  async getTask(taskId: string): Promise<BackgroundTask> {
+    const response = await api.get(`/api/v1/background-tasks/${taskId}`);
+    return response.data;
+  },
+
+  /**
+   * 取消任务
+   */
+  async cancelTask(taskId: string): Promise<{ success: boolean; message: string }> {
+    const response = await api.post(`/api/v1/background-tasks/${taskId}/cancel`);
+    return response.data;
+  },
+
+  /**
+   * 创建索引任务
+   */
+  async startIndexTask(
+    sessionId: string,
+    skipEmbedding: boolean = false
+  ): Promise<TaskStartedResponse> {
+    const response = await api.post('/api/v1/background-tasks/index-session', {
+      session_id: sessionId,
+      skip_embedding: skipEmbedding,
+    });
+    return response.data;
+  },
+
+  /**
+   * 创建 embedding 补建任务
+   */
+  async startBackfillTask(
+    sessionId?: string,
+    batchSize: number = 100
+  ): Promise<TaskStartedResponse> {
+    const response = await api.post('/api/v1/background-tasks/backfill-embeddings', {
+      session_id: sessionId,
+      batch_size: batchSize,
+    });
+    return response.data;
+  },
+
+  /**
+   * 创建重建索引任务
+   */
+  async startReindexTask(
+    sessionId: string,
+    skipEmbedding: boolean = false
+  ): Promise<TaskStartedResponse> {
+    const response = await api.post('/api/v1/background-tasks/reindex-session', {
+      session_id: sessionId,
+      skip_embedding: skipEmbedding,
+    });
+    return response.data;
+  },
+
+  /**
+   * 获取会话的后台任务
+   * @param signal 可选的 AbortSignal 用于取消请求
+   */
+  async getSessionTasks(
+    sessionId: string,
+    status?: string,
+    signal?: AbortSignal
+  ): Promise<BackgroundTaskListResponse> {
+    const response = await api.get(`/api/v1/background-tasks/session/${sessionId}`, {
+      params: { status },
+      signal,
+    });
     return response.data;
   },
 };

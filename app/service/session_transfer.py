@@ -889,29 +889,10 @@ class SessionTransferService:
         db.commit()
         db.refresh(new_session)
         
-        # 5. 为导入的消息创建搜索索引（仅针对 pm/group 类型）
-        if new_session.type in ("pm", "group"):
-            try:
-                from app.service.search_indexer import SearchIndexerService
-                indexer = SearchIndexerService()
-                
-                # 获取所有导入的消息
-                imported_messages = db.query(Message).filter(
-                    Message.session_id == new_session.id
-                ).all()
-                
-                # 批量创建索引
-                # skip_embedding=True 时只创建文本索引用于模糊搜索，不生成 embedding
-                for message in imported_messages:
-                    try:
-                        indexer.index_message(db, message, skip_embedding=skip_embedding)
-                    except Exception as e:
-                        logger.error(f"Failed to index imported message {message.id}: {e}")
-                
-                index_mode = "text-only (fuzzy search)" if skip_embedding else "full (fuzzy + vector search)"
-                logger.info(f"Created {index_mode} search index for {len(imported_messages)} imported messages")
-            except Exception as e:
-                logger.error(f"Failed to create search index for imported session {new_session.id}: {e}")
+        # 注意：索引操作改为后台任务执行，不在这里同步处理
+        # 会话创建后，调用方可以选择：
+        # 1. 立即创建后台任务进行索引
+        # 2. 让用户稍后手动触发索引
         
         return ImportedSessionInfo(
             session_id=new_session.id,
