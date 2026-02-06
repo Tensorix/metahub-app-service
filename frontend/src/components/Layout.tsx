@@ -8,7 +8,7 @@ import { useBreakpoints } from '@/hooks/useMediaQuery';
 export function Layout() {
   const { isMobile } = useBreakpoints();
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (

@@ -107,7 +107,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: {},
   messagesLoading: {},
   sessionMessages: {},
-  topicSidebarCollapsed: false,
+  topicSidebarCollapsed: typeof window !== 'undefined' ? window.innerWidth < 1024 : false,
   leftDrawerOpen: false,
   rightDrawerOpen: false,
   boundaryProgress: 0,
