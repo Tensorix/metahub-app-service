@@ -231,15 +231,105 @@ export interface TopicUpdate {
   name?: string;
 }
 
+// ========== MessagePart 类型扩展 ==========
+
+export type MessagePartType =
+  | 'text'
+  | 'image'
+  | 'at'
+  | 'url'
+  | 'json'
+  | 'tool_call'
+  | 'tool_result'
+  | 'error'
+  | 'thinking';
+
 export interface MessagePart {
   id: string;
   message_id: string;
-  type: string;
+  type: MessagePartType;
   content: string;
   metadata?: Record<string, any>;
   event_id?: string;
   raw_data?: Record<string, any>;
   created_at: string;
+}
+
+// ========== AI Part 内容解析类型 ==========
+
+export interface ToolCallContent {
+  call_id: string;
+  name: string;
+  args: Record<string, unknown>;
+}
+
+export interface ToolResultContent {
+  call_id: string;
+  name: string;
+  result: string;
+  success: boolean;
+}
+
+export interface ErrorContent {
+  error: string;
+  code?: string;
+  recoverable?: boolean;
+}
+
+export interface ThinkingContent {
+  content: string;
+  timestamp?: string;
+}
+
+// ========== 类型守卫函数 ==========
+
+export function isToolCallPart(part: MessagePart): boolean {
+  return part.type === 'tool_call';
+}
+
+export function isToolResultPart(part: MessagePart): boolean {
+  return part.type === 'tool_result';
+}
+
+export function isErrorPart(part: MessagePart): boolean {
+  return part.type === 'error';
+}
+
+export function isThinkingPart(part: MessagePart): boolean {
+  return part.type === 'thinking';
+}
+
+export function isTextPart(part: MessagePart): boolean {
+  return part.type === 'text';
+}
+
+// ========== Part 内容解析函数 ==========
+
+export function parseToolCallContent(part: MessagePart): ToolCallContent | null {
+  if (part.type !== 'tool_call') return null;
+  try {
+    return JSON.parse(part.content) as ToolCallContent;
+  } catch {
+    return null;
+  }
+}
+
+export function parseToolResultContent(part: MessagePart): ToolResultContent | null {
+  if (part.type !== 'tool_result') return null;
+  try {
+    return JSON.parse(part.content) as ToolResultContent;
+  } catch {
+    return null;
+  }
+}
+
+export function parseErrorContent(part: MessagePart): ErrorContent | null {
+  if (part.type !== 'error') return null;
+  try {
+    return JSON.parse(part.content) as ErrorContent;
+  } catch {
+    return null;
+  }
 }
 
 export interface MessageSender {

@@ -38,11 +38,19 @@ interface ChatState {
   isStreaming: boolean;
   streamingMessageId: string | null;
   streamingContent: string;
+  streamingThinking: string;
+  isThinking: boolean;
   abortController: AbortController | null;
   activeToolCall: {
+    call_id: string;
     name: string;
     args: Record<string, unknown>;
   } | null;
+  pendingParts: Array<{
+    type: 'thinking' | 'tool_call' | 'tool_result' | 'error';
+    content: string;
+    metadata?: Record<string, unknown>;
+  }>;
   streamError: string | null;
 
   // ===== 计算属性（改为方法，避免无限循环） =====
@@ -109,8 +117,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isStreaming: false,
   streamingMessageId: null,
   streamingContent: '',
+  streamingThinking: '',
+  isThinking: false,
   abortController: null,
   activeToolCall: null,
+  pendingParts: [],
   streamError: null,
 
   // ===== 计算属性（改为方法，避免无限循环） =====
@@ -526,10 +537,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       is_deleted: false,
-      parts: [{ id: userMessageId, message_id: userMessageId, type: 'text', content, created_at: new Date().toISOString() }],
+      parts: [{ id: `${userMessageId}-part`, message_id: userMessageId, type: 'text', content, created_at: new Date().toISOString() }],
     };
 
-    // 添加空的 AI 消息占位
+    // 添加空的 AI 消息占位（支持多 Part）
     const aiMessage: Message = {
       id: aiMessageId,
       session_id: currentSessionId,
@@ -538,7 +549,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       is_deleted: false,
-      parts: [{ id: aiMessageId, message_id: aiMessageId, type: 'text', content: '', created_at: new Date().toISOString() }],
+      parts: [],  // 初始为空，动态添加
     };
 
     set((state) => {
@@ -552,14 +563,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         isStreaming: true,
         streamingMessageId: aiMessageId,
         streamingContent: '',
+        streamingThinking: '',
+        isThinking: false,
         abortController: controller,
         streamError: null,
         activeToolCall: null,
+        pendingParts: [],
       };
     });
 
     try {
-      let fullResponse: string[] = [];
+      let currentCallId: string | null = null;
+      let currentTextPartIndex = 0; // 跟踪当前是第几个 text part
 
       console.log('Starting AI chat stream:', { currentSessionId, content, topicId });
 
@@ -572,30 +587,49 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       )) {
         console.log('Received event:', event);
+        
         // 处理不同事件类型
         switch (event.event) {
           case 'message':
             set((state) => {
-              const newContent = state.streamingContent + event.data.content;
-              fullResponse.push(event.data.content);
+              const newContent = state.streamingContent + (event.data.content || '');
 
-              // 更新消息内容
+              // 更新消息的 text part
               const topicKey = topicId || currentSessionId;
               const currentMessages = state.messages[topicKey] || [];
               const msgIndex = currentMessages.findIndex(
                 (m) => m.id === state.streamingMessageId
               );
+
               if (msgIndex !== -1) {
                 const updatedMessages = [...currentMessages];
-                updatedMessages[msgIndex] = {
-                  ...updatedMessages[msgIndex],
-                  parts: [
+                const message = { ...updatedMessages[msgIndex] };
+
+                // 找到当前的 text part（使用 index 来区分多个 text part）
+                const textPartId = `${message.id}-text-${currentTextPartIndex}`;
+                let textPartIndex = message.parts.findIndex(p => p.id === textPartId);
+                
+                if (textPartIndex === -1) {
+                  // 创建新的 text part
+                  message.parts = [
+                    ...message.parts,
                     {
-                      ...updatedMessages[msgIndex].parts[0],
+                      id: textPartId,
+                      message_id: message.id,
+                      type: 'text',
                       content: newContent,
-                    },
-                  ],
-                };
+                      created_at: new Date().toISOString(),
+                    }
+                  ];
+                } else {
+                  // 更新现有 text part
+                  message.parts = message.parts.map((p, i) =>
+                    i === textPartIndex ? { ...p, content: newContent } : p
+                  );
+                }
+
+                updatedMessages[msgIndex] = message;
+
                 return {
                   streamingContent: newContent,
                   messages: {
@@ -608,19 +642,226 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
             break;
 
+          case 'thinking':
+            set((state) => {
+              const newThinking = state.streamingThinking + (event.data.content || '');
+
+              // 更新消息的 thinking part
+              const topicKey = topicId || currentSessionId;
+              const currentMessages = state.messages[topicKey] || [];
+              const msgIndex = currentMessages.findIndex(
+                (m) => m.id === state.streamingMessageId
+              );
+
+              if (msgIndex !== -1) {
+                const updatedMessages = [...currentMessages];
+                const message = { ...updatedMessages[msgIndex] };
+
+                // 找到或创建 thinking part
+                let thinkingPartIndex = message.parts.findIndex(p => p.type === 'thinking');
+                if (thinkingPartIndex === -1) {
+                  message.parts = [
+                    {
+                      id: `${message.id}-thinking`,
+                      message_id: message.id,
+                      type: 'thinking',
+                      content: newThinking,
+                      created_at: new Date().toISOString(),
+                    },
+                    ...message.parts,
+                  ];
+                } else {
+                  message.parts = message.parts.map((p, i) =>
+                    i === thinkingPartIndex ? { ...p, content: newThinking } : p
+                  );
+                }
+
+                updatedMessages[msgIndex] = message;
+
+                return {
+                  streamingThinking: newThinking,
+                  isThinking: true,
+                  messages: {
+                    ...state.messages,
+                    [topicKey]: updatedMessages,
+                  },
+                };
+              }
+              return { streamingThinking: newThinking, isThinking: true };
+            });
+            break;
+
           case 'tool_call':
-            set(() => ({
-              activeToolCall: {
-                name: event.data.name,
-                args: event.data.args,
-              },
-            }));
+            currentCallId = event.data.call_id || `call_${Date.now()}`;
+
+            set((state) => {
+              const toolCallPart = {
+                type: 'tool_call' as const,
+                content: JSON.stringify({
+                  call_id: currentCallId,
+                  name: event.data.name,
+                  args: event.data.args,
+                }),
+                metadata: { timestamp: new Date().toISOString() },
+              };
+
+              // 更新消息 parts
+              const topicKey = topicId || currentSessionId;
+              const currentMessages = state.messages[topicKey] || [];
+              const msgIndex = currentMessages.findIndex(
+                (m) => m.id === state.streamingMessageId
+              );
+
+              if (msgIndex !== -1) {
+                const updatedMessages = [...currentMessages];
+                const message = { ...updatedMessages[msgIndex] };
+                message.parts = [
+                  ...message.parts,
+                  {
+                    id: `${message.id}-tc-${currentCallId}`,
+                    message_id: message.id,
+                    type: 'tool_call',
+                    content: toolCallPart.content,
+                    metadata: toolCallPart.metadata,
+                    created_at: new Date().toISOString(),
+                  }
+                ];
+                updatedMessages[msgIndex] = message;
+
+                return {
+                  activeToolCall: {
+                    call_id: currentCallId!,
+                    name: event.data.name || '',
+                    args: event.data.args || {},
+                  },
+                  pendingParts: [...state.pendingParts, toolCallPart],
+                  messages: {
+                    ...state.messages,
+                    [topicKey]: updatedMessages,
+                  },
+                };
+              }
+
+              return {
+                activeToolCall: {
+                  call_id: currentCallId!,
+                  name: event.data.name || '',
+                  args: event.data.args || {},
+                },
+                pendingParts: [...state.pendingParts, toolCallPart],
+              };
+            });
+            
+            // 重要：工具调用后，重置 streamingContent 并增加 text part index
+            // 这样后续的 message 事件会创建新的 text part
+            set({ streamingContent: '' });
+            currentTextPartIndex++;
             break;
 
           case 'tool_result':
-            set(() => ({
-              activeToolCall: null,
-            }));
+            set((state) => {
+              const resultCallId = event.data.call_id || currentCallId;
+              const toolResultPart = {
+                type: 'tool_result' as const,
+                content: JSON.stringify({
+                  call_id: resultCallId,
+                  name: event.data.name,
+                  result: event.data.result,
+                  success: event.data.success ?? true,
+                }),
+                metadata: { timestamp: new Date().toISOString() },
+              };
+
+              // 更新消息 parts
+              const topicKey = topicId || currentSessionId;
+              const currentMessages = state.messages[topicKey] || [];
+              const msgIndex = currentMessages.findIndex(
+                (m) => m.id === state.streamingMessageId
+              );
+
+              if (msgIndex !== -1) {
+                const updatedMessages = [...currentMessages];
+                const message = { ...updatedMessages[msgIndex] };
+                message.parts = [
+                  ...message.parts,
+                  {
+                    id: `${message.id}-tr-${resultCallId}`,
+                    message_id: message.id,
+                    type: 'tool_result',
+                    content: toolResultPart.content,
+                    metadata: toolResultPart.metadata,
+                    created_at: new Date().toISOString(),
+                  }
+                ];
+                updatedMessages[msgIndex] = message;
+
+                return {
+                  activeToolCall: null,
+                  pendingParts: [...state.pendingParts, toolResultPart],
+                  messages: {
+                    ...state.messages,
+                    [topicKey]: updatedMessages,
+                  },
+                };
+              }
+
+              return {
+                activeToolCall: null,
+                pendingParts: [...state.pendingParts, toolResultPart],
+              };
+            });
+            currentCallId = null;
+            break;
+
+          case 'error':
+            set((state) => {
+              const errorPart = {
+                type: 'error' as const,
+                content: JSON.stringify({
+                  error: event.data.error,
+                  code: event.data.code,
+                }),
+                metadata: { timestamp: new Date().toISOString() },
+              };
+
+              // 更新消息 parts
+              const topicKey = topicId || currentSessionId;
+              const currentMessages = state.messages[topicKey] || [];
+              const msgIndex = currentMessages.findIndex(
+                (m) => m.id === state.streamingMessageId
+              );
+
+              if (msgIndex !== -1) {
+                const updatedMessages = [...currentMessages];
+                const message = { ...updatedMessages[msgIndex] };
+                message.parts = [
+                  ...message.parts,
+                  {
+                    id: `${message.id}-err-${Date.now()}`,
+                    message_id: message.id,
+                    type: 'error',
+                    content: errorPart.content,
+                    metadata: errorPart.metadata,
+                    created_at: new Date().toISOString(),
+                  }
+                ];
+                updatedMessages[msgIndex] = message;
+
+                return {
+                  streamError: event.data.error || 'Unknown error',
+                  pendingParts: [...state.pendingParts, errorPart],
+                  messages: {
+                    ...state.messages,
+                    [topicKey]: updatedMessages,
+                  },
+                };
+              }
+
+              return {
+                streamError: event.data.error || 'Unknown error',
+                pendingParts: [...state.pendingParts, errorPart],
+              };
+            });
             break;
 
           case 'done':
@@ -630,6 +871,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               streamingMessageId: null,
               abortController: null,
               activeToolCall: null,
+              pendingParts: [],
             }));
 
             // 刷新消息列表获取真实 ID
@@ -637,53 +879,53 @@ export const useChatStore = create<ChatState>((set, get) => ({
               await get().loadMessages(currentSessionId, topicId);
             }
             break;
-
-          case 'error':
-            set(() => ({
-              isStreaming: false,
-              streamError: event.data.error,
-              abortController: null,
-              activeToolCall: null,
-            }));
-            break;
         }
       }
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
-        // 用户取消，不是错误
+        // 用户取消
         set((state) => {
           const topicKey = topicId || currentSessionId;
           const currentMessages = state.messages[topicKey] || [];
           const msgIndex = currentMessages.findIndex(
             (m) => m.id === state.streamingMessageId
           );
+
           if (msgIndex !== -1) {
             const updatedMessages = [...currentMessages];
-            updatedMessages[msgIndex] = {
-              ...updatedMessages[msgIndex],
-              parts: [
-                {
-                  ...updatedMessages[msgIndex].parts[0],
-                  content: updatedMessages[msgIndex].parts[0].content + ' [已取消]',
-                },
-              ],
-            };
+            const message = { ...updatedMessages[msgIndex] };
+
+            // 在 text part 后添加取消标记
+            const textPartIndex = message.parts.findIndex(p => p.type === 'text');
+            if (textPartIndex !== -1) {
+              message.parts = message.parts.map((p, i) =>
+                i === textPartIndex
+                  ? { ...p, content: p.content + ' [已取消]' }
+                  : p
+              );
+            }
+
+            updatedMessages[msgIndex] = message;
+
             return {
               isStreaming: false,
               abortController: null,
               activeToolCall: null,
               streamingMessageId: null,
+              pendingParts: [],
               messages: {
                 ...state.messages,
                 [topicKey]: updatedMessages,
               },
             };
           }
+
           return {
             isStreaming: false,
             abortController: null,
             activeToolCall: null,
             streamingMessageId: null,
+            pendingParts: [],
           };
         });
       } else {
@@ -693,6 +935,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           abortController: null,
           activeToolCall: null,
           streamingMessageId: null,
+          pendingParts: [],
         }));
       }
     }
@@ -769,8 +1012,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isStreaming: false,
       streamingMessageId: null,
       streamingContent: '',
+      streamingThinking: '',
+      isThinking: false,
       abortController: null,
       activeToolCall: null,
+      pendingParts: [],
       streamError: null,
     });
   },

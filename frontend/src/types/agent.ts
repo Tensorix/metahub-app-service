@@ -5,6 +5,7 @@
 // SSE Event types
 export type ChatEventType =
   | 'message'
+  | 'thinking'
   | 'tool_call'
   | 'tool_result'
   | 'done'
@@ -17,9 +18,17 @@ export interface ChatEventMessage {
   };
 }
 
+export interface ChatEventThinking {
+  event: 'thinking';
+  data: {
+    content: string;
+  };
+}
+
 export interface ChatEventToolCall {
   event: 'tool_call';
   data: {
+    call_id: string;
     name: string;
     args: Record<string, unknown>;
   };
@@ -28,8 +37,10 @@ export interface ChatEventToolCall {
 export interface ChatEventToolResult {
   event: 'tool_result';
   data: {
+    call_id: string;
     name: string;
     result: string;
+    success?: boolean;
   };
 }
 
@@ -44,11 +55,13 @@ export interface ChatEventError {
   event: 'error';
   data: {
     error: string;
+    code?: string;
   };
 }
 
 export type ChatEvent =
   | ChatEventMessage
+  | ChatEventThinking
   | ChatEventToolCall
   | ChatEventToolResult
   | ChatEventDone
@@ -80,14 +93,21 @@ export interface WSIncomingChunk {
   content: string;
 }
 
+export interface WSIncomingThinking {
+  type: 'thinking';
+  content: string;
+}
+
 export interface WSIncomingToolCall {
   type: 'tool_call';
+  call_id: string;
   name: string;
   args: Record<string, unknown>;
 }
 
 export interface WSIncomingToolResult {
   type: 'tool_result';
+  call_id: string;
   name: string;
   result: string;
 }
@@ -107,6 +127,7 @@ export interface WSIncomingStopped {
 
 export type WSIncomingMessage =
   | WSIncomingChunk
+  | WSIncomingThinking
   | WSIncomingToolCall
   | WSIncomingToolResult
   | WSIncomingDone

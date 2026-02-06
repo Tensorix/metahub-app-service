@@ -8,8 +8,11 @@ export function useAIChat() {
   const {
     isStreaming,
     streamingContent,
+    streamingThinking,
+    isThinking,
     streamingMessageId,
     activeToolCall,
+    pendingParts,
     streamError,
     sendAIMessage,
     stopGeneration,
@@ -47,8 +50,11 @@ export function useAIChat() {
     // State
     isStreaming,
     streamingContent,
+    streamingThinking,
+    isThinking,
     streamingMessageId,
     activeToolCall,
+    pendingParts,
     error: streamError,
 
     // Actions

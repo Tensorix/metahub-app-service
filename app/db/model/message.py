@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -48,6 +49,11 @@ class Message(Base):
     )
     external_id: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True, index=True, comment="外部系统的消息ID"
+    )
+    message_str: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="消息纯文本内容，由 parts 合成，用于检索和统一处理"
     )
 
     created_at: Mapped[datetime] = mapped_column(

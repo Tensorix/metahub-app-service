@@ -9,7 +9,10 @@ Provides:
 
 import asyncio
 import json
-from typing import Optional
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Optional, List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
@@ -30,12 +33,165 @@ from app.schema.agent_chat import (
 from app.agent import AgentFactory
 from app.service.session import TopicService, MessageService
 from app.service.auth import TokenService
+from app.constants.message import MessagePartType
+from app.utils.message_utils import parts_to_message_str
 
 
 router = APIRouter()
 
 # Store active generation tasks for cancellation
 _active_tasks: dict[str, asyncio.Task] = {}
+
+
+@dataclass
+class StreamingPart:
+    """流式过程中收集的 Part 数据"""
+    type: str
+    content: dict  # 原始数据，稍后序列化
+    timestamp: datetime = field(default_factory=lambda: datetime.utcnow())
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class StreamingCollector:
+    """收集流式事件的数据结构"""
+    text_chunks: List[str] = field(default_factory=list)
+    thinking_chunks: List[str] = field(default_factory=list)
+    tool_calls: List[StreamingPart] = field(default_factory=list)
+    tool_results: List[StreamingPart] = field(default_factory=list)
+    errors: List[StreamingPart] = field(default_factory=list)
+    _call_counter: int = field(default=0)
+
+    def generate_call_id(self) -> str:
+        """生成唯一的 call_id"""
+        self._call_counter += 1
+        return f"call_{uuid.uuid4().hex[:8]}_{self._call_counter}"
+
+    def add_tool_call(self, name: str, args: dict, call_id: Optional[str] = None) -> str:
+        """添加工具调用，返回 call_id"""
+        if call_id is None:
+            call_id = self.generate_call_id()
+
+        self.tool_calls.append(StreamingPart(
+            type=MessagePartType.TOOL_CALL,
+            content={
+                "call_id": call_id,
+                "name": name,
+                "args": args,
+            },
+            metadata={"timestamp": datetime.utcnow().isoformat()}
+        ))
+        return call_id
+
+    def add_tool_result(self, name: str, result: str, call_id: str, success: bool = True):
+        """添加工具结果"""
+        self.tool_results.append(StreamingPart(
+            type=MessagePartType.TOOL_RESULT,
+            content={
+                "call_id": call_id,
+                "name": name,
+                "result": result,
+                "success": success,
+            },
+            metadata={"timestamp": datetime.utcnow().isoformat()}
+        ))
+
+    def add_error(self, error: str, code: Optional[str] = None, context: Optional[str] = None):
+        """添加错误"""
+        content = {"error": error}
+        if code:
+            content["code"] = code
+
+        metadata = {"timestamp": datetime.utcnow().isoformat()}
+        if context:
+            metadata["context"] = context
+
+        self.errors.append(StreamingPart(
+            type=MessagePartType.ERROR,
+            content=content,
+            metadata=metadata
+        ))
+
+    def add_text(self, chunk: str):
+        """添加文本片段"""
+        self.text_chunks.append(chunk)
+
+    def add_thinking(self, chunk: str):
+        """添加思考内容片段"""
+        self.thinking_chunks.append(chunk)
+
+    def get_full_text(self) -> str:
+        """获取完整文本"""
+        return "".join(self.text_chunks)
+
+    def get_full_thinking(self) -> str:
+        """获取完整思考内容"""
+        return "".join(self.thinking_chunks)
+
+    def has_content(self) -> bool:
+        """是否有任何内容"""
+        return bool(
+            self.text_chunks or
+            self.thinking_chunks or
+            self.tool_calls or
+            self.tool_results or
+            self.errors
+        )
+
+    def to_parts_data(self) -> List[dict]:
+        """
+        转换为 MessagePart 创建数据列表
+        按时间顺序排列：thinking -> tool_call -> tool_result -> text -> error
+        """
+        parts = []
+
+        # 添加思考内容（如果有，放在最前面）
+        full_thinking = self.get_full_thinking()
+        if full_thinking:
+            parts.append({
+                "type": MessagePartType.THINKING,
+                "content": full_thinking,
+                "metadata_": {"timestamp": datetime.utcnow().isoformat()},
+            })
+
+        # 按时间顺序合并 tool_call 和 tool_result
+        timed_parts = []
+
+        for tc in self.tool_calls:
+            timed_parts.append((tc.timestamp, MessagePartType.TOOL_CALL, tc))
+
+        for tr in self.tool_results:
+            timed_parts.append((tr.timestamp, MessagePartType.TOOL_RESULT, tr))
+
+        # 按时间排序
+        timed_parts.sort(key=lambda x: x[0])
+
+        # 添加排序后的 tool_call/tool_result
+        for _, part_type, part in timed_parts:
+            parts.append({
+                "type": part_type,
+                "content": json.dumps(part.content),
+                "metadata_": part.metadata,
+            })
+
+        # 添加文本（如果有）
+        full_text = self.get_full_text()
+        if full_text:
+            parts.append({
+                "type": MessagePartType.TEXT,
+                "content": full_text,
+                "metadata_": {},
+            })
+
+        # 添加错误（如果有）
+        for err in self.errors:
+            parts.append({
+                "type": MessagePartType.ERROR,
+                "content": json.dumps(err.content),
+                "metadata_": err.metadata,
+            })
+
+        return parts
 
 
 async def _validate_session_for_agent(
@@ -131,6 +287,63 @@ async def _get_or_create_topic(
     return topic
 
 
+async def _save_message_with_parts(
+    db: Session,
+    user_id: UUID,
+    topic_id: UUID,
+    role: str,
+    parts_data: List[dict],
+    message_metadata: Optional[dict] = None,
+) -> Message:
+    """
+    保存消息及其多个 Parts
+
+    Args:
+        db: Database session
+        user_id: User ID
+        topic_id: Topic ID
+        role: Message role (user/assistant)
+        parts_data: List of part data dicts with keys: type, content, metadata_
+        message_metadata: Optional message-level metadata
+
+    Returns:
+        Message instance with parts
+    """
+    # Get session_id from topic
+    topic = db.query(Topic).filter(Topic.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    # 生成 message_str（纯文本，用于检索）
+    message_str = parts_to_message_str(parts_data)
+
+    # Create message
+    message = Message(
+        user_id=user_id,
+        session_id=topic.session_id,
+        topic_id=topic_id,
+        role=role,
+        message_str=message_str,
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+
+    # Create message parts
+    for part_data in parts_data:
+        part = MessagePart(
+            message_id=message.id,
+            type=part_data.get("type", MessagePartType.TEXT),
+            content=part_data.get("content", ""),
+            metadata_=part_data.get("metadata_", {}),
+        )
+        db.add(part)
+
+    db.commit()
+
+    return message
+
+
 async def _save_message(
     db: Session,
     user_id: UUID,
@@ -140,45 +353,14 @@ async def _save_message(
     metadata: Optional[dict] = None,
 ) -> Message:
     """
-    Save a message to the database.
-
-    Args:
-        db: Database session
-        user_id: User ID
-        topic_id: Topic ID
-        role: Message role (user/assistant)
-        content: Message content
-        metadata: Optional metadata
-
-    Returns:
-        Message instance
+    Save a message to the database (兼容旧接口).
     """
-    # Get session_id from topic
-    topic = db.query(Topic).filter(Topic.id == topic_id).first()
-    if not topic:
-        raise HTTPException(status_code=404, detail="Topic not found")
-
-    message = Message(
-        user_id=user_id,
-        session_id=topic.session_id,
-        topic_id=topic_id,
-        role=role,
-    )
-    db.add(message)
-    db.commit()
-    db.refresh(message)
-
-    # Create message part
-    part = MessagePart(
-        message_id=message.id,
-        type="text",
-        content=content,
-        metadata_=metadata or {},
-    )
-    db.add(part)
-    db.commit()
-
-    return message
+    parts_data = [{
+        "type": MessagePartType.TEXT,
+        "content": content,
+        "metadata_": metadata or {},
+    }]
+    return await _save_message_with_parts(db, user_id, topic_id, role, parts_data)
 
 
 @router.post("/sessions/{session_id}/chat")
@@ -268,7 +450,11 @@ async def chat_with_agent(
         
         logger = logging.getLogger(__name__)
         task_key = f"{session_id}:{topic.id}"
-        full_response = []
+        
+        # 使用 StreamingCollector 收集事件
+        collector = StreamingCollector()
+        active_call_id: Optional[str] = None
+        
         # Create a new db session for the generator
         db_stream = SessionLocal()
 
@@ -290,9 +476,36 @@ async def chat_with_agent(
 
                 logger.debug(f"Agent event: {event_type}, data: {event_data}")
 
-                # Collect response text
+                # 收集并转发事件
                 if event_type == "message":
-                    full_response.append(event_data.get("content", ""))
+                    content = event_data.get("content", "")
+                    collector.add_text(content)
+
+                elif event_type == "thinking":
+                    content = event_data.get("content", "")
+                    collector.add_thinking(content)
+
+                elif event_type == "tool_call":
+                    name = event_data.get("name", "")
+                    args = event_data.get("args", {})
+                    # 生成 call_id 并添加到事件数据中
+                    active_call_id = collector.add_tool_call(name, args)
+                    # 将 call_id 添加到转发的事件中
+                    event_data["call_id"] = active_call_id
+
+                elif event_type == "tool_result":
+                    name = event_data.get("name", "")
+                    result = event_data.get("result", "")
+                    success = event_data.get("success", True)
+                    # 使用当前活动的 call_id
+                    if active_call_id:
+                        collector.add_tool_result(name, result, active_call_id, success)
+                        event_data["call_id"] = active_call_id
+                        active_call_id = None  # 重置
+
+                elif event_type == "error":
+                    error_msg = event_data.get("error", "Unknown error")
+                    collector.add_error(error_msg, context="streaming")
 
                 # Yield SSE event - must be a dict with 'data' key for sse-starlette
                 yield {
@@ -302,35 +515,67 @@ async def chat_with_agent(
 
             logger.info(f"Chat stream completed for {task_key}, saving message")
 
-            # Save complete AI message with the new db session
-            if full_response:
-                await _save_message(
+            # 保存完整的 AI 消息（包含所有 Parts）
+            if collector.has_content():
+                parts_data = collector.to_parts_data()
+                await _save_message_with_parts(
                     db_stream,
                     current_user.id,
                     topic.id,
                     "assistant",
-                    "".join(full_response),
+                    parts_data,
                 )
-                logger.info(f"Message saved for {task_key}")
+                logger.info(f"Message saved with {len(parts_data)} parts for {task_key}")
+
+            # 发送 done 事件
+            yield {
+                "event": "done",
+                "data": json.dumps({"status": "complete"}),
+            }
 
         except asyncio.CancelledError:
             logger.info(f"Chat generation cancelled for {task_key}")
-            # Handle cancellation
-            if full_response:
-                await _save_message(
+            
+            # 保存已收集的内容（标记为已取消）
+            if collector.has_content():
+                # 添加取消标记到文本
+                if collector.text_chunks:
+                    collector.text_chunks.append(" [已取消]")
+
+                parts_data = collector.to_parts_data()
+                # 在最后一个 part 的 metadata 中添加 cancelled 标记
+                if parts_data:
+                    parts_data[-1]["metadata_"]["cancelled"] = True
+
+                await _save_message_with_parts(
                     db_stream,
                     current_user.id,
                     topic.id,
                     "assistant",
-                    "".join(full_response) + " [已取消]",
-                    {"cancelled": True},
+                    parts_data,
                 )
+
             yield {
                 "event": "done",
                 "data": json.dumps({"status": "cancelled"}),
             }
+
         except Exception as e:
             logger.error(f"Error in chat stream for {task_key}: {str(e)}", exc_info=True)
+            
+            # 保存已收集的内容 + 错误信息
+            collector.add_error(str(e), context="fatal")
+
+            if collector.has_content():
+                parts_data = collector.to_parts_data()
+                await _save_message_with_parts(
+                    db_stream,
+                    current_user.id,
+                    topic.id,
+                    "assistant",
+                    parts_data,
+                )
+
             yield {
                 "event": "error",
                 "data": json.dumps({"error": str(e)}),
@@ -450,10 +695,13 @@ async def chat_websocket(
                 )
 
                 thread_id = f"topic_{topic.id}"
-                full_response = []
+                
+                # 使用 StreamingCollector
+                collector = StreamingCollector()
+                active_call_id: Optional[str] = None
 
                 async def stream_to_ws():
-                    nonlocal full_response
+                    nonlocal collector, active_call_id
                     try:
                         async for event in agent_service.chat_stream(
                             msg.content,
@@ -466,49 +714,74 @@ async def chat_websocket(
 
                             if event_type == "message":
                                 content = event_data.get("content", "")
-                                full_response.append(content)
+                                collector.add_text(content)
                                 await websocket.send_json({
                                     "type": "chunk",
                                     "content": content,
                                 })
 
+                            elif event_type == "thinking":
+                                content = event_data.get("content", "")
+                                collector.add_thinking(content)
+                                await websocket.send_json({
+                                    "type": "thinking",
+                                    "content": content,
+                                })
+
                             elif event_type == "tool_call":
+                                name = event_data.get("name", "")
+                                args = event_data.get("args", {})
+                                active_call_id = collector.add_tool_call(name, args)
                                 await websocket.send_json({
                                     "type": "tool_call",
-                                    "name": event_data.get("name"),
-                                    "args": event_data.get("args"),
+                                    "name": name,
+                                    "args": args,
+                                    "call_id": active_call_id,
                                 })
 
                             elif event_type == "tool_result":
+                                name = event_data.get("name", "")
+                                result = event_data.get("result", "")
+                                success = event_data.get("success", True)
+                                if active_call_id:
+                                    collector.add_tool_result(name, result, active_call_id, success)
                                 await websocket.send_json({
                                     "type": "tool_result",
-                                    "name": event_data.get("name"),
-                                    "result": event_data.get("result"),
+                                    "name": name,
+                                    "result": result,
+                                    "call_id": active_call_id,
                                 })
+                                active_call_id = None
 
                             elif event_type == "done":
                                 await websocket.send_json({"type": "done"})
 
                             elif event_type == "error":
+                                error_msg = event_data.get("error", "")
+                                collector.add_error(error_msg)
                                 await websocket.send_json({
                                     "type": "error",
-                                    "message": event_data.get("error"),
+                                    "message": error_msg,
                                 })
 
-                        # Save complete response
-                        if full_response:
-                            await _save_message(
+                        # 保存完整消息
+                        if collector.has_content():
+                            parts_data = collector.to_parts_data()
+                            await _save_message_with_parts(
                                 db, user_id, topic.id,
-                                "assistant", "".join(full_response)
+                                "assistant", parts_data
                             )
 
                     except asyncio.CancelledError:
-                        if full_response:
-                            await _save_message(
+                        if collector.has_content():
+                            if collector.text_chunks:
+                                collector.text_chunks.append(" [已取消]")
+                            parts_data = collector.to_parts_data()
+                            if parts_data:
+                                parts_data[-1]["metadata_"]["cancelled"] = True
+                            await _save_message_with_parts(
                                 db, user_id, topic.id,
-                                "assistant",
-                                "".join(full_response) + " [已取消]",
-                                {"cancelled": True},
+                                "assistant", parts_data
                             )
 
                 current_task = asyncio.create_task(stream_to_ws())
