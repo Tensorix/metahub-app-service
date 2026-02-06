@@ -13,9 +13,21 @@ import {
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { Switch } from './ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { SearchIndexManager } from './SearchIndexManager';
-import { Settings, Search } from 'lucide-react';
+import { Settings, Search, Download, Loader2, Calendar } from 'lucide-react';
+import { useSessionTransfer } from '@/hooks/useSessionTransfer';
+import { useToast } from '@/hooks/use-toast';
+import { formatDateForInput } from '@/lib/utils';
 
 interface SessionDialogProps {
   open: boolean;
@@ -32,6 +44,20 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
   const [autoSendIM, setAutoSendIM] = useState(true);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
+
+  // 导出选项状态
+  const [exportFormat, setExportFormat] = useState<'json' | 'jsonl'>('json');
+  const [includeDeleted, setIncludeDeleted] = useState(false);
+  const [enableDateRange, setEnableDateRange] = useState(false);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
+  const {
+    exporting,
+    exportSession,
+    exportError,
+  } = useSessionTransfer();
 
   useEffect(() => {
     if (open) {
@@ -84,12 +110,44 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
     }
   };
 
+  const handleExport = async () => {
+    if (!session) return;
+    
+    try {
+      await exportSession(session.id, {
+        format: exportFormat,
+        includeDeleted,
+        startDate: enableDateRange && startDate ? startDate : undefined,
+        endDate: enableDateRange && endDate ? endDate : undefined,
+      });
+      toast({
+        title: '导出成功',
+        description: `${exportFormat.toUpperCase()} 格式会话数据已下载`,
+      });
+    } catch (error) {
+      toast({
+        title: '导出失败',
+        description: exportError || '导出过程中发生错误',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const setQuickRange = (days: number) => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - days);
+    setStartDate(formatDateForInput(start));
+    setEndDate(formatDateForInput(end));
+    setEnableDateRange(true);
+  };
+
   const isEditMode = !!session;
   const showSearchIndex = isEditMode && (session.type === 'pm' || session.type === 'group');
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={showSearchIndex ? 'max-w-2xl' : undefined}>
+      <DialogContent className={isEditMode ? 'max-w-2xl' : undefined}>
         <DialogHeader>
           <DialogTitle>{session ? '会话设置' : '创建会话'}</DialogTitle>
           <DialogDescription>
@@ -97,17 +155,23 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
           </DialogDescription>
         </DialogHeader>
 
-        {showSearchIndex ? (
+        {isEditMode ? (
           <Tabs defaultValue="basic" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className={`grid w-full ${showSearchIndex ? 'grid-cols-3' : 'grid-cols-2'}`}>
               <TabsTrigger value="basic" className="flex items-center gap-2">
                 <Settings className="h-4 w-4" />
                 基本信息
               </TabsTrigger>
-              <TabsTrigger value="search" className="flex items-center gap-2">
-                <Search className="h-4 w-4" />
-                搜索索引
+              <TabsTrigger value="export" className="flex items-center gap-2">
+                <Download className="h-4 w-4" />
+                导出数据
               </TabsTrigger>
+              {showSearchIndex && (
+                <TabsTrigger value="search" className="flex items-center gap-2">
+                  <Search className="h-4 w-4" />
+                  搜索索引
+                </TabsTrigger>
+              )}
             </TabsList>
 
             <TabsContent value="basic">
@@ -202,12 +266,129 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
               </form>
             </TabsContent>
 
-            <TabsContent value="search" className="mt-4">
-              <SearchIndexManager
-                sessionId={session.id}
-                sessionName={session.name}
-              />
+            <TabsContent value="export" className="mt-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">导出会话数据</CardTitle>
+                  <CardDescription>
+                    将会话数据导出为文件，可用于备份或迁移
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* 导出格式 */}
+                  <div className="space-y-2">
+                    <Label>导出格式</Label>
+                    <Select 
+                      value={exportFormat} 
+                      onValueChange={(value: string) => setExportFormat(value as 'json' | 'jsonl')}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="json">JSON（易读）</SelectItem>
+                        <SelectItem value="jsonl">JSONL（流式处理）</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* 包含已删除 */}
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="include-deleted">包含已删除消息</Label>
+                    <Switch
+                      id="include-deleted"
+                      checked={includeDeleted}
+                      onCheckedChange={setIncludeDeleted}
+                    />
+                  </div>
+
+                  {/* 增量导出 */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="date-range">
+                        <Calendar className="h-4 w-4 inline mr-1" />
+                        按时间范围导出
+                      </Label>
+                      <Switch
+                        id="date-range"
+                        checked={enableDateRange}
+                        onCheckedChange={setEnableDateRange}
+                      />
+                    </div>
+
+                    {enableDateRange && (
+                      <div className="space-y-2 pl-4 border-l-2">
+                        <div className="flex gap-2 text-xs">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setQuickRange(7)}
+                          >
+                            最近 7 天
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setQuickRange(30)}
+                          >
+                            最近 30 天
+                          </Button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-xs">开始时间</Label>
+                            <Input
+                              type="datetime-local"
+                              value={startDate}
+                              onChange={(e) => setStartDate(e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">结束时间</Label>
+                            <Input
+                              type="datetime-local"
+                              value={endDate}
+                              onChange={(e) => setEndDate(e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 导出按钮 */}
+                  <Button 
+                    type="button"
+                    onClick={handleExport} 
+                    disabled={exporting}
+                    className="w-full"
+                  >
+                    {exporting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        导出中...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="h-4 w-4 mr-2" />
+                        导出
+                      </>
+                    )}
+                  </Button>
+                </CardContent>
+              </Card>
             </TabsContent>
+
+            {showSearchIndex && (
+              <TabsContent value="search" className="mt-4">
+                <SearchIndexManager
+                  sessionId={session.id}
+                  sessionName={session.name}
+                />
+              </TabsContent>
+            )}
           </Tabs>
         ) : (
           <form onSubmit={handleSubmit}>
