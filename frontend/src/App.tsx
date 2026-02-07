@@ -35,6 +35,8 @@ function App() {
         >
           <Route index element={<Home />} />
           <Route path="sessions" element={<Sessions />} />
+          <Route path="sessions/:sessionId" element={<Sessions />} />
+          <Route path="sessions/:sessionId/topics/:topicId" element={<Sessions />} />
           <Route path="agents" element={<Agents />} />
           <Route path="activities" element={<Activities />} />
           <Route path="settings" element={<Settings />} />

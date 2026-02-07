@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { useChatStore } from '@/store/chat';
 import { cn } from '@/lib/utils';
@@ -9,22 +10,83 @@ import { ResizableHandle } from '@/components/ui/resizable';
 
 interface ChatLayoutProps {
   className?: string;
+  initialSessionId?: string;
+  initialTopicId?: string;
 }
 
 const SESSION_SIDEBAR_MIN_WIDTH = 240;
 const SESSION_SIDEBAR_MAX_WIDTH = 400;
 const SESSION_SIDEBAR_DEFAULT_WIDTH = 320;
 
-export function ChatLayout({ className }: ChatLayoutProps) {
+export function ChatLayout({ className, initialSessionId, initialTopicId }: ChatLayoutProps) {
+  const navigate = useNavigate();
   const { isDesktop, isTablet, isMobile } = useBreakpoints();
   const setRightDrawerOpen = useChatStore((state) => state.setRightDrawerOpen);
   const rightDrawerOpen = useChatStore((state) => state.rightDrawerOpen);
+  const currentSessionId = useChatStore((state) => state.currentSessionId);
+  const currentTopicId = useChatStore((state) => state.currentTopicId);
+  const setCurrentSessionId = useChatStore((state) => state.setCurrentSessionId);
+  const setCurrentTopicId = useChatStore((state) => state.setCurrentTopicId);
 
   // 可调整的侧边栏宽度
   const [sessionSidebarWidth, setSessionSidebarWidth] = useState(SESSION_SIDEBAR_DEFAULT_WIDTH);
 
   // 移动端视图状态：'sessions' | 'messages'
   const [mobileView, setMobileView] = useState<'sessions' | 'messages'>('sessions');
+
+  // 使用 ref 防止循环更新
+  const isInitialMount = useRef(true);
+  const lastSyncedSession = useRef<string | null>(null);
+  const lastSyncedTopic = useRef<string | null>(null);
+
+  // 初始化：从 URL 参数设置当前 session 和 topic（仅首次挂载）
+  useEffect(() => {
+    if (!isInitialMount.current) return;
+    
+    if (initialSessionId && initialSessionId !== currentSessionId) {
+      setCurrentSessionId(initialSessionId);
+      lastSyncedSession.current = initialSessionId;
+      if (isMobile) {
+        setMobileView('messages');
+      }
+    }
+    if (initialTopicId && initialTopicId !== currentTopicId) {
+      setCurrentTopicId(initialTopicId);
+      lastSyncedTopic.current = initialTopicId;
+    }
+    
+    isInitialMount.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // 空依赖数组，仅在挂载时运行一次
+
+  // 监听 store 中的 session/topic 变化，更新 URL
+  useEffect(() => {
+    // 跳过初始挂载时的同步
+    if (isInitialMount.current) return;
+    
+    // 检查是否真的需要更新 URL（避免重复 navigate）
+    if (
+      lastSyncedSession.current === currentSessionId &&
+      lastSyncedTopic.current === currentTopicId
+    ) {
+      return;
+    }
+    
+    // 更新 URL
+    if (currentSessionId) {
+      if (currentTopicId) {
+        navigate(`/sessions/${currentSessionId}/topics/${currentTopicId}`, { replace: true });
+      } else {
+        navigate(`/sessions/${currentSessionId}`, { replace: true });
+      }
+    } else {
+      navigate('/sessions', { replace: true });
+    }
+    
+    // 记录已同步的值
+    lastSyncedSession.current = currentSessionId;
+    lastSyncedTopic.current = currentTopicId;
+  }, [currentSessionId, currentTopicId, navigate]);
 
   const handleSessionSidebarResize = useCallback((delta: number) => {
     setSessionSidebarWidth((prev) =>

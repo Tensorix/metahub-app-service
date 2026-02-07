@@ -92,6 +92,8 @@ interface ChatState {
   setLeftDrawerOpen: (open: boolean) => void;
   setRightDrawerOpen: (open: boolean) => void;
   setBoundaryState: (progress: number, direction: 'up' | 'down' | null) => void;
+  setCurrentSessionId: (sessionId: string | null) => void;
+  setCurrentTopicId: (topicId: string | null) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -495,6 +497,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setLeftDrawerOpen: (open) => set({ leftDrawerOpen: open }),
   setRightDrawerOpen: (open) => set({ rightDrawerOpen: open }),
   setBoundaryState: (progress, direction) => set({ boundaryProgress: progress, boundaryDirection: direction }),
+  setCurrentSessionId: (sessionId) => set({ currentSessionId: sessionId }),
+  setCurrentTopicId: (topicId) => set({ currentTopicId: topicId }),
 
   // ===== AI 对话 Actions =====
   sendAIMessage: async (content: string) => {
