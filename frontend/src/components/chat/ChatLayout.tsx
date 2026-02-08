@@ -25,8 +25,10 @@ export function ChatLayout({ className, initialSessionId, initialTopicId }: Chat
   const rightDrawerOpen = useChatStore((state) => state.rightDrawerOpen);
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const currentTopicId = useChatStore((state) => state.currentTopicId);
+  const selectSession = useChatStore((state) => state.selectSession);
+  const selectTopic = useChatStore((state) => state.selectTopic);
+  const loadTopics = useChatStore((state) => state.loadTopics);
   const setCurrentSessionId = useChatStore((state) => state.setCurrentSessionId);
-  const setCurrentTopicId = useChatStore((state) => state.setCurrentTopicId);
 
   // 可调整的侧边栏宽度
   const [sessionSidebarWidth, setSessionSidebarWidth] = useState(SESSION_SIDEBAR_DEFAULT_WIDTH);
@@ -39,23 +41,44 @@ export function ChatLayout({ className, initialSessionId, initialTopicId }: Chat
   const lastSyncedSession = useRef<string | null>(null);
   const lastSyncedTopic = useRef<string | null>(null);
 
-  // 初始化：从 URL 参数设置当前 session 和 topic（仅首次挂载）
+  // 初始化：从 URL 参数加载 session 和 topic（仅首次挂载）
   useEffect(() => {
     if (!isInitialMount.current) return;
     
-    if (initialSessionId && initialSessionId !== currentSessionId) {
-      setCurrentSessionId(initialSessionId);
-      lastSyncedSession.current = initialSessionId;
-      if (isMobile) {
-        setMobileView('messages');
+    const initializeFromUrl = async () => {
+      if (initialSessionId && initialSessionId !== currentSessionId) {
+        lastSyncedSession.current = initialSessionId;
+        
+        if (isMobile) {
+          setMobileView('messages');
+        }
+        
+        // 如果有 initialTopicId，只加载 topics，然后选择指定的 topic
+        if (initialTopicId) {
+          // 设置 sessionId 并加载 topics
+          setCurrentSessionId(initialSessionId);
+          await loadTopics(initialSessionId);
+          
+          // 选择指定的 topic（会触发 store 更新）
+          await selectTopic(initialTopicId);
+          
+          // 在 selectTopic 之后更新 lastSynced
+          lastSyncedTopic.current = initialTopicId;
+        } else {
+          // 没有 topicId，使用 selectSession 的默认行为（自动选择最新 topic）
+          await selectSession(initialSessionId);
+          
+          // 同步自动选择的 topic
+          const newTopicId = useChatStore.getState().currentTopicId;
+          lastSyncedTopic.current = newTopicId;
+        }
       }
-    }
-    if (initialTopicId && initialTopicId !== currentTopicId) {
-      setCurrentTopicId(initialTopicId);
-      lastSyncedTopic.current = initialTopicId;
-    }
+      
+      // 所有异步操作完成后才设置为 false
+      isInitialMount.current = false;
+    };
     
-    isInitialMount.current = false;
+    void initializeFromUrl();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // 空依赖数组，仅在挂载时运行一次
 

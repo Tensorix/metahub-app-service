@@ -25,7 +25,7 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
   const [newTopicName, setNewTopicName] = useState('');
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const topicRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const currentTopicId = useChatStore((state) => state.currentTopicId);
@@ -43,12 +43,15 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
   const currentSession = getCurrentSession();
   const topics = getAllTopicsForSession(currentSessionId);
 
-  // 话题加载后滚动到底部（最新的话题在底部）
+  // 当前选中的话题变化时，滚动到该话题
   useEffect(() => {
-    if (topics.length > 0) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (currentTopicId && topicRefs.current[currentTopicId]) {
+      topicRefs.current[currentTopicId]?.scrollIntoView({ 
+        behavior: 'smooth',
+        block: 'nearest'
+      });
     }
-  }, [currentSessionId, topics.length]);
+  }, [currentTopicId]);
 
   // 计算预览目标话题
   // 话题按 created_at 升序排列（最旧在 index 0，最新在末尾）
@@ -168,6 +171,7 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
               return (
                 <div
                   key={topic.id}
+                  ref={(el) => { topicRefs.current[topic.id] = el; }}
                   className={cn(
                     'group w-full rounded-md text-xs transition-colors hover:bg-accent/50',
                     isSelected && 'bg-accent',
@@ -297,8 +301,6 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
               </div>
             </div>
           )}
-          {/* 滚动到底部的锚点 */}
-          <div ref={bottomRef} />
         </div>
       </ScrollArea>
 
