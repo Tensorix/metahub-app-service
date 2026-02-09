@@ -424,7 +424,10 @@ class DeepAgentService:
         token = agent_user_id.set(user_id)
         try:
             agent = await self._get_agent()  # 添加 await
-            cfg = {"configurable": {"thread_id": thread_id}}
+            cfg = {
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": config.AGENT_RECURSION_LIMIT,  # 增加递归限制,默认是 25
+            }
 
             if user_id:
                 cfg["configurable"]["user_id"] = str(user_id)
@@ -477,7 +480,10 @@ class DeepAgentService:
         token = agent_user_id.set(user_id)
         try:
             agent = await self._get_agent()  # 添加 await
-            cfg = {"configurable": {"thread_id": thread_id}}
+            cfg = {
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": config.AGENT_RECURSION_LIMIT,  # 增加递归限制,默认是 25
+            }
 
             if user_id:
                 cfg["configurable"]["user_id"] = str(user_id)

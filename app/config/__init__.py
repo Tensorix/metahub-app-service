@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     AGENT_TIMEOUT: int = 300
     AGENT_DEFAULT_MODEL: str = "gpt-4o-mini"
     AGENT_DEFAULT_PROVIDER: str = "openai"
+    AGENT_RECURSION_LIMIT: int = 100  # LangGraph 递归限制,默认 25 通常不够用
 
     # ============ 搜索配置 ============
 
