@@ -16,7 +16,6 @@ from uuid import UUID
 
 from deepagents import create_deep_agent, SubAgent
 from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
-from deepagents.middleware import SubAgentMiddleware, SummarizationMiddleware
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres import AsyncPostgresStore
@@ -240,17 +239,20 @@ class DeepAgentService:
 
         return kwargs
 
-    async def _build_subagent_middleware(self) -> Optional[SubAgentMiddleware]:
-        """Build SubAgentMiddleware with full agent capabilities.
+    async def _build_subagents(self) -> list:
+        """Build SubAgent list for create_deep_agent.
 
         改进：
         1. SubAgent 支持独立的 model_provider → 完整的 provider:model 格式
         2. SubAgent 支持加载自己的 MCP 工具
         3. SubAgent 支持 model_kwargs (API key, base_url 等)
+        
+        注意：不再手动创建 SubAgentMiddleware，而是返回 SubAgent 列表，
+        让 create_deep_agent 自动创建 middleware。
         """
         subagent_records = self.config.get("subagents") or []
         if not subagent_records:
-            return None
+            return []
 
         from app.agent.tools import ToolRegistry
 
@@ -273,10 +275,7 @@ class DeepAgentService:
             )
             subagents.append(subagent)
 
-        return SubAgentMiddleware(
-            subagents=subagents,
-            default_model=self._get_model_string()
-        )
+        return subagents
 
     def _get_model_kwargs(self) -> dict:
         """
@@ -296,24 +295,6 @@ class DeepAgentService:
         
         return kwargs
 
-    def _build_summarization_middleware(self) -> Optional[SummarizationMiddleware]:
-        """
-        Build summarization middleware for conversation compression.
-        
-        When conversation exceeds max_messages, automatically generates summary
-        and keeps only recent messages.
-        """
-        summarization_config = self.config.get("summarization", {})
-        
-        if not summarization_config or not summarization_config.get("enabled", False):
-            return None
-        
-        return SummarizationMiddleware(
-            max_messages=summarization_config.get("max_messages", 50),
-            keep_last_n=summarization_config.get("keep_last_n", 20),
-            summary_prompt=summarization_config.get("summary_prompt"),
-            model=summarization_config.get("model"),
-        )
 
     async def _get_agent(self):
         """
@@ -326,19 +307,6 @@ class DeepAgentService:
         - MCP tools: dynamically loaded from configured MCP Servers
         """
         if self._agent is None:
-            # Build middleware list
-            middleware = []
-
-            # SubAgent middleware (现在是 async)
-            subagent_mw = await self._build_subagent_middleware()
-            if subagent_mw:
-                middleware.append(subagent_mw)
-
-            # Summarization middleware
-            summarization_mw = self._build_summarization_middleware()
-            if summarization_mw:
-                middleware.append(summarization_mw)
-
             # Build model with explicit API key
             from langchain.chat_models import init_chat_model
 
@@ -353,6 +321,9 @@ class DeepAgentService:
             mcp_tools = await self._get_mcp_tools()
             all_tools = self._merge_tools(builtin_tools, mcp_tools)
 
+            # 构建 subagents 列表（create_deep_agent 会自动创建 SubAgentMiddleware）
+            subagents = await self._build_subagents()
+
             # Agent kwargs
             agent_kwargs = {
                 "model": model,  # Pass model instance instead of string
@@ -363,7 +334,8 @@ class DeepAgentService:
                     "(write_todos, read_todos) and file system tools "
                     "(ls, read_file, write_file, edit_file, glob, grep)."
                 ),
-                "middleware": middleware,
+                "subagents": subagents,  # create_deep_agent 会自动创建 SubAgentMiddleware
+                "middleware": [],  # 不需要手动添加 middleware，create_deep_agent 会自动添加
                 "checkpointer": self.checkpointer,
                 "store": self.store,
                 "backend": self._build_backend(),
@@ -385,8 +357,7 @@ class DeepAgentService:
             logger.info(
                 f"Creating deep agent: model={model_string}, "
                 f"tools={len(builtin_tools)} builtin + {len(mcp_tools)} mcp, "
-                f"middleware={len(middleware)}, "
-                f"subagents={len(subagent_mw.subagents) if subagent_mw else 0}"
+                f"subagents={len(subagents)}"
             )
 
             self._agent = create_deep_agent(**agent_kwargs)

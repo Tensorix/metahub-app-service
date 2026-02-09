@@ -11,11 +11,12 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import type { Agent, AgentCreate, AgentUpdate, SubAgent } from '@/lib/agentManagementApi';
+import type { Agent, AgentCreate, AgentUpdate, MountedSubagentSummary } from '@/lib/agentManagementApi';
 import type { McpServerResponse } from '@/types/mcpServer';
 import { X, Plus } from 'lucide-react';
 import { useTools } from '@/hooks/useTools';
 import { MCPServerConfig } from './MCPServerConfig';
+import { SubAgentSection } from './SubAgentSection';
 
 interface AgentDialogProps {
   open: boolean;
@@ -41,6 +42,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
 
   const [formData, setFormData] = useState<AgentCreate>({
     name: '',
+    description: '',
     system_prompt: '',
     model: 'gpt-4o-mini',
     model_provider: 'openai',
@@ -49,7 +51,6 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
     tools: [],
     skills: [],
     memory_files: [],
-    subagents: [],
     summarization: {
       enabled: false,
       max_messages: 50,
@@ -59,25 +60,17 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'basic' | 'advanced' | 'subagents' | 'summarization' | 'mcp'>('basic');
   const [mcpServers, setMcpServers] = useState<McpServerResponse[]>([]);
+  const [mountedSubagents, setMountedSubagents] = useState<MountedSubagentSummary[]>([]);
 
   // Skill/Memory editing states
   const [editingSkill, setEditingSkill] = useState<{ name: string; content: string } | null>(null);
   const [editingMemory, setEditingMemory] = useState<{ name: string; content: string } | null>(null);
 
-  // SubAgent form state
-  const [editingSubAgent, setEditingSubAgent] = useState<SubAgent | null>(null);
-  const [subAgentForm, setSubAgentForm] = useState<SubAgent>({
-    name: '',
-    description: '',
-    system_prompt: '',
-    model: '',
-    tools: [],
-  });
-
   useEffect(() => {
     if (agent) {
       setFormData({
         name: agent.name,
+        description: agent.description || '',
         system_prompt: agent.system_prompt || '',
         model: agent.model || 'gpt-4o-mini',
         model_provider: agent.model_provider || 'openai',
@@ -86,17 +79,18 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
         tools: agent.tools || [],
         skills: agent.skills || [],
         memory_files: agent.memory_files || [],
-        subagents: agent.subagents || [],
         summarization: agent.summarization || {
           enabled: false,
           max_messages: 50,
           keep_last_n: 20,
         },
       });
+      setMountedSubagents(agent.subagents || []);
       setMcpServers(agent.mcp_servers || []);
     } else {
       setFormData({
         name: '',
+        description: '',
         system_prompt: '',
         model: 'gpt-4o-mini',
         model_provider: 'openai',
@@ -105,13 +99,13 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
         tools: [],
         skills: [],
         memory_files: [],
-        subagents: [],
         summarization: {
           enabled: false,
           max_messages: 50,
           keep_last_n: 20,
         },
       });
+      setMountedSubagents([]);
       setMcpServers([]);
     }
     setActiveTab('basic');
@@ -121,7 +115,22 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
     e.preventDefault();
     setLoading(true);
     try {
-      await onSubmit(formData);
+      if (agent) {
+        // 编辑模式：更新 Agent 基本信息
+        await onSubmit(formData);
+        // SubAgent 挂载在 SubAgentSection 中实时管理，不需要在 submit 时处理
+      } else {
+        // 创建模式：可选内联挂载
+        const createData: AgentCreate = {
+          ...formData,
+          mount_subagents: mountedSubagents.map((sa) => ({
+            agent_id: sa.agent_id,
+            mount_description: sa.mount_description,
+            sort_order: sa.sort_order,
+          })),
+        };
+        await onSubmit(createData);
+      }
       onOpenChange(false);
     } finally {
       setLoading(false);
@@ -179,55 +188,6 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
     });
   };
 
-  const addOrUpdateSubAgent = () => {
-    if (!subAgentForm.name || !subAgentForm.description) return;
-
-    const subagents = formData.subagents || [];
-    if (editingSubAgent) {
-      setFormData({
-        ...formData,
-        subagents: subagents.map(sa =>
-          sa.name === editingSubAgent.name ? subAgentForm : sa
-        ),
-      });
-    } else {
-      setFormData({
-        ...formData,
-        subagents: [...subagents, subAgentForm],
-      });
-    }
-
-    setSubAgentForm({
-      name: '',
-      description: '',
-      system_prompt: '',
-      model: '',
-      tools: [],
-    });
-    setEditingSubAgent(null);
-  };
-
-  const editSubAgent = (sa: SubAgent) => {
-    setSubAgentForm(sa);
-    setEditingSubAgent(sa);
-  };
-
-  const removeSubAgent = (name: string) => {
-    setFormData({
-      ...formData,
-      subagents: (formData.subagents || []).filter(sa => sa.name !== name),
-    });
-  };
-
-  const toggleSubAgentTool = (tool: string) => {
-    const tools = subAgentForm.tools || [];
-    if (tools.includes(tool)) {
-      setSubAgentForm({ ...subAgentForm, tools: tools.filter(t => t !== tool) });
-    } else {
-      setSubAgentForm({ ...subAgentForm, tools: [...tools, tool] });
-    }
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -259,7 +219,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
             className={`px-4 py-2 ${activeTab === 'subagents' ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground'}`}
             onClick={() => setActiveTab('subagents')}
           >
-            子代理 ({(formData.subagents || []).length})
+            子代理 ({mountedSubagents.length})
           </button>
           <button
             type="button"
@@ -291,6 +251,19 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                     placeholder="输入 Agent 名称"
                     required
                   />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="description">描述</Label>
+                  <Input
+                    id="description"
+                    value={formData.description || ''}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    placeholder="Agent 的能力描述，被挂载为 SubAgent 时用于任务匹配"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    当此 Agent 被其他 Agent 挂载为子代理时，父 Agent 根据此描述决定是否委派任务
+                  </p>
                 </div>
 
                 <div className="grid gap-2">
@@ -594,194 +567,11 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
 
             {/* SubAgents Tab */}
             {activeTab === 'subagents' && (
-              <>
-                <div className="border rounded-lg p-4 space-y-4">
-                  <h3 className="font-medium">
-                    {editingSubAgent ? '编辑子代理' : '添加子代理'}
-                  </h3>
-                  
-                  <div className="grid gap-2">
-                    <Label>名称 *</Label>
-                    <Input
-                      value={subAgentForm.name}
-                      onChange={(e) => setSubAgentForm({ ...subAgentForm, name: e.target.value })}
-                      placeholder="researcher"
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>描述 *</Label>
-                    <Input
-                      value={subAgentForm.description}
-                      onChange={(e) => setSubAgentForm({ ...subAgentForm, description: e.target.value })}
-                      placeholder="Research specialist for finding information"
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>系统提示词</Label>
-                    <textarea
-                      className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      value={subAgentForm.system_prompt}
-                      onChange={(e) => setSubAgentForm({ ...subAgentForm, system_prompt: e.target.value })}
-                      placeholder="You are a research specialist..."
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>模型（可选，留空继承父 Agent）</Label>
-                    <Input
-                      value={subAgentForm.model}
-                      onChange={(e) => setSubAgentForm({ ...subAgentForm, model: e.target.value })}
-                      placeholder="gpt-4o-mini"
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>工具</Label>
-                    {toolsLoading ? (
-                      <div className="text-sm text-muted-foreground">加载工具列表...</div>
-                    ) : toolsError ? (
-                      <div className="text-sm text-destructive">
-                        加载工具失败: {toolsError}
-                      </div>
-                    ) : (
-                      <>
-                        {/* 显示失效的工具（如果有） */}
-                        {getInvalidTools(subAgentForm.tools || []).length > 0 && (
-                          <div className="border border-destructive/50 rounded-lg p-3 space-y-2 bg-destructive/5">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-destructive">⚠️ 失效的工具</span>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {getInvalidTools(subAgentForm.tools || []).map((tool) => (
-                                <Badge
-                                  key={tool}
-                                  variant="destructive"
-                                  className="cursor-pointer"
-                                  onClick={() => toggleSubAgentTool(tool)}
-                                >
-                                  {tool}
-                                  <X className="ml-1 h-3 w-3" />
-                                </Badge>
-                              ))}
-                            </div>
-                            <p className="text-xs text-destructive">
-                              这些工具在系统中不存在，点击删除它们
-                            </p>
-                          </div>
-                        )}
-                        
-                        {/* 按分类显示有效工具 */}
-                        {categories.length > 0 ? (
-                          <div className="space-y-3">
-                            {categories.map((category) => (
-                              <div key={category.category} className="space-y-1">
-                                <div className="text-xs font-medium text-muted-foreground uppercase">
-                                  {category.category}
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                  {category.tools.map((tool) => {
-                                    const isSelected = (subAgentForm.tools || []).includes(tool.name);
-                                    return (
-                                      <Badge
-                                        key={tool.name}
-                                        variant={isSelected ? 'default' : 'outline'}
-                                        className="cursor-pointer hover:bg-primary/90"
-                                        onClick={() => toggleSubAgentTool(tool.name)}
-                                        title={tool.description}
-                                      >
-                                        {tool.name}
-                                        {isSelected && <X className="ml-1 h-3 w-3" />}
-                                      </Badge>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="flex flex-wrap gap-2">
-                            {tools.map((tool) => {
-                              const isSelected = (subAgentForm.tools || []).includes(tool.name);
-                              return (
-                                <Badge
-                                  key={tool.name}
-                                  variant={isSelected ? 'default' : 'outline'}
-                                  className="cursor-pointer hover:bg-primary/90"
-                                  onClick={() => toggleSubAgentTool(tool.name)}
-                                  title={tool.description}
-                                >
-                                  {tool.name}
-                                  {isSelected && <X className="ml-1 h-3 w-3" />}
-                                </Badge>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-
-                  <Button
-                    type="button"
-                    onClick={addOrUpdateSubAgent}
-                    disabled={!subAgentForm.name || !subAgentForm.description}
-                  >
-                    {editingSubAgent ? '更新子代理' : '添加子代理'}
-                  </Button>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>已配置的子代理</Label>
-                  {(formData.subagents || []).length === 0 ? (
-                    <p className="text-sm text-muted-foreground">暂无子代理</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {(formData.subagents || []).map((sa, index) => (
-                        <div key={index} className="border rounded-lg p-3 space-y-1">
-                          <div className="flex justify-between items-start">
-                            <div className="flex-1">
-                              <p className="font-medium">{sa.name}</p>
-                              <p className="text-sm text-muted-foreground">{sa.description}</p>
-                              {sa.model && (
-                                <p className="text-xs text-muted-foreground mt-1">模型: {sa.model}</p>
-                              )}
-                              {(sa.tools || []).length > 0 && (
-                                <div className="flex gap-1 mt-1 flex-wrap">
-                                  {(sa.tools || []).map(tool => (
-                                    <Badge key={tool} variant="outline" className="text-xs">
-                                      {tool}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => editSubAgent(sa)}
-                              >
-                                编辑
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => removeSubAgent(sa.name)}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </>
+              <SubAgentSection
+                agentId={agent?.id}
+                mountedSubagents={mountedSubagents}
+                onMountedChange={setMountedSubagents}
+              />
             )}
 
             {/* MCP Servers Tab */}

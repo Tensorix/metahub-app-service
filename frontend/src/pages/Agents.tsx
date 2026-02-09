@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { AgentDialog } from '@/components/AgentDialog';
+import { DeleteAgentDialog } from '@/components/DeleteAgentDialog';
 import { agentManagementApi } from '@/lib/agentManagementApi';
 import type { Agent, AgentCreate, AgentUpdate } from '@/lib/agentManagementApi';
 import { useToast } from '@/hooks/use-toast';
@@ -15,6 +16,7 @@ export default function Agents() {
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const { toast } = useToast();
@@ -88,10 +90,10 @@ export default function Agents() {
     }
   };
 
-  const handleDelete = async (agentId: string) => {
-    if (!confirm('确定要删除这个 Agent 吗？')) return;
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
     try {
-      await agentManagementApi.deleteAgent(agentId);
+      await agentManagementApi.deleteAgent(deleteTarget.id);
       toast({
         title: '删除成功',
         description: 'Agent 已删除',
@@ -104,6 +106,7 @@ export default function Agents() {
         variant: 'destructive',
       });
     }
+    setDeleteTarget(null);
   };
 
   const openCreateDialog = () => {
@@ -214,6 +217,13 @@ export default function Agents() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
+                    {/* 描述 */}
+                    {agent.description && (
+                      <p className="text-sm text-muted-foreground italic">
+                        {agent.description}
+                      </p>
+                    )}
+
                     {agent.system_prompt && (
                       <p className="text-sm text-muted-foreground line-clamp-3">
                         {agent.system_prompt}
@@ -234,8 +244,15 @@ export default function Agents() {
                     {/* Features */}
                     <div className="flex flex-wrap gap-2 text-xs">
                       {agent.subagents && agent.subagents.length > 0 && (
-                        <Badge variant="secondary">
+                        <Badge variant="secondary" title={
+                          agent.subagents.map(sa => sa.name).join(', ')
+                        }>
                           {agent.subagents.length} 子代理
+                        </Badge>
+                      )}
+                      {agent.parent_agents_count && agent.parent_agents_count > 0 && (
+                        <Badge variant="outline" className="text-xs">
+                          被 {agent.parent_agents_count} 个 Agent 使用
                         </Badge>
                       )}
                       {agent.skills && agent.skills.length > 0 && (
@@ -246,6 +263,11 @@ export default function Agents() {
                       {agent.memory_files && agent.memory_files.length > 0 && (
                         <Badge variant="secondary">
                           {agent.memory_files.length} Memory
+                        </Badge>
+                      )}
+                      {agent.mcp_servers && agent.mcp_servers.length > 0 && (
+                        <Badge variant="secondary">
+                          {agent.mcp_servers.length} MCP
                         </Badge>
                       )}
                       {agent.summarization?.enabled && (
@@ -274,7 +296,7 @@ export default function Agents() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleDelete(agent.id)}
+                        onClick={() => setDeleteTarget(agent)}
                         className="text-destructive hover:text-destructive"
                       >
                         <Trash2 className="h-3 w-3" />
@@ -316,6 +338,15 @@ export default function Agents() {
         agent={editingAgent}
         onSubmit={editingAgent ? handleUpdate : handleCreate}
       />
+
+      {deleteTarget && (
+        <DeleteAgentDialog
+          open={!!deleteTarget}
+          onOpenChange={(open) => !open && setDeleteTarget(null)}
+          agent={deleteTarget}
+          onConfirm={handleDeleteConfirm}
+        />
+      )}
     </div>
   );
 }

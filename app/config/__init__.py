@@ -3,6 +3,9 @@
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from urllib.parse import quote_plus
+import dotenv
+
+dotenv.load_dotenv()
 
 
 class Settings(BaseSettings):
