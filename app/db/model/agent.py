@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from app.db.model.subagent import SubAgent
     from app.db.model.agent_version import AgentVersion
     from app.db.model.agent_mcp_server import AgentMcpServer
+    from app.db.model.agent_subagent import AgentSubagent
 
 
 class Agent(Base):
@@ -28,6 +29,9 @@ class Agent(Base):
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid7)
     name: Mapped[str] = mapped_column(String(255), nullable=False, comment="Agent 名称")
+    description: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="通用能力描述"
+    )
     system_prompt: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="系统提示词"
     )
@@ -86,6 +90,22 @@ class Agent(Base):
         back_populates="parent_agent",
         cascade="all, delete-orphan",
         lazy="selectin"
+    )
+    # 新关系：我挂载了哪些 SubAgent
+    mounted_subagents: Mapped[list["AgentSubagent"]] = relationship(
+        "AgentSubagent",
+        foreign_keys="AgentSubagent.parent_agent_id",
+        back_populates="parent_agent",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="AgentSubagent.sort_order",
+    )
+    # 反向关系：我被哪些 Agent 挂载为 SubAgent
+    mounted_as_subagent_in: Mapped[list["AgentSubagent"]] = relationship(
+        "AgentSubagent",
+        foreign_keys="AgentSubagent.child_agent_id",
+        back_populates="child_agent",
+        lazy="noload",  # 按需加载，避免 N+1
     )
     versions: Mapped[list["AgentVersion"]] = relationship(
         "AgentVersion",

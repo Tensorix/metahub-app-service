@@ -74,6 +74,10 @@ async def create_mcp_server(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # 级联清除缓存
+    from app.agent.factory import AgentFactory
+    AgentFactory.clear_cache_cascade(agent_id, db)
+
     return server
 
 
@@ -111,6 +115,11 @@ async def update_mcp_server(
     server = McpServerService.update(db, server_id, agent_id, data)
     if not server:
         raise HTTPException(status_code=404, detail="MCP Server not found")
+    
+    # 级联清除缓存
+    from app.agent.factory import AgentFactory
+    AgentFactory.clear_cache_cascade(agent_id, db)
+    
     return server
 
 
@@ -129,6 +138,10 @@ async def delete_mcp_server(
     success = McpServerService.delete(db, server_id, agent_id)
     if not success:
         raise HTTPException(status_code=404, detail="MCP Server not found")
+    
+    # 级联清除缓存
+    from app.agent.factory import AgentFactory
+    AgentFactory.clear_cache_cascade(agent_id, db)
 
 
 @router.post(

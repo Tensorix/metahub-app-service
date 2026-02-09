@@ -159,12 +159,94 @@ class DeepAgentService:
         
         return backend_factory
 
-    def _build_subagent_middleware(self) -> Optional[SubAgentMiddleware]:
-        """
-        Build SubAgentMiddleware with configured subagents.
+    async def _get_subagent_mcp_tools(self, sa_config: dict) -> list:
+        """加载 SubAgent 配置的 MCP 工具。
 
-        Subagents enable task delegation and context isolation.
-        Each subagent has its own tools, model, and system prompt.
+        复用现有的 MCPClientManager，使用子 Agent 的 _agent_id 作为缓存 key。
+        """
+        mcp_servers = sa_config.get("mcp_servers") or []
+        if not mcp_servers:
+            return []
+
+        from app.agent.mcp import get_mcp_client_manager
+
+        manager = get_mcp_client_manager()
+        agent_id = sa_config.get("_agent_id")
+
+        if not agent_id:
+            logger.warning(f"SubAgent '{sa_config.get('name')}' has no _agent_id, "
+                           f"MCP tool cache disabled")
+            from uuid import uuid4
+            agent_id = uuid4()
+
+        try:
+            tools = await manager.get_tools(agent_id, mcp_servers)
+            logger.info(f"SubAgent '{sa_config.get('name')}': loaded {len(tools)} MCP tools")
+            return tools
+        except Exception as e:
+            logger.error(f"SubAgent '{sa_config.get('name')}': failed to load MCP tools: {e}")
+            return []
+
+    def _build_subagent_model(self, sa_config: dict):
+        """为 SubAgent 构建 model 实例或标识。
+
+        如果 SubAgent 指定了 model_provider，构建完整的 model 实例
+        （因为可能需要不同 provider 的 API key）。
+        如果未指定，返回 model name 字符串（继承父 Agent 的 provider）。
+        """
+        model_name = sa_config.get("model")
+        model_provider = sa_config.get("model_provider")
+
+        if not model_name:
+            return None  # 继承父 Agent 的 model
+
+        if model_provider:
+            # SubAgent 有独立的 provider — 需要构建完整的 model 实例
+            from langchain.chat_models import init_chat_model
+
+            model_string = (
+                model_name if ":" in model_name
+                else f"{model_provider}:{model_name}"
+            )
+
+            # 获取 provider 对应的 API key
+            kwargs = self._get_model_kwargs_for_provider(model_provider)
+
+            return init_chat_model(model_string, **kwargs)
+        else:
+            # 没有独立 provider — 使用父 Agent 的 provider
+            # 返回 model name，由 SubAgentMiddleware 的 default_model 提供 provider
+            return model_name
+
+    def _get_model_kwargs_for_provider(self, provider: str) -> dict:
+        """获取指定 provider 的 model kwargs。
+
+        扩展 _get_model_kwargs() 以支持多 provider。
+        """
+        kwargs = {}
+
+        if provider == "openai":
+            if config.OPENAI_API_KEY:
+                kwargs["api_key"] = config.OPENAI_API_KEY
+            if config.OPENAI_BASE_URL:
+                kwargs["base_url"] = config.OPENAI_BASE_URL
+        elif provider == "anthropic":
+            if hasattr(config, 'ANTHROPIC_API_KEY') and config.ANTHROPIC_API_KEY:
+                kwargs["api_key"] = config.ANTHROPIC_API_KEY
+        elif provider == "google":
+            if hasattr(config, 'GOOGLE_API_KEY') and config.GOOGLE_API_KEY:
+                kwargs["api_key"] = config.GOOGLE_API_KEY
+        # 可按需添加更多 provider
+
+        return kwargs
+
+    async def _build_subagent_middleware(self) -> Optional[SubAgentMiddleware]:
+        """Build SubAgentMiddleware with full agent capabilities.
+
+        改进：
+        1. SubAgent 支持独立的 model_provider → 完整的 provider:model 格式
+        2. SubAgent 支持加载自己的 MCP 工具
+        3. SubAgent 支持 model_kwargs (API key, base_url 等)
         """
         subagent_records = self.config.get("subagents") or []
         if not subagent_records:
@@ -174,16 +256,23 @@ class DeepAgentService:
 
         subagents = []
         for sa in subagent_records:
+            # 1. 构建工具列表 (内置 + MCP)
+            builtin_tools = ToolRegistry.get_tools(sa.get("tools") or [])
+            mcp_tools = await self._get_subagent_mcp_tools(sa)
+            all_tools = self._merge_tools(builtin_tools, mcp_tools)
+
+            # 2. 构建完整的 model 标识
+            model = self._build_subagent_model(sa)
+
             subagent = SubAgent(
                 name=sa["name"],
                 description=sa["description"],
                 system_prompt=sa.get("system_prompt", ""),
-                tools=ToolRegistry.get_tools(sa.get("tools") or []),
-                model=sa.get("model"),  # Optional, inherits from parent if None
+                tools=all_tools,
+                model=model,  # ← 现在是完整的 Model 实例或 provider:name 字符串
             )
             subagents.append(subagent)
 
-        # SubAgentMiddleware requires default_model for subagents without explicit model
         return SubAgentMiddleware(
             subagents=subagents,
             default_model=self._get_model_string()
@@ -240,8 +329,8 @@ class DeepAgentService:
             # Build middleware list
             middleware = []
 
-            # SubAgent middleware
-            subagent_mw = self._build_subagent_middleware()
+            # SubAgent middleware (现在是 async)
+            subagent_mw = await self._build_subagent_middleware()
             if subagent_mw:
                 middleware.append(subagent_mw)
 
