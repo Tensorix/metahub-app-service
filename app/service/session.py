@@ -76,6 +76,10 @@ class SessionService:
         for key, value in update_data.items():
             setattr(session, key, value)
         
+        # 校验：开启自动回复时必须关联 Agent
+        if session.auto_reply_enabled and not session.agent_id:
+            raise ValueError("启用自动回复时必须关联一个 Agent")
+        
         # 版本号递增
         session.version += 1
         

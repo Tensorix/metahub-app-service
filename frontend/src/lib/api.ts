@@ -181,6 +181,7 @@ export interface Session {
   agent_id?: string;
   metadata?: Record<string, any>;
   source?: string;
+  auto_reply_enabled: boolean;
   last_visited_at?: string;
   created_at: string;
   updated_at: string;
@@ -194,6 +195,7 @@ export interface SessionCreate {
   agent_id?: string;
   metadata?: Record<string, any>;
   source?: string;
+  auto_reply_enabled?: boolean;
 }
 
 export interface SessionUpdate {
@@ -203,6 +205,7 @@ export interface SessionUpdate {
   metadata?: Record<string, any>;
   source?: string;
   last_visited_at?: string;
+  auto_reply_enabled?: boolean;
 }
 
 export interface SessionListResponse {

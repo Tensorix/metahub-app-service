@@ -11,6 +11,7 @@ class SessionBase(BaseModel):
     agent_id: Optional[UUID] = Field(None, description="关联的 Agent ID")
     metadata: Optional[dict] = Field(None, description="扩展元数据", validation_alias="metadata_")
     source: Optional[str] = Field(None, description="来源: null/astr_wechat/astr_qq/manual_upload", max_length=50)
+    auto_reply_enabled: bool = Field(False, description="是否启用自动回复（仅 pm/group 会话有效）")
 
 
 class SessionCreate(SessionBase):
@@ -24,6 +25,7 @@ class SessionUpdate(BaseModel):
     metadata: Optional[dict] = Field(None, description="扩展元数据", validation_alias="metadata_")
     source: Optional[str] = Field(None, description="来源", max_length=50)
     last_visited_at: Optional[datetime] = Field(None, description="最后访问时间")
+    auto_reply_enabled: Optional[bool] = Field(None, description="是否启用自动回复")
 
 
 class SessionResponse(SessionBase):

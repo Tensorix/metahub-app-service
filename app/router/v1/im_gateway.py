@@ -211,11 +211,38 @@ async def _handle_incoming_message(data: dict, user_id: UUID, source: str) -> No
         )
         db.commit()
         logger.info(f"WS incoming message processed: {result}")
+
+        # 触发自动回复（fire-and-forget，不阻塞消息处理）
+        session_id = result.get("session_id")
+        if session_id:
+            asyncio.create_task(
+                _try_auto_reply(
+                    session_id=UUID(session_id),
+                    user_id=user_id,
+                    message_str=webhook_data.message_str,
+                )
+            )
     except Exception as e:
         logger.error(f"Error processing WS message: {e}", exc_info=True)
         db.rollback()
     finally:
         db.close()
+
+
+async def _try_auto_reply(session_id: UUID, user_id: UUID, message_str: str) -> None:
+    """
+    尝试自动回复，仅在 session 开启了自动回复时执行。
+    独立函数便于错误隔离。
+    """
+    try:
+        from app.service.auto_reply import AutoReplyService
+        await AutoReplyService.process(
+            session_id=session_id,
+            user_id=user_id,
+            incoming_message_str=message_str,
+        )
+    except Exception as e:
+        logger.error(f"Auto-reply error for session {session_id}: {e}", exc_info=True)
 
 
 # ============================================================

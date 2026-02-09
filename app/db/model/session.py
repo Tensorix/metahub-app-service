@@ -51,6 +51,10 @@ class Session(Base):
     last_visited_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="最后访问时间，用于已读未读"
     )
+    auto_reply_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False,
+        comment="是否启用自动回复（仅 pm/group 会话有效）"
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -42,6 +42,7 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
   const [source, setSource] = useState('');
   const [agentId, setAgentId] = useState<string>('');
   const [autoSendIM, setAutoSendIM] = useState(true);
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
@@ -75,12 +76,14 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
       setSource(session.source || '');
       setAgentId(session.agent_id || '');
       setAutoSendIM(session.metadata?.auto_send_im !== false); // 默认 true
+      setAutoReplyEnabled(session.auto_reply_enabled ?? false);
     } else {
       setName('');
       setType('pm');
       setSource('');
       setAgentId('');
       setAutoSendIM(true);
+      setAutoReplyEnabled(false);
     }
   }, [session, open]);
 
@@ -95,6 +98,7 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
         type,
         source: source || undefined,
         agent_id: agentId || undefined,
+        auto_reply_enabled: isIMSession ? autoReplyEnabled : undefined,
         metadata: isIMSession ? {
           ...(session?.metadata || {}),
           auto_send_im: autoSendIM,
@@ -217,7 +221,12 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
                       id="agent"
                       className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                       value={agentId}
-                      onChange={(e) => setAgentId(e.target.value)}
+                      onChange={(e) => {
+                        setAgentId(e.target.value);
+                        if (!e.target.value) {
+                          setAutoReplyEnabled(false); // 清除 Agent 时关闭自动回复
+                        }
+                      }}
                     >
                       <option value="">无</option>
                       {agents.map((agent) => (
@@ -230,23 +239,51 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
 
                   {/* IM 会话配置 */}
                   {(type === 'pm' || type === 'group') && (
-                    <div className="space-y-2">
-                      <div className="flex items-center space-x-2">
-                        <input
-                          type="checkbox"
-                          id="autoSendIM"
-                          checked={autoSendIM}
-                          onChange={(e) => setAutoSendIM(e.target.checked)}
-                          className="h-4 w-4 rounded border-gray-300"
-                        />
-                        <Label htmlFor="autoSendIM" className="cursor-pointer">
-                          自动发送到 IM 平台
-                        </Label>
+                    <>
+                      <div className="space-y-2">
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="autoSendIM"
+                            checked={autoSendIM}
+                            onChange={(e) => setAutoSendIM(e.target.checked)}
+                            className="h-4 w-4 rounded border-gray-300"
+                          />
+                          <Label htmlFor="autoSendIM" className="cursor-pointer">
+                            自动发送到 IM 平台
+                          </Label>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          启用后，发送的消息会直接通过 IM Gateway 发送到对应平台（私聊/群聊）
+                        </p>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        启用后，发送的消息会直接通过 IM Gateway 发送到对应平台（私聊/群聊）
-                      </p>
-                    </div>
+
+                      {/* 自动回复配置 */}
+                      <div className="space-y-3 rounded-lg border p-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <Label htmlFor="autoReply" className="cursor-pointer font-medium">
+                              自动回复
+                            </Label>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              收到消息时，由关联的 Agent 自动生成回复
+                            </p>
+                          </div>
+                          <Switch
+                            id="autoReply"
+                            checked={autoReplyEnabled}
+                            onCheckedChange={setAutoReplyEnabled}
+                            disabled={!agentId}
+                          />
+                        </div>
+
+                        {autoReplyEnabled && !agentId && (
+                          <p className="text-xs text-destructive">
+                            请先选择一个 Agent 才能启用自动回复
+                          </p>
+                        )}
+                      </div>
+                    </>
                   )}
                 </div>
 
@@ -433,7 +470,12 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
                   id="agent"
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   value={agentId}
-                  onChange={(e) => setAgentId(e.target.value)}
+                  onChange={(e) => {
+                    setAgentId(e.target.value);
+                    if (!e.target.value) {
+                      setAutoReplyEnabled(false); // 清除 Agent 时关闭自动回复
+                    }
+                  }}
                 >
                   <option value="">无</option>
                   {agents.map((agent) => (
@@ -446,23 +488,51 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
 
               {/* IM 会话配置 */}
               {(type === 'pm' || type === 'group') && (
-                <div className="space-y-2">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="autoSendIM"
-                      checked={autoSendIM}
-                      onChange={(e) => setAutoSendIM(e.target.checked)}
-                      className="h-4 w-4 rounded border-gray-300"
-                    />
-                    <Label htmlFor="autoSendIM" className="cursor-pointer">
-                      自动发送到 IM 平台
-                    </Label>
+                <>
+                  <div className="space-y-2">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="autoSendIM"
+                        checked={autoSendIM}
+                        onChange={(e) => setAutoSendIM(e.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300"
+                      />
+                      <Label htmlFor="autoSendIM" className="cursor-pointer">
+                        自动发送到 IM 平台
+                      </Label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      启用后，发送的消息会直接通过 IM Gateway 发送到对应平台（私聊/群聊）
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    启用后，发送的消息会直接通过 IM Gateway 发送到对应平台（私聊/群聊）
-                  </p>
-                </div>
+
+                  {/* 自动回复配置 */}
+                  <div className="space-y-3 rounded-lg border p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label htmlFor="autoReply" className="cursor-pointer font-medium">
+                          自动回复
+                        </Label>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          收到消息时，由关联的 Agent 自动生成回复
+                        </p>
+                      </div>
+                      <Switch
+                        id="autoReply"
+                        checked={autoReplyEnabled}
+                        onCheckedChange={setAutoReplyEnabled}
+                        disabled={!agentId}
+                      />
+                    </div>
+
+                    {autoReplyEnabled && !agentId && (
+                      <p className="text-xs text-destructive">
+                        请先选择一个 Agent 才能启用自动回复
+                      </p>
+                    )}
+                  </div>
+                </>
               )}
             </div>
 
