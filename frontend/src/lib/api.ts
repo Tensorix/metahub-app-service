@@ -242,7 +242,8 @@ export type MessagePartType =
   | 'tool_call'
   | 'tool_result'
   | 'error'
-  | 'thinking';
+  | 'thinking'
+  | 'subagent_call';
 
 export interface MessagePart {
   id: string;
@@ -268,6 +269,14 @@ export interface ToolResultContent {
   name: string;
   result: string;
   success: boolean;
+}
+
+export interface SubAgentCallContent {
+  call_id: string;
+  name: string;
+  description: string;
+  result: string;
+  duration_ms: number;
 }
 
 export interface ErrorContent {

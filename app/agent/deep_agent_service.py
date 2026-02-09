@@ -11,19 +11,57 @@ Uses deepagents for agent orchestration with:
 """
 
 import logging
+import json
 from typing import Any, AsyncGenerator, Optional
 from uuid import UUID
 
 from deepagents import create_deep_agent, SubAgent
 from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres import AsyncPostgresStore
+from langgraph.types import Command
 
 from app.config import config
 from app.agent.tools.context import agent_user_id
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_serialize(value) -> str:
+    """安全序列化工具输出为字符串，特别处理 SubAgent 返回的 Command 对象"""
+    if value is None:
+        return ""
+    
+    # 处理 SubAgent 返回的 Command 对象
+    if isinstance(value, Command):
+        try:
+            # Command.update['messages'] 包含 ToolMessage 列表
+            messages = value.update.get("messages", [])
+            if messages:
+                last_msg = messages[-1]
+                # ToolMessage 的 content 就是 SubAgent 的最终输出
+                if isinstance(last_msg, ToolMessage):
+                    return str(last_msg.content)
+                elif hasattr(last_msg, "content"):
+                    return str(last_msg.content)
+            # 如果无法提取，返回字符串表示
+            return str(value)
+        except Exception as e:
+            logger.warning(f"Failed to extract content from Command: {e}")
+            return str(value)
+    
+    if isinstance(value, (str, int, float, bool)):
+        return str(value)
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return str(value)
+    try:
+        return str(value)
+    except Exception:
+        return f"<{type(value).__name__}>"
 
 
 class DeepAgentService:
@@ -361,7 +399,6 @@ class DeepAgentService:
             )
 
             self._agent = create_deep_agent(**agent_kwargs)
-
         return self._agent
 
     async def chat(
@@ -455,6 +492,9 @@ class DeepAgentService:
 
             try:
                 event_count = 0
+                # 追踪活跃的 SubAgent run_id，用于过滤内部事件
+                _active_subagent_run_ids = set()
+                
                 async for event in agent.astream_events(
                     {"messages": [{"role": "user", "content": message}]},
                     config=cfg,
@@ -463,9 +503,55 @@ class DeepAgentService:
                     event_count += 1
                     event_type = event.get("event")
                     event_data = event.get("data", {})
+                    run_id = event.get("run_id")
+                    parent_ids = event.get("parent_ids", [])
 
-                    logger.debug(f"Agent event #{event_count}: {event_type}")
+                    logger.debug(f"Agent event #{event_count}: {event_type}, run_id={run_id}")
 
+                    # ★ 优先处理 task 工具的 start/end（标记 SubAgent 边界）
+                    if event_type == "on_tool_start" and event.get("name") == "task":
+                        tool_input = event_data.get("input", {})
+                        subagent_name = tool_input.get("subagent_type", "unknown")
+                        description = tool_input.get("description", "")
+                        _active_subagent_run_ids.add(run_id)
+                        logger.info(f"SubAgent delegation START: {subagent_name} (run_id={run_id})")
+                        yield {
+                            "event": "subagent_start",
+                            "data": {
+                                "run_id": run_id,
+                                "name": subagent_name,
+                                "description": description,
+                            },
+                        }
+                        continue
+
+                    if event_type == "on_tool_end" and event.get("name") == "task":
+                        tool_output = event_data.get("output", "")
+                        result_str = _safe_serialize(tool_output)
+                        _active_subagent_run_ids.discard(run_id)
+                        logger.info(f"SubAgent delegation END (run_id={run_id})")
+                        yield {
+                            "event": "subagent_end",
+                            "data": {
+                                "run_id": run_id,
+                                "result": result_str,
+                            },
+                        }
+                        continue
+
+                    # ★ 过滤 SubAgent 内部事件
+                    # 方法1: 使用 parent_ids（如果事件的父级在活跃 SubAgent 中，则丢弃）
+                    if _active_subagent_run_ids and parent_ids:
+                        if any(pid in _active_subagent_run_ids for pid in parent_ids):
+                            logger.debug(f"Filtering SubAgent internal event: {event_type}")
+                            continue
+                    
+                    # 方法2: 如果 run_id 本身就在活跃 SubAgent 集合中（说明这是 SubAgent 的直接子事件）
+                    if run_id in _active_subagent_run_ids:
+                        logger.debug(f"Filtering SubAgent direct child event: {event_type}")
+                        continue
+
+                    # 以下是主 Agent 事件的正常处理
                     if event_type == "on_chat_model_stream":
                         # Streaming text chunk
                         chunk = event_data.get("chunk")
@@ -478,8 +564,10 @@ class DeepAgentService:
 
                     elif event_type == "on_tool_start":
                         # Tool invocation started (custom or built-in)
+                        # 注意：task 工具已经在前面处理过了
                         tool_name = event.get("name", "unknown")
                         tool_input = event_data.get("input", {})
+                        
                         logger.info(f"Tool call: {tool_name}")
                         
                         # 安全地序列化 tool_input
@@ -489,7 +577,6 @@ class DeepAgentService:
                                 safe_input = {}
                                 for key, value in tool_input.items():
                                     try:
-                                        import json
                                         json.dumps(value)  # 测试是否可序列化
                                         safe_input[key] = value
                                     except (TypeError, ValueError):
@@ -509,30 +596,12 @@ class DeepAgentService:
 
                     elif event_type == "on_tool_end":
                         # Tool execution completed
+                        # 注意：task 工具已经在前面处理过了
                         tool_output = event_data.get("output", "")
                         tool_name = event.get("name", "unknown")
-                        logger.info(f"Tool result: {tool_name}")
                         
-                        # 安全地序列化 tool_output
-                        try:
-                            # 尝试转换为字符串
-                            if tool_output is None:
-                                result_str = ""
-                            elif isinstance(tool_output, (str, int, float, bool)):
-                                result_str = str(tool_output)
-                            elif isinstance(tool_output, (dict, list)):
-                                # 对于字典和列表，尝试 JSON 序列化
-                                import json
-                                try:
-                                    result_str = json.dumps(tool_output, ensure_ascii=False)
-                                except (TypeError, ValueError):
-                                    result_str = str(tool_output)
-                            else:
-                                # 对于其他类型，使用 str() 但捕获可能的错误
-                                result_str = str(tool_output)
-                        except Exception as e:
-                            logger.warning(f"Failed to serialize tool output: {e}")
-                            result_str = f"<output type: {type(tool_output).__name__}>"
+                        logger.info(f"Tool result: {tool_name}")
+                        result_str = _safe_serialize(tool_output)
                         
                         yield {
                             "event": "tool_result",

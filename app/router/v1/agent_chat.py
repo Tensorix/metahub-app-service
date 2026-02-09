@@ -55,20 +55,37 @@ class StreamingPart:
 @dataclass
 class StreamingCollector:
     """收集流式事件的数据结构"""
-    text_chunks: List[str] = field(default_factory=list)
+    text_chunks: List[str] = field(default_factory=list)  # 当前累积的文本块
+    text_parts: List[StreamingPart] = field(default_factory=list)  # 已完成的文本 parts
     thinking_chunks: List[str] = field(default_factory=list)
     tool_calls: List[StreamingPart] = field(default_factory=list)
     tool_results: List[StreamingPart] = field(default_factory=list)
     errors: List[StreamingPart] = field(default_factory=list)
+    subagent_calls: List[StreamingPart] = field(default_factory=list)
     _call_counter: int = field(default=0)
+    _active_subagents: dict = field(default_factory=dict)  # run_id → subagent info
 
     def generate_call_id(self) -> str:
         """生成唯一的 call_id"""
         self._call_counter += 1
         return f"call_{uuid.uuid4().hex[:8]}_{self._call_counter}"
 
+    def flush_current_text(self):
+        """将当前累积的 text_chunks 转换为一个独立的 text part"""
+        if self.text_chunks:
+            text_content = "".join(self.text_chunks)
+            self.text_parts.append(StreamingPart(
+                type=MessagePartType.TEXT,
+                content={"text": text_content},
+                metadata={"timestamp": datetime.utcnow().isoformat()}
+            ))
+            self.text_chunks = []  # 清空当前累积的 chunks
+
     def add_tool_call(self, name: str, args: dict, call_id: Optional[str] = None) -> str:
         """添加工具调用，返回 call_id"""
+        # 先 flush 当前累积的文本，使其成为独立的 part
+        self.flush_current_text()
+        
         if call_id is None:
             call_id = self.generate_call_id()
 
@@ -95,6 +112,46 @@ class StreamingCollector:
             },
             metadata={"timestamp": datetime.utcnow().isoformat()}
         ))
+
+    def add_subagent_start(self, run_id: str, name: str, description: str) -> str:
+        """记录 SubAgent 调用开始，用 run_id 作为关联键"""
+        # 先 flush 当前累积的文本，使其成为独立的 part
+        self.flush_current_text()
+        
+        call_id = self.generate_call_id()
+        self._active_subagents[run_id] = {
+            "call_id": call_id,
+            "name": name,
+            "description": description,
+            "start_time": datetime.utcnow(),
+        }
+        return call_id
+
+    def add_subagent_end(self, run_id: str, result: str) -> Optional[str]:
+        """记录 SubAgent 调用结束，用 run_id 匹配对应的 start，返回 call_id"""
+        sa = self._active_subagents.pop(run_id, None)
+        if not sa:
+            return None
+        duration = int(
+            (datetime.utcnow() - sa["start_time"]).total_seconds() * 1000
+        )
+        self.subagent_calls.append(StreamingPart(
+            type=MessagePartType.SUBAGENT_CALL,
+            content={
+                "call_id": sa["call_id"],
+                "name": sa["name"],
+                "description": sa["description"],
+                "result": result,
+                "duration_ms": duration,
+            },
+            metadata={"timestamp": datetime.utcnow().isoformat()},
+        ))
+        return sa["call_id"]
+
+    def flush_active_subagents(self, cancel_result: str = "[已取消]"):
+        """流中断时，将所有未完成的 SubAgent 调用补充关闭"""
+        for run_id in list(self._active_subagents.keys()):
+            self.add_subagent_end(run_id, cancel_result)
 
     def add_error(self, error: str, code: Optional[str] = None, context: Optional[str] = None):
         """添加错误"""
@@ -132,17 +189,22 @@ class StreamingCollector:
         """是否有任何内容"""
         return bool(
             self.text_chunks or
+            self.text_parts or
             self.thinking_chunks or
             self.tool_calls or
             self.tool_results or
+            self.subagent_calls or
             self.errors
         )
 
     def to_parts_data(self) -> List[dict]:
         """
         转换为 MessagePart 创建数据列表
-        按时间顺序排列：thinking -> tool_call -> tool_result -> text -> error
+        按时间顺序排列所有 parts：thinking -> text/tool_call/tool_result/subagent_call（交错）-> error
         """
+        # 先 flush 最后剩余的文本
+        self.flush_current_text()
+        
         parts = []
 
         # 添加思考内容（如果有，放在最前面）
@@ -154,8 +216,11 @@ class StreamingCollector:
                 "metadata_": {"timestamp": datetime.utcnow().isoformat()},
             })
 
-        # 按时间顺序合并 tool_call 和 tool_result
+        # 按时间顺序合并所有 parts（text, tool_call, tool_result, subagent_call）
         timed_parts = []
+
+        for tp in self.text_parts:
+            timed_parts.append((tp.timestamp, MessagePartType.TEXT, tp))
 
         for tc in self.tool_calls:
             timed_parts.append((tc.timestamp, MessagePartType.TOOL_CALL, tc))
@@ -163,25 +228,28 @@ class StreamingCollector:
         for tr in self.tool_results:
             timed_parts.append((tr.timestamp, MessagePartType.TOOL_RESULT, tr))
 
+        for sa in self.subagent_calls:
+            timed_parts.append((sa.timestamp, MessagePartType.SUBAGENT_CALL, sa))
+
         # 按时间排序
         timed_parts.sort(key=lambda x: x[0])
 
-        # 添加排序后的 tool_call/tool_result
+        # 添加排序后的所有 parts
         for _, part_type, part in timed_parts:
-            parts.append({
-                "type": part_type,
-                "content": json.dumps(part.content),
-                "metadata_": part.metadata,
-            })
-
-        # 添加文本（如果有）
-        full_text = self.get_full_text()
-        if full_text:
-            parts.append({
-                "type": MessagePartType.TEXT,
-                "content": full_text,
-                "metadata_": {},
-            })
+            if part_type == MessagePartType.TEXT:
+                # text part 的 content 是 {"text": "..."} 格式，需要提取
+                parts.append({
+                    "type": part_type,
+                    "content": part.content["text"],
+                    "metadata_": part.metadata,
+                })
+            else:
+                # 其他 part 的 content 需要 JSON 序列化
+                parts.append({
+                    "type": part_type,
+                    "content": json.dumps(part.content),
+                    "metadata_": part.metadata,
+                })
 
         # 添加错误（如果有）
         for err in self.errors:
@@ -503,6 +571,20 @@ async def chat_with_agent(
                         event_data["call_id"] = active_call_id
                         active_call_id = None  # 重置
 
+                elif event_type == "subagent_start":
+                    run_id = event_data.get("run_id", "")
+                    name = event_data.get("name", "")
+                    description = event_data.get("description", "")
+                    sa_call_id = collector.add_subagent_start(run_id, name, description)
+                    event_data["call_id"] = sa_call_id
+
+                elif event_type == "subagent_end":
+                    run_id = event_data.get("run_id", "")
+                    result = event_data.get("result", "")
+                    sa_call_id = collector.add_subagent_end(run_id, result)
+                    if sa_call_id:
+                        event_data["call_id"] = sa_call_id
+
                 elif event_type == "error":
                     error_msg = event_data.get("error", "Unknown error")
                     collector.add_error(error_msg, context="streaming")
@@ -517,7 +599,17 @@ async def chat_with_agent(
 
             # 保存完整的 AI 消息（包含所有 Parts）
             if collector.has_content():
+                logger.info(f"Collector state: text_parts={len(collector.text_parts)}, "
+                           f"tool_calls={len(collector.tool_calls)}, "
+                           f"tool_results={len(collector.tool_results)}, "
+                           f"subagent_calls={len(collector.subagent_calls)}")
+                
                 parts_data = collector.to_parts_data()
+                
+                # 调试：打印 parts 类型
+                part_types = [p["type"] for p in parts_data]
+                logger.info(f"Parts to save: {part_types}")
+                
                 await _save_message_with_parts(
                     db_stream,
                     current_user.id,
@@ -535,6 +627,9 @@ async def chat_with_agent(
 
         except asyncio.CancelledError:
             logger.info(f"Chat generation cancelled for {task_key}")
+            
+            # 关闭所有未完成的 SubAgent 调用
+            collector.flush_active_subagents("[已取消]")
             
             # 保存已收集的内容（标记为已取消）
             if collector.has_content():
@@ -753,6 +848,28 @@ async def chat_websocket(
                                 })
                                 active_call_id = None
 
+                            elif event_type == "subagent_start":
+                                run_id = event_data.get("run_id", "")
+                                name = event_data.get("name", "")
+                                description = event_data.get("description", "")
+                                sa_call_id = collector.add_subagent_start(run_id, name, description)
+                                await websocket.send_json({
+                                    "type": "subagent_start",
+                                    "name": name,
+                                    "description": description,
+                                    "call_id": sa_call_id,
+                                })
+
+                            elif event_type == "subagent_end":
+                                run_id = event_data.get("run_id", "")
+                                result = event_data.get("result", "")
+                                sa_call_id = collector.add_subagent_end(run_id, result)
+                                await websocket.send_json({
+                                    "type": "subagent_end",
+                                    "call_id": sa_call_id,
+                                    "result": result,
+                                })
+
                             elif event_type == "done":
                                 await websocket.send_json({"type": "done"})
 
@@ -773,6 +890,9 @@ async def chat_websocket(
                             )
 
                     except asyncio.CancelledError:
+                        # 关闭所有未完成的 SubAgent 调用
+                        collector.flush_active_subagents("[已取消]")
+                        
                         if collector.has_content():
                             if collector.text_chunks:
                                 collector.text_chunks.append(" [已取消]")

@@ -46,6 +46,7 @@ interface ChatState {
     name: string;
     args: Record<string, unknown>;
   } | null;
+  activeSubagents: Map<string, { name: string; description: string }>;
   pendingParts: Array<{
     type: 'thinking' | 'tool_call' | 'tool_result' | 'error';
     content: string;
@@ -123,6 +124,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isThinking: false,
   abortController: null,
   activeToolCall: null,
+  activeSubagents: new Map(),
   pendingParts: [],
   streamError: null,
 
@@ -817,6 +819,89 @@ export const useChatStore = create<ChatState>((set, get) => ({
             currentCallId = null;
             break;
 
+          case 'subagent_start':
+            console.log('[SubAgent] Start:', event.data);
+            set((state) => {
+              const callId = event.data.call_id;
+              
+              const newActiveSubagents = new Map(state.activeSubagents);
+              newActiveSubagents.set(callId, {
+                name: event.data.name,
+                description: event.data.description,
+              });
+              console.log('[SubAgent] Active subagents after start:', Array.from(newActiveSubagents.entries()));
+              return { activeSubagents: newActiveSubagents };
+            });
+            
+            // 重要：SubAgent 调用后，重置 streamingContent 并增加 text part index
+            // 这样后续的 message 事件会创建新的 text part
+            set({ streamingContent: '' });
+            currentTextPartIndex++;
+            break;
+
+          case 'subagent_end':
+            console.log('[SubAgent] End:', event.data);
+            set((state) => {
+              const callId = event.data.call_id;
+              const result = event.data.result;
+              
+              if (callId) {
+                // 从 activeSubagents 中获取 name 和 description
+                const subagentInfo = state.activeSubagents.get(callId);
+                console.log('[SubAgent] End - subagentInfo:', subagentInfo);
+                
+                // 移除活跃状态
+                const newActiveSubagents = new Map(state.activeSubagents);
+                newActiveSubagents.delete(callId);
+                console.log('[SubAgent] Active subagents after end:', Array.from(newActiveSubagents.entries()));
+                
+                // 立即创建 subagent_call part 并添加到消息中
+                const topicKey = topicId || currentSessionId;
+                const currentMessages = state.messages[topicKey] || [];
+                const msgIndex = currentMessages.findIndex(
+                  (m) => m.id === state.streamingMessageId
+                );
+                
+                if (msgIndex !== -1 && subagentInfo) {
+                  const updatedMessages = [...currentMessages];
+                  const message = { ...updatedMessages[msgIndex] };
+                  
+                  // 添加 subagent_call part
+                  const newPart = {
+                    id: `${message.id}-sa-${callId}`,
+                    message_id: message.id,
+                    type: 'subagent_call' as const,
+                    content: JSON.stringify({
+                      call_id: callId,
+                      name: subagentInfo.name,
+                      description: subagentInfo.description,
+                      result: result,
+                      duration_ms: 0, // 流式中无法计算准确时长
+                    }),
+                    created_at: new Date().toISOString(),
+                  };
+                  console.log('[SubAgent] Creating part:', newPart);
+                  
+                  message.parts = [...message.parts, newPart];
+                  updatedMessages[msgIndex] = message;
+                  
+                  console.log('[SubAgent] Updated message parts:', message.parts.map(p => ({ type: p.type, id: p.id })));
+                  
+                  return {
+                    activeSubagents: newActiveSubagents,
+                    messages: {
+                      ...state.messages,
+                      [topicKey]: updatedMessages,
+                    },
+                  };
+                }
+                
+                return { activeSubagents: newActiveSubagents };
+              }
+              return state;
+            });
+            break;
+
           case 'error':
             set((state) => {
               const errorPart = {
@@ -869,18 +954,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
             break;
 
           case 'done':
+            console.log('[Done] Stream completed');
+            
+            // 在 reload 之前，保存当前消息的 parts 用于调试
+            const topicKey = topicId || currentSessionId;
+            const currentMessages = get().messages[topicKey] || [];
+            const streamingMsg = currentMessages.find(m => m.id === get().streamingMessageId);
+            if (streamingMsg) {
+              console.log('[Done] Current message parts before reload:', 
+                streamingMsg.parts.map(p => ({ type: p.type, id: p.id }))
+              );
+            }
+            
             // 流式完成
             set(() => ({
               isStreaming: false,
               streamingMessageId: null,
               abortController: null,
               activeToolCall: null,
+              activeSubagents: new Map(),
               pendingParts: [],
             }));
 
             // 刷新消息列表获取真实 ID
             if (topicId) {
               await get().loadMessages(currentSessionId, topicId);
+              
+              // 检查 reload 后的 parts
+              const reloadedMessages = get().messages[topicKey] || [];
+              const reloadedMsg = reloadedMessages.find(m => m.id === streamingMsg?.id);
+              if (reloadedMsg) {
+                console.log('[Done] Message parts after reload:', 
+                  reloadedMsg.parts.map(p => ({ type: p.type, id: p.id }))
+                );
+              }
             }
             break;
         }

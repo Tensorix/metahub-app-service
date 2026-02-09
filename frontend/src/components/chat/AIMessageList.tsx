@@ -11,11 +11,12 @@ import { StreamingMessage } from './StreamingMessage';
 import { ToolCallIndicator } from './ToolCallIndicator';
 import { ThinkingPart } from './ThinkingPart';
 import { ToolCallPart } from './ToolCallPart';
+import { SubAgentCallPart } from './SubAgentCallPart';
 import { ErrorPart } from './ErrorPart';
 import { RegenerateButton } from './RegenerateButton';
 import { cn } from '@/lib/utils';
 import { Bot, User } from 'lucide-react';
-import type { Message, MessagePart } from '@/lib/api';
+import type { Message, MessagePart, SubAgentCallContent } from '@/lib/api';
 import { parseToolCallContent } from '@/lib/api';
 
 export function AIMessageList({ className }: { className?: string }) {
@@ -26,6 +27,7 @@ export function AIMessageList({ className }: { className?: string }) {
     streamingMessageId,
     streamingThinking,
     isThinking,
+    activeSubagents,
   } = useChatStore();
   const { activeToolCall } = useAIChat();
 
@@ -41,23 +43,10 @@ export function AIMessageList({ className }: { className?: string }) {
           isStreaming={message.id === streamingMessageId}
           streamingThinking={streamingThinking}
           isThinking={isThinking}
+          activeToolCall={message.id === streamingMessageId ? activeToolCall : null}
+          activeSubagents={message.id === streamingMessageId ? activeSubagents : new Map()}
         />
       ))}
-
-      {/* Tool call indicator (流式中) */}
-      {activeToolCall && (
-        <div className="flex gap-3">
-          <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full border bg-primary/10">
-            <Bot className="h-4 w-4" />
-          </div>
-          <ToolCallIndicator
-            name={activeToolCall.name}
-            args={activeToolCall.args}
-            status="calling"
-            className="max-w-[80%]"
-          />
-        </div>
-      )}
 
       {/* Empty state */}
       {messageList.length === 0 && (
@@ -76,6 +65,8 @@ interface MessageItemProps {
   isStreaming: boolean;
   streamingThinking: string;
   isThinking: boolean;
+  activeToolCall: { name: string; args: Record<string, unknown> } | null;
+  activeSubagents: Map<string, { name: string; description: string }>;
 }
 
 function MessageItem({
@@ -83,6 +74,8 @@ function MessageItem({
   isStreaming,
   streamingThinking,
   isThinking,
+  activeToolCall,
+  activeSubagents,
 }: MessageItemProps) {
   const isUser = message.role === 'user' || message.role === 'self';
   const isAssistant = message.role === 'assistant';
@@ -92,7 +85,7 @@ function MessageItem({
     if (!isAssistant) return [];
 
     const result: Array<{
-      type: 'thinking' | 'tool_pair' | 'text' | 'error';
+      type: 'thinking' | 'tool_pair' | 'subagent_call' | 'text' | 'error';
       data: any;
     }> = [];
 
@@ -138,6 +131,15 @@ function MessageItem({
           
         case 'tool_result':
           // tool_result 已经在 tool_call 中处理了，跳过
+          break;
+          
+        case 'subagent_call':
+          try {
+            const saData: SubAgentCallContent = JSON.parse(part.content);
+            result.push({ type: 'subagent_call', data: saData });
+          } catch {
+            // ignore
+          }
           break;
           
         case 'text':
@@ -234,6 +236,14 @@ function MessageItem({
                   />
                 );
                 
+              case 'subagent_call':
+                return (
+                  <SubAgentCallPart
+                    key={`subagent-${item.data.call_id}`}
+                    data={item.data}
+                  />
+                );
+                
               case 'text':
                 return (
                   <div key={`text-${index}`} className="rounded-lg px-4 py-2 bg-muted">
@@ -265,6 +275,41 @@ function MessageItem({
               isStreaming={true}
             />
           )}
+
+          {/* 流式中的工具调用指示 */}
+          {isStreaming && activeToolCall && (
+            <ToolCallIndicator
+              name={activeToolCall.name}
+              args={activeToolCall.args}
+              status="calling"
+            />
+          )}
+
+          {/* 流式中的 SubAgent 执行指示 */}
+          {(() => {
+            const shouldShow = isStreaming && activeSubagents.size > 0;
+            if (activeSubagents.size > 0) {
+              console.log('[SubAgent Indicator] isStreaming:', isStreaming, 
+                         'activeSubagents:', Array.from(activeSubagents.entries()),
+                         'shouldShow:', shouldShow);
+            }
+            return shouldShow ? (
+              <div className="flex flex-col gap-1">
+                {Array.from(activeSubagents.entries()).map(([callId, sa]) => (
+                  <div
+                    key={callId}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 animate-pulse"
+                  >
+                    <Bot className="h-3.5 w-3.5 text-primary" />
+                    <span className="text-xs font-medium text-primary">{sa.name}</span>
+                    <span className="text-xs text-muted-foreground truncate">
+                      {sa.description}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null;
+          })()}
 
           {/* Actions for AI messages */}
           {!isStreaming && hasTextContent && (

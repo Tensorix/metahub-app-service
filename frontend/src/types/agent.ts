@@ -8,6 +8,8 @@ export type ChatEventType =
   | 'thinking'
   | 'tool_call'
   | 'tool_result'
+  | 'subagent_start'
+  | 'subagent_end'
   | 'done'
   | 'error';
 
@@ -44,6 +46,25 @@ export interface ChatEventToolResult {
   };
 }
 
+export interface ChatEventSubAgentStart {
+  event: 'subagent_start';
+  data: {
+    call_id: string;
+    run_id: string;
+    name: string;
+    description: string;
+  };
+}
+
+export interface ChatEventSubAgentEnd {
+  event: 'subagent_end';
+  data: {
+    run_id: string;
+    call_id: string;
+    result: string;
+  };
+}
+
 export interface ChatEventDone {
   event: 'done';
   data: {
@@ -64,6 +85,8 @@ export type ChatEvent =
   | ChatEventThinking
   | ChatEventToolCall
   | ChatEventToolResult
+  | ChatEventSubAgentStart
+  | ChatEventSubAgentEnd
   | ChatEventDone
   | ChatEventError;
 

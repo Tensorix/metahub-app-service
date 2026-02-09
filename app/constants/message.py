@@ -43,14 +43,15 @@ class MessagePartType:
     TOOL_RESULT = "tool_result"
     ERROR = "error"
     THINKING = "thinking"
+    SUBAGENT_CALL = "subagent_call"
 
     KNOWN_TYPES = frozenset({
         TEXT, IMAGE, AT, URL, JSON,
-        TOOL_CALL, TOOL_RESULT, ERROR, THINKING,
+        TOOL_CALL, TOOL_RESULT, ERROR, THINKING, SUBAGENT_CALL,
     })
 
     # AI 相关类型集合
-    AI_TYPES = frozenset({TOOL_CALL, TOOL_RESULT, ERROR, THINKING})
+    AI_TYPES = frozenset({TOOL_CALL, TOOL_RESULT, ERROR, THINKING, SUBAGENT_CALL})
 
     @classmethod
     def is_known(cls, type_: str) -> bool:
