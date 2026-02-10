@@ -141,7 +141,7 @@ class AutoReplyService:
 
         # 7. Send via bridge
         try:
-            message_payload = [{"type": "text", "content": reply_text}]
+            message_payload = [{"type": "text", "text": reply_text}]
             bridge_result = await im_connection_manager.send_to_bridge(
                 user_id=user_id,
                 source=session.source,
