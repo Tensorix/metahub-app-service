@@ -221,6 +221,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       metadata: data.metadata,
       source: data.source,
       last_visited_at: data.last_visited_at,
+      auto_reply_enabled: data.auto_reply_enabled,
     });
     set((state) => ({
       sessions: state.sessions.map((s) =>
