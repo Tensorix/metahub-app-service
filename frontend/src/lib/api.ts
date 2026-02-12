@@ -262,24 +262,27 @@ export interface MessagePart {
 // ========== AI Part 内容解析类型 ==========
 
 export interface ToolCallContent {
-  call_id: string;
+  op_id: string;
   name: string;
   args: Record<string, unknown>;
 }
 
 export interface ToolResultContent {
-  call_id: string;
+  op_id: string;
   name: string;
   result: string;
   success: boolean;
+  duration_ms?: number;
+  status?: 'success' | 'error' | 'cancelled';
 }
 
 export interface SubAgentCallContent {
-  call_id: string;
+  op_id: string;
   name: string;
   description: string;
   result: string;
   duration_ms: number;
+  status?: 'success' | 'error' | 'cancelled';
 }
 
 export interface ErrorContent {
@@ -320,7 +323,14 @@ export function isTextPart(part: MessagePart): boolean {
 export function parseToolCallContent(part: MessagePart): ToolCallContent | null {
   if (part.type !== 'tool_call') return null;
   try {
-    return JSON.parse(part.content) as ToolCallContent;
+    const data = JSON.parse(part.content) as any;
+    const opId = data.op_id || data.call_id;
+    if (!opId) return null;
+    return {
+      op_id: opId,
+      name: data.name || 'unknown',
+      args: (data.args || {}) as Record<string, unknown>,
+    };
   } catch {
     return null;
   }
@@ -329,7 +339,17 @@ export function parseToolCallContent(part: MessagePart): ToolCallContent | null 
 export function parseToolResultContent(part: MessagePart): ToolResultContent | null {
   if (part.type !== 'tool_result') return null;
   try {
-    return JSON.parse(part.content) as ToolResultContent;
+    const data = JSON.parse(part.content) as any;
+    const opId = data.op_id || data.call_id;
+    if (!opId) return null;
+    return {
+      op_id: opId,
+      name: data.name || 'unknown',
+      result: data.result || '',
+      success: data.success ?? true,
+      duration_ms: data.duration_ms,
+      status: data.status,
+    };
   } catch {
     return null;
   }

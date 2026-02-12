@@ -8,7 +8,6 @@ import { useMemo } from 'react';
 import { useChatStore } from '@/store/chat';
 import { useAIChat } from '@/hooks/useAIChat';
 import { StreamingMessage } from './StreamingMessage';
-import { ToolCallIndicator } from './ToolCallIndicator';
 import { ThinkingPart } from './ThinkingPart';
 import { ToolCallPart } from './ToolCallPart';
 import { SubAgentCallPart } from './SubAgentCallPart';
@@ -17,7 +16,7 @@ import { RegenerateButton } from './RegenerateButton';
 import { cn } from '@/lib/utils';
 import { Bot, User } from 'lucide-react';
 import type { Message, MessagePart, SubAgentCallContent } from '@/lib/api';
-import { parseToolCallContent } from '@/lib/api';
+import { parseToolCallContent, parseToolResultContent } from '@/lib/api';
 
 export function AIMessageList({ className }: { className?: string }) {
   const { 
@@ -27,9 +26,8 @@ export function AIMessageList({ className }: { className?: string }) {
     streamingMessageId,
     streamingThinking,
     isThinking,
-    activeSubagents,
   } = useChatStore();
-  const { activeToolCall } = useAIChat();
+  const { activeOperations } = useAIChat();
 
   const topicKey = currentTopicId || currentSessionId;
   const messageList = topicKey ? (messages[topicKey] || []) : [];
@@ -43,8 +41,7 @@ export function AIMessageList({ className }: { className?: string }) {
           isStreaming={message.id === streamingMessageId}
           streamingThinking={streamingThinking}
           isThinking={isThinking}
-          activeToolCall={message.id === streamingMessageId ? activeToolCall : null}
-          activeSubagents={message.id === streamingMessageId ? activeSubagents : new Map()}
+          activeOperations={message.id === streamingMessageId ? activeOperations : new Map()}
         />
       ))}
 
@@ -65,8 +62,15 @@ interface MessageItemProps {
   isStreaming: boolean;
   streamingThinking: string;
   isThinking: boolean;
-  activeToolCall: { name: string; args: Record<string, unknown> } | null;
-  activeSubagents: Map<string, { name: string; description: string }>;
+  activeOperations: Map<string, {
+    op_id: string;
+    op_type: 'tool' | 'subagent';
+    name: string;
+    args?: Record<string, unknown>;
+    description?: string;
+    started_at: string;
+    status: 'running' | 'success' | 'error' | 'cancelled';
+  }>;
 }
 
 function MessageItem({
@@ -74,8 +78,7 @@ function MessageItem({
   isStreaming,
   streamingThinking,
   isThinking,
-  activeToolCall,
-  activeSubagents,
+  activeOperations,
 }: MessageItemProps) {
   const isUser = message.role === 'user' || message.role === 'self';
   const isAssistant = message.role === 'assistant';
@@ -85,7 +88,7 @@ function MessageItem({
     if (!isAssistant) return [];
 
     const result: Array<{
-      type: 'thinking' | 'tool_pair' | 'subagent_call' | 'text' | 'error';
+      type: 'thinking' | 'tool_pair' | 'tool_result_orphan' | 'subagent_call' | 'text' | 'error';
       data: any;
     }> = [];
 
@@ -95,8 +98,8 @@ function MessageItem({
       if (part.type === 'tool_result') {
         try {
           const resultData = JSON.parse(part.content);
-          if (resultData.call_id) {
-            toolResultMap.set(resultData.call_id, part);
+          if (resultData.op_id) {
+            toolResultMap.set(resultData.op_id, part);
           }
         } catch {
           // ignore
@@ -116,9 +119,9 @@ function MessageItem({
         case 'tool_call':
           try {
             const callContent = parseToolCallContent(part);
-            if (callContent && !processedToolCalls.has(callContent.call_id)) {
-              processedToolCalls.add(callContent.call_id);
-              const resultPart = toolResultMap.get(callContent.call_id);
+            if (callContent && !processedToolCalls.has(callContent.op_id)) {
+              processedToolCalls.add(callContent.op_id);
+              const resultPart = toolResultMap.get(callContent.op_id);
               result.push({
                 type: 'tool_pair',
                 data: { call: part, result: resultPart }
@@ -130,12 +133,23 @@ function MessageItem({
           break;
           
         case 'tool_result':
-          // tool_result 已经在 tool_call 中处理了，跳过
+          try {
+            const resultContent = parseToolResultContent(part);
+            if (resultContent && !processedToolCalls.has(resultContent.op_id)) {
+              result.push({ type: 'tool_result_orphan', data: resultContent });
+            }
+          } catch {
+            // ignore
+          }
           break;
           
         case 'subagent_call':
           try {
-            const saData: SubAgentCallContent = JSON.parse(part.content);
+            const parsed: any = JSON.parse(part.content);
+            const saData: SubAgentCallContent = {
+              ...parsed,
+              op_id: parsed.op_id || parsed.call_id,
+            };
             result.push({ type: 'subagent_call', data: saData });
           } catch {
             // ignore
@@ -239,9 +253,18 @@ function MessageItem({
               case 'subagent_call':
                 return (
                   <SubAgentCallPart
-                    key={`subagent-${item.data.call_id}`}
+                    key={`subagent-${item.data.op_id}`}
                     data={item.data}
                   />
+                );
+
+              case 'tool_result_orphan':
+                return (
+                  <div key={`tool-orphan-${index}`} className="my-2 rounded-lg border px-3 py-2 bg-muted/20">
+                    <div className="text-xs text-muted-foreground mb-1">Tool Result (Unmatched)</div>
+                    <div className="text-sm font-medium mb-1">{item.data.name}</div>
+                    <pre className="text-xs whitespace-pre-wrap break-words">{item.data.result}</pre>
+                  </div>
                 );
                 
               case 'text':
@@ -276,40 +299,26 @@ function MessageItem({
             />
           )}
 
-          {/* 流式中的工具调用指示 */}
-          {isStreaming && activeToolCall && (
-            <ToolCallIndicator
-              name={activeToolCall.name}
-              args={activeToolCall.args}
-              status="calling"
-            />
-          )}
-
-          {/* 流式中的 SubAgent 执行指示 */}
-          {(() => {
-            const shouldShow = isStreaming && activeSubagents.size > 0;
-            if (activeSubagents.size > 0) {
-              console.log('[SubAgent Indicator] isStreaming:', isStreaming, 
-                         'activeSubagents:', Array.from(activeSubagents.entries()),
-                         'shouldShow:', shouldShow);
-            }
-            return shouldShow ? (
-              <div className="flex flex-col gap-1">
-                {Array.from(activeSubagents.entries()).map(([callId, sa]) => (
+          {/* 流式中的并行操作指示 */}
+          {isStreaming && activeOperations.size > 0 && (
+            <div className="flex flex-col gap-1">
+              {Array.from(activeOperations.values())
+                .sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime())
+                .map((op) => (
                   <div
-                    key={callId}
+                    key={op.op_id}
                     className="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 animate-pulse"
                   >
                     <Bot className="h-3.5 w-3.5 text-primary" />
-                    <span className="text-xs font-medium text-primary">{sa.name}</span>
-                    <span className="text-xs text-muted-foreground truncate">
-                      {sa.description}
-                    </span>
+                    <span className="text-xs font-medium text-primary">{op.name}</span>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{op.op_type}</span>
+                    {op.description && (
+                      <span className="text-xs text-muted-foreground truncate">{op.description}</span>
+                    )}
                   </div>
                 ))}
-              </div>
-            ) : null;
-          })()}
+            </div>
+          )}
 
           {/* Actions for AI messages */}
           {!isStreaming && hasTextContent && (

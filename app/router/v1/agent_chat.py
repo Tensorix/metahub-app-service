@@ -9,9 +9,9 @@ Provides:
 
 import asyncio
 import json
-import uuid
+import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import UUID
 
@@ -48,7 +48,7 @@ class StreamingPart:
     """流式过程中收集的 Part 数据"""
     type: str
     content: dict  # 原始数据，稍后序列化
-    timestamp: datetime = field(default_factory=lambda: datetime.utcnow())
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict = field(default_factory=dict)
 
 
@@ -62,13 +62,7 @@ class StreamingCollector:
     tool_results: List[StreamingPart] = field(default_factory=list)
     errors: List[StreamingPart] = field(default_factory=list)
     subagent_calls: List[StreamingPart] = field(default_factory=list)
-    _call_counter: int = field(default=0)
-    _active_subagents: dict = field(default_factory=dict)  # run_id → subagent info
-
-    def generate_call_id(self) -> str:
-        """生成唯一的 call_id"""
-        self._call_counter += 1
-        return f"call_{uuid.uuid4().hex[:8]}_{self._call_counter}"
+    _active_operations: dict = field(default_factory=dict)  # op_id → operation info
 
     def flush_current_text(self):
         """将当前累积的 text_chunks 转换为一个独立的 text part"""
@@ -77,81 +71,112 @@ class StreamingCollector:
             self.text_parts.append(StreamingPart(
                 type=MessagePartType.TEXT,
                 content={"text": text_content},
-                metadata={"timestamp": datetime.utcnow().isoformat()}
+                metadata={"timestamp": datetime.now(timezone.utc).isoformat()}
             ))
             self.text_chunks = []  # 清空当前累积的 chunks
 
-    def add_tool_call(self, name: str, args: dict, call_id: Optional[str] = None) -> str:
-        """添加工具调用，返回 call_id"""
-        # 先 flush 当前累积的文本，使其成为独立的 part
+    def add_operation_start(
+        self,
+        op_id: str,
+        op_type: str,
+        name: str,
+        args: Optional[dict] = None,
+        description: str = "",
+        started_at: Optional[str] = None,
+    ):
+        """记录操作开始。tool 立即落 tool_call，subagent 等待结束后落 subagent_call。"""
         self.flush_current_text()
-        
-        if call_id is None:
-            call_id = self.generate_call_id()
+        start_time = datetime.now(timezone.utc)
+        if started_at:
+            try:
+                start_time = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+            except ValueError:
+                pass
 
-        self.tool_calls.append(StreamingPart(
-            type=MessagePartType.TOOL_CALL,
-            content={
-                "call_id": call_id,
-                "name": name,
-                "args": args,
-            },
-            metadata={"timestamp": datetime.utcnow().isoformat()}
-        ))
-        return call_id
+        self._active_operations[op_id] = {
+            "op_id": op_id,
+            "op_type": op_type,
+            "name": name,
+            "args": args or {},
+            "description": description,
+            "start_time": start_time,
+        }
 
-    def add_tool_result(self, name: str, result: str, call_id: str, success: bool = True):
-        """添加工具结果"""
-        self.tool_results.append(StreamingPart(
-            type=MessagePartType.TOOL_RESULT,
-            content={
-                "call_id": call_id,
-                "name": name,
+        if op_type == "tool":
+            self.tool_calls.append(StreamingPart(
+                type=MessagePartType.TOOL_CALL,
+                content={
+                    "op_id": op_id,
+                    "name": name,
+                    "args": args or {},
+                },
+                metadata={"timestamp": start_time.isoformat()}
+            ))
+
+    def add_operation_end(
+        self,
+        op_id: str,
+        op_type: Optional[str] = None,
+        name: Optional[str] = None,
+        result: str = "",
+        success: bool = True,
+        ended_at: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> dict:
+        """记录操作结束。按 op_id 精确匹配开始事件。"""
+        op = self._active_operations.pop(op_id, None)
+
+        effective_type = op_type or (op.get("op_type") if op else "tool")
+        effective_name = name or (op.get("name") if op else "unknown")
+        effective_description = op.get("description", "") if op else ""
+        start_time = op.get("start_time", datetime.now(timezone.utc)) if op else datetime.now(timezone.utc)
+        end_time = datetime.now(timezone.utc)
+        if ended_at:
+            try:
+                end_time = datetime.fromisoformat(ended_at.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+        duration = int((end_time - start_time).total_seconds() * 1000)
+        effective_status = status or ("success" if success else "error")
+
+        if effective_type == "subagent":
+            payload = {
+                "op_id": op_id,
+                "op_type": effective_type,
+                "name": effective_name,
+                "description": effective_description,
                 "result": result,
                 "success": success,
-            },
-            metadata={"timestamp": datetime.utcnow().isoformat()}
-        ))
+                "duration_ms": max(0, duration),
+                "status": effective_status,
+            }
+            self.subagent_calls.append(StreamingPart(
+                type=MessagePartType.SUBAGENT_CALL,
+                content=payload,
+                metadata={"timestamp": end_time.isoformat()},
+            ))
+            return payload
 
-    def add_subagent_start(self, run_id: str, name: str, description: str) -> str:
-        """记录 SubAgent 调用开始，用 run_id 作为关联键"""
-        # 先 flush 当前累积的文本，使其成为独立的 part
-        self.flush_current_text()
-        
-        call_id = self.generate_call_id()
-        self._active_subagents[run_id] = {
-            "call_id": call_id,
-            "name": name,
-            "description": description,
-            "start_time": datetime.utcnow(),
+        payload = {
+            "op_id": op_id,
+            "op_type": effective_type,
+            "name": effective_name,
+            "result": result,
+            "success": success,
+            "duration_ms": max(0, duration),
+            "status": effective_status,
         }
-        return call_id
-
-    def add_subagent_end(self, run_id: str, result: str) -> Optional[str]:
-        """记录 SubAgent 调用结束，用 run_id 匹配对应的 start，返回 call_id"""
-        sa = self._active_subagents.pop(run_id, None)
-        if not sa:
-            return None
-        duration = int(
-            (datetime.utcnow() - sa["start_time"]).total_seconds() * 1000
-        )
-        self.subagent_calls.append(StreamingPart(
-            type=MessagePartType.SUBAGENT_CALL,
-            content={
-                "call_id": sa["call_id"],
-                "name": sa["name"],
-                "description": sa["description"],
-                "result": result,
-                "duration_ms": duration,
-            },
-            metadata={"timestamp": datetime.utcnow().isoformat()},
+        self.tool_results.append(StreamingPart(
+            type=MessagePartType.TOOL_RESULT,
+            content=payload,
+            metadata={"timestamp": end_time.isoformat()}
         ))
-        return sa["call_id"]
+        return payload
 
-    def flush_active_subagents(self, cancel_result: str = "[已取消]"):
-        """流中断时，将所有未完成的 SubAgent 调用补充关闭"""
-        for run_id in list(self._active_subagents.keys()):
-            self.add_subagent_end(run_id, cancel_result)
+    def flush_active_operations(self, cancel_result: str = "[已取消]"):
+        """流中断时，将所有未完成操作补充关闭。"""
+        for op_id in list(self._active_operations.keys()):
+            self.add_operation_end(op_id, result=cancel_result, success=False, status="cancelled")
 
     def add_error(self, error: str, code: Optional[str] = None, context: Optional[str] = None):
         """添加错误"""
@@ -159,7 +184,7 @@ class StreamingCollector:
         if code:
             content["code"] = code
 
-        metadata = {"timestamp": datetime.utcnow().isoformat()}
+        metadata = {"timestamp": datetime.now(timezone.utc).isoformat()}
         if context:
             metadata["context"] = context
 
@@ -213,7 +238,7 @@ class StreamingCollector:
             parts.append({
                 "type": MessagePartType.THINKING,
                 "content": full_thinking,
-                "metadata_": {"timestamp": datetime.utcnow().isoformat()},
+                "metadata_": {"timestamp": datetime.now(timezone.utc).isoformat()},
             })
 
         # 按时间顺序合并所有 parts（text, tool_call, tool_result, subagent_call）
@@ -445,8 +470,8 @@ async def chat_with_agent(
 
     SSE Events:
     - message: Text content chunk
-    - tool_call: Tool invocation
-    - tool_result: Tool execution result
+    - operation_start: Tool/SubAgent invocation started
+    - operation_end: Tool/SubAgent invocation completed
     - done: Stream complete
     - error: Error occurred
     """
@@ -521,7 +546,6 @@ async def chat_with_agent(
         
         # 使用 StreamingCollector 收集事件
         collector = StreamingCollector()
-        active_call_id: Optional[str] = None
         
         # Create a new db session for the generator
         db_stream = SessionLocal()
@@ -541,8 +565,16 @@ async def chat_with_agent(
             ):
                 event_type = event.get("event")
                 event_data = event.get("data", {})
+                event_loop_ms = int(time.perf_counter() * 1000)
 
                 logger.debug(f"Agent event: {event_type}, data: {event_data}")
+                if event_type in {"operation_start", "operation_end"}:
+                    logger.debug(
+                        "OP_TRACE source=agent_chat phase=ingress "
+                        f"event={event_type} op_id={event_data.get('op_id')} "
+                        f"op_type={event_data.get('op_type')} name={event_data.get('name')} "
+                        f"event_loop_ms={event_loop_ms}"
+                    )
 
                 # 收集并转发事件
                 if event_type == "message":
@@ -553,43 +585,40 @@ async def chat_with_agent(
                     content = event_data.get("content", "")
                     collector.add_thinking(content)
 
-                elif event_type == "tool_call":
-                    name = event_data.get("name", "")
-                    args = event_data.get("args", {})
-                    # 生成 call_id 并添加到事件数据中
-                    active_call_id = collector.add_tool_call(name, args)
-                    # 将 call_id 添加到转发的事件中
-                    event_data["call_id"] = active_call_id
+                elif event_type == "operation_start":
+                    collector.add_operation_start(
+                        op_id=event_data.get("op_id", ""),
+                        op_type=event_data.get("op_type", "tool"),
+                        name=event_data.get("name", "unknown"),
+                        args=event_data.get("args", {}),
+                        description=event_data.get("description", ""),
+                        started_at=event_data.get("started_at"),
+                    )
 
-                elif event_type == "tool_result":
-                    name = event_data.get("name", "")
-                    result = event_data.get("result", "")
-                    success = event_data.get("success", True)
-                    # 使用当前活动的 call_id
-                    if active_call_id:
-                        collector.add_tool_result(name, result, active_call_id, success)
-                        event_data["call_id"] = active_call_id
-                        active_call_id = None  # 重置
-
-                elif event_type == "subagent_start":
-                    run_id = event_data.get("run_id", "")
-                    name = event_data.get("name", "")
-                    description = event_data.get("description", "")
-                    sa_call_id = collector.add_subagent_start(run_id, name, description)
-                    event_data["call_id"] = sa_call_id
-
-                elif event_type == "subagent_end":
-                    run_id = event_data.get("run_id", "")
-                    result = event_data.get("result", "")
-                    sa_call_id = collector.add_subagent_end(run_id, result)
-                    if sa_call_id:
-                        event_data["call_id"] = sa_call_id
+                elif event_type == "operation_end":
+                    end_payload = collector.add_operation_end(
+                        op_id=event_data.get("op_id", ""),
+                        op_type=event_data.get("op_type"),
+                        name=event_data.get("name"),
+                        result=event_data.get("result", ""),
+                        success=event_data.get("success", True),
+                        ended_at=event_data.get("ended_at"),
+                        status=event_data.get("status"),
+                    )
+                    event_data.update(end_payload)
 
                 elif event_type == "error":
                     error_msg = event_data.get("error", "Unknown error")
                     collector.add_error(error_msg, context="streaming")
 
                 # Yield SSE event - must be a dict with 'data' key for sse-starlette
+                if event_type in {"operation_start", "operation_end"}:
+                    logger.debug(
+                        "OP_TRACE source=agent_chat phase=egress_sse "
+                        f"event={event_type} op_id={event_data.get('op_id')} "
+                        f"op_type={event_data.get('op_type')} name={event_data.get('name')} "
+                        f"event_loop_ms={int(time.perf_counter() * 1000)}"
+                    )
                 yield {
                     "event": event_type,
                     "data": json.dumps(event_data),
@@ -628,8 +657,8 @@ async def chat_with_agent(
         except asyncio.CancelledError:
             logger.info(f"Chat generation cancelled for {task_key}")
             
-            # 关闭所有未完成的 SubAgent 调用
-            collector.flush_active_subagents("[已取消]")
+            # 关闭所有未完成操作
+            collector.flush_active_operations("[已取消]")
             
             # 保存已收集的内容（标记为已取消）
             if collector.has_content():
@@ -728,8 +757,8 @@ async def chat_websocket(
 
     Server -> Client messages:
     - {"type": "chunk", "content": "..."}
-    - {"type": "tool_call", "name": "...", "args": {...}}
-    - {"type": "tool_result", "name": "...", "result": "..."}
+    - {"type": "operation_start", "op_type": "tool|subagent", "name": "..."}
+    - {"type": "operation_end", "op_type": "tool|subagent", "result": "..."}
     - {"type": "done"}
     - {"type": "error", "message": "..."}
     - {"type": "stopped"}
@@ -793,11 +822,13 @@ async def chat_websocket(
                 
                 # 使用 StreamingCollector
                 collector = StreamingCollector()
-                active_call_id: Optional[str] = None
 
                 async def stream_to_ws():
-                    nonlocal collector, active_call_id
+                    nonlocal collector
                     try:
+                        import logging
+                        logger = logging.getLogger(__name__)
+
                         async for event in agent_service.chat_stream(
                             msg.content,
                             thread_id=thread_id,
@@ -806,6 +837,14 @@ async def chat_websocket(
                         ):
                             event_type = event.get("event")
                             event_data = event.get("data", {})
+                            event_loop_ms = int(time.perf_counter() * 1000)
+                            if event_type in {"operation_start", "operation_end"}:
+                                logger.debug(
+                                    "OP_TRACE source=agent_chat_ws phase=ingress "
+                                    f"event={event_type} op_id={event_data.get('op_id')} "
+                                    f"op_type={event_data.get('op_type')} name={event_data.get('name')} "
+                                    f"event_loop_ms={event_loop_ms}"
+                                )
 
                             if event_type == "message":
                                 content = event_data.get("content", "")
@@ -823,51 +862,46 @@ async def chat_websocket(
                                     "content": content,
                                 })
 
-                            elif event_type == "tool_call":
-                                name = event_data.get("name", "")
-                                args = event_data.get("args", {})
-                                active_call_id = collector.add_tool_call(name, args)
+                            elif event_type == "operation_start":
+                                collector.add_operation_start(
+                                    op_id=event_data.get("op_id", ""),
+                                    op_type=event_data.get("op_type", "tool"),
+                                    name=event_data.get("name", "unknown"),
+                                    args=event_data.get("args", {}),
+                                    description=event_data.get("description", ""),
+                                    started_at=event_data.get("started_at"),
+                                )
+                                logger.debug(
+                                    "OP_TRACE source=agent_chat_ws phase=egress "
+                                    f"event=operation_start op_id={event_data.get('op_id')} "
+                                    f"op_type={event_data.get('op_type')} name={event_data.get('name')} "
+                                    f"event_loop_ms={int(time.perf_counter() * 1000)}"
+                                )
                                 await websocket.send_json({
-                                    "type": "tool_call",
-                                    "name": name,
-                                    "args": args,
-                                    "call_id": active_call_id,
+                                    "type": "operation_start",
+                                    **event_data,
                                 })
 
-                            elif event_type == "tool_result":
-                                name = event_data.get("name", "")
-                                result = event_data.get("result", "")
-                                success = event_data.get("success", True)
-                                if active_call_id:
-                                    collector.add_tool_result(name, result, active_call_id, success)
+                            elif event_type == "operation_end":
+                                end_payload = collector.add_operation_end(
+                                    op_id=event_data.get("op_id", ""),
+                                    op_type=event_data.get("op_type"),
+                                    name=event_data.get("name"),
+                                    result=event_data.get("result", ""),
+                                    success=event_data.get("success", True),
+                                    ended_at=event_data.get("ended_at"),
+                                    status=event_data.get("status"),
+                                )
+                                logger.debug(
+                                    "OP_TRACE source=agent_chat_ws phase=egress "
+                                    f"event=operation_end op_id={event_data.get('op_id')} "
+                                    f"op_type={event_data.get('op_type')} name={event_data.get('name')} "
+                                    f"event_loop_ms={int(time.perf_counter() * 1000)}"
+                                )
                                 await websocket.send_json({
-                                    "type": "tool_result",
-                                    "name": name,
-                                    "result": result,
-                                    "call_id": active_call_id,
-                                })
-                                active_call_id = None
-
-                            elif event_type == "subagent_start":
-                                run_id = event_data.get("run_id", "")
-                                name = event_data.get("name", "")
-                                description = event_data.get("description", "")
-                                sa_call_id = collector.add_subagent_start(run_id, name, description)
-                                await websocket.send_json({
-                                    "type": "subagent_start",
-                                    "name": name,
-                                    "description": description,
-                                    "call_id": sa_call_id,
-                                })
-
-                            elif event_type == "subagent_end":
-                                run_id = event_data.get("run_id", "")
-                                result = event_data.get("result", "")
-                                sa_call_id = collector.add_subagent_end(run_id, result)
-                                await websocket.send_json({
-                                    "type": "subagent_end",
-                                    "call_id": sa_call_id,
-                                    "result": result,
+                                    "type": "operation_end",
+                                    **event_data,
+                                    **end_payload,
                                 })
 
                             elif event_type == "done":
@@ -890,8 +924,8 @@ async def chat_websocket(
                             )
 
                     except asyncio.CancelledError:
-                        # 关闭所有未完成的 SubAgent 调用
-                        collector.flush_active_subagents("[已取消]")
+                        # 关闭所有未完成操作
+                        collector.flush_active_operations("[已取消]")
                         
                         if collector.has_content():
                             if collector.text_chunks:

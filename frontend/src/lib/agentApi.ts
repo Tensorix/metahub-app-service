@@ -353,7 +353,7 @@ export async function chatWithAgentFull(
     topicId?: string;
     signal?: AbortSignal;
     onChunk?: (content: string) => void;
-    onToolCall?: (name: string, args: Record<string, unknown>) => void;
+    onOperationStart?: (event: { op_id: string; op_type: 'tool' | 'subagent'; name: string; args?: Record<string, unknown>; description?: string }) => void;
   }
 ): Promise<string> {
   const chunks: string[] = [];
@@ -365,8 +365,8 @@ export async function chatWithAgentFull(
     if (event.event === 'message') {
       chunks.push(event.data.content);
       options?.onChunk?.(event.data.content);
-    } else if (event.event === 'tool_call') {
-      options?.onToolCall?.(event.data.name, event.data.args);
+    } else if (event.event === 'operation_start') {
+      options?.onOperationStart?.(event.data);
     } else if (event.event === 'error') {
       throw new Error(event.data.error);
     }

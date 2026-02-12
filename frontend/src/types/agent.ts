@@ -6,10 +6,8 @@
 export type ChatEventType =
   | 'message'
   | 'thinking'
-  | 'tool_call'
-  | 'tool_result'
-  | 'subagent_start'
-  | 'subagent_end'
+  | 'operation_start'
+  | 'operation_end'
   | 'done'
   | 'error';
 
@@ -27,41 +25,29 @@ export interface ChatEventThinking {
   };
 }
 
-export interface ChatEventToolCall {
-  event: 'tool_call';
+export interface ChatEventOperationStart {
+  event: 'operation_start';
   data: {
-    call_id: string;
+    op_id: string;
+    op_type: 'tool' | 'subagent';
     name: string;
-    args: Record<string, unknown>;
+    args?: Record<string, unknown>;
+    description?: string;
+    started_at: string;
   };
 }
 
-export interface ChatEventToolResult {
-  event: 'tool_result';
+export interface ChatEventOperationEnd {
+  event: 'operation_end';
   data: {
-    call_id: string;
+    op_id: string;
+    op_type: 'tool' | 'subagent';
     name: string;
     result: string;
-    success?: boolean;
-  };
-}
-
-export interface ChatEventSubAgentStart {
-  event: 'subagent_start';
-  data: {
-    call_id: string;
-    run_id: string;
-    name: string;
-    description: string;
-  };
-}
-
-export interface ChatEventSubAgentEnd {
-  event: 'subagent_end';
-  data: {
-    run_id: string;
-    call_id: string;
-    result: string;
+    success: boolean;
+    duration_ms: number;
+    status: 'success' | 'error' | 'cancelled';
+    ended_at: string;
   };
 }
 
@@ -83,10 +69,8 @@ export interface ChatEventError {
 export type ChatEvent =
   | ChatEventMessage
   | ChatEventThinking
-  | ChatEventToolCall
-  | ChatEventToolResult
-  | ChatEventSubAgentStart
-  | ChatEventSubAgentEnd
+  | ChatEventOperationStart
+  | ChatEventOperationEnd
   | ChatEventDone
   | ChatEventError;
 
@@ -121,18 +105,26 @@ export interface WSIncomingThinking {
   content: string;
 }
 
-export interface WSIncomingToolCall {
-  type: 'tool_call';
-  call_id: string;
+export interface WSIncomingOperationStart {
+  type: 'operation_start';
+  op_id: string;
+  op_type: 'tool' | 'subagent';
   name: string;
-  args: Record<string, unknown>;
+  args?: Record<string, unknown>;
+  description?: string;
+  started_at: string;
 }
 
-export interface WSIncomingToolResult {
-  type: 'tool_result';
-  call_id: string;
+export interface WSIncomingOperationEnd {
+  type: 'operation_end';
+  op_id: string;
+  op_type: 'tool' | 'subagent';
   name: string;
   result: string;
+  success: boolean;
+  duration_ms: number;
+  status: 'success' | 'error' | 'cancelled';
+  ended_at: string;
 }
 
 export interface WSIncomingDone {
@@ -151,8 +143,8 @@ export interface WSIncomingStopped {
 export type WSIncomingMessage =
   | WSIncomingChunk
   | WSIncomingThinking
-  | WSIncomingToolCall
-  | WSIncomingToolResult
+  | WSIncomingOperationStart
+  | WSIncomingOperationEnd
   | WSIncomingDone
   | WSIncomingError
   | WSIncomingStopped;

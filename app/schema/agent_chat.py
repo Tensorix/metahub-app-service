@@ -38,7 +38,7 @@ class ChatResponse(BaseModel):
 class StreamEvent(BaseModel):
     """SSE event model."""
 
-    event: Literal["message", "tool_call", "tool_result", "done", "error"]
+    event: Literal["message", "thinking", "operation_start", "operation_end", "done", "error"]
     data: dict
 
 
@@ -67,9 +67,15 @@ class WSIncomingMessage(BaseModel):
 class WSOutgoingMessage(BaseModel):
     """WebSocket outgoing message."""
 
-    type: Literal["chunk", "tool_call", "tool_result", "done", "error", "stopped"]
+    type: Literal["chunk", "thinking", "operation_start", "operation_end", "done", "error", "stopped"]
     content: Optional[str] = None
+    op_id: Optional[str] = None
+    op_type: Optional[Literal["tool", "subagent"]] = None
     name: Optional[str] = None
+    description: Optional[str] = None
     args: Optional[dict] = None
     result: Optional[str] = None
+    success: Optional[bool] = None
+    duration_ms: Optional[int] = None
+    status: Optional[Literal["success", "error", "cancelled"]] = None
     message: Optional[str] = None

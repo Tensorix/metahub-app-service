@@ -12,8 +12,10 @@ Uses deepagents for agent orchestration with:
 
 import logging
 import json
+import time
 from typing import Any, AsyncGenerator, Optional
 from uuid import UUID
+from datetime import datetime, timezone
 
 from deepagents import create_deep_agent, SubAgent
 from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
@@ -471,8 +473,8 @@ class DeepAgentService:
         Yields:
             Event dictionaries with types:
                 - message: Text content chunk
-                - tool_call: Tool invocation (including built-in tools)
-                - tool_result: Tool execution result
+                - operation_start: Tool/SubAgent invocation started
+                - operation_end: Tool/SubAgent invocation completed
                 - done: Stream complete
                 - error: Error occurred
         """
@@ -498,8 +500,8 @@ class DeepAgentService:
 
             try:
                 event_count = 0
-                # 追踪活跃的 SubAgent run_id，用于过滤内部事件
-                _active_subagent_run_ids = set()
+                # 追踪活跃的 SubAgent op_id，用于过滤内部事件
+                _active_subagent_op_ids = set()
                 
                 async for event in agent.astream_events(
                     {"messages": [{"role": "user", "content": message}]},
@@ -507,26 +509,43 @@ class DeepAgentService:
                     version="v2",
                 ):
                     event_count += 1
+                    event_loop_ms = int(time.perf_counter() * 1000)
                     event_type = event.get("event")
                     event_data = event.get("data", {})
-                    run_id = event.get("run_id")
+                    op_id = event.get("run_id")
                     parent_ids = event.get("parent_ids", [])
+                    now_iso = datetime.now(timezone.utc).isoformat()
 
-                    logger.debug(f"Agent event #{event_count}: {event_type}, run_id={run_id}")
+                    if not op_id:
+                        from uuid import uuid4
 
-                    # ★ 优先处理 task 工具的 start/end（标记 SubAgent 边界）
+                        op_id = f"op_{uuid4().hex}"
+                        logger.warning(
+                            f"Missing run_id in event '{event_type}', generated op_id={op_id}"
+                        )
+
+                    logger.debug(f"Agent event #{event_count}: {event_type}, op_id={op_id}")
+
+                    # 优先处理 task 工具的 start/end（标记 SubAgent 边界）
                     if event_type == "on_tool_start" and event.get("name") == "task":
                         tool_input = event_data.get("input", {})
                         subagent_name = tool_input.get("subagent_type", "unknown")
                         description = tool_input.get("description", "")
-                        _active_subagent_run_ids.add(run_id)
-                        logger.info(f"SubAgent delegation START: {subagent_name} (run_id={run_id})")
+                        _active_subagent_op_ids.add(op_id)
+                        logger.info(f"SubAgent delegation START: {subagent_name} (op_id={op_id})")
+                        logger.debug(
+                            "OP_TRACE source=deep_agent_service phase=emit_start "
+                            f"op_id={op_id} op_type=subagent name={subagent_name} "
+                            f"event_loop_ms={event_loop_ms} ts={now_iso}"
+                        )
                         yield {
-                            "event": "subagent_start",
+                            "event": "operation_start",
                             "data": {
-                                "run_id": run_id,
+                                "op_id": op_id,
+                                "op_type": "subagent",
                                 "name": subagent_name,
                                 "description": description,
+                                "started_at": now_iso,
                             },
                         }
                         continue
@@ -534,26 +553,35 @@ class DeepAgentService:
                     if event_type == "on_tool_end" and event.get("name") == "task":
                         tool_output = event_data.get("output", "")
                         result_str = _safe_serialize(tool_output)
-                        _active_subagent_run_ids.discard(run_id)
-                        logger.info(f"SubAgent delegation END (run_id={run_id})")
+                        _active_subagent_op_ids.discard(op_id)
+                        logger.info(f"SubAgent delegation END (op_id={op_id})")
+                        logger.debug(
+                            "OP_TRACE source=deep_agent_service phase=emit_end "
+                            f"op_id={op_id} op_type=subagent name=task "
+                            f"event_loop_ms={event_loop_ms} ts={now_iso}"
+                        )
                         yield {
-                            "event": "subagent_end",
+                            "event": "operation_end",
                             "data": {
-                                "run_id": run_id,
+                                "op_id": op_id,
+                                "op_type": "subagent",
+                                "name": event.get("name", "task"),
                                 "result": result_str,
+                                "success": True,
+                                "ended_at": now_iso,
                             },
                         }
                         continue
 
-                    # ★ 过滤 SubAgent 内部事件
+                    # 过滤 SubAgent 内部事件
                     # 方法1: 使用 parent_ids（如果事件的父级在活跃 SubAgent 中，则丢弃）
-                    if _active_subagent_run_ids and parent_ids:
-                        if any(pid in _active_subagent_run_ids for pid in parent_ids):
+                    if _active_subagent_op_ids and parent_ids:
+                        if any(pid in _active_subagent_op_ids for pid in parent_ids):
                             logger.debug(f"Filtering SubAgent internal event: {event_type}")
                             continue
                     
-                    # 方法2: 如果 run_id 本身就在活跃 SubAgent 集合中（说明这是 SubAgent 的直接子事件）
-                    if run_id in _active_subagent_run_ids:
+                    # 方法2: 如果 op_id 本身就在活跃 SubAgent 集合中（说明这是 SubAgent 的直接子事件）
+                    if op_id in _active_subagent_op_ids:
                         logger.debug(f"Filtering SubAgent direct child event: {event_type}")
                         continue
 
@@ -569,8 +597,7 @@ class DeepAgentService:
                             }
 
                     elif event_type == "on_tool_start":
-                        # Tool invocation started (custom or built-in)
-                        # 注意：task 工具已经在前面处理过了
+                        # Tool invocation started (task 已在前面处理)
                         tool_name = event.get("name", "unknown")
                         tool_input = event_data.get("input", {})
                         
@@ -593,16 +620,23 @@ class DeepAgentService:
                             tool_input = {"error": "Failed to serialize input"}
                         
                         yield {
-                            "event": "tool_call",
+                            "event": "operation_start",
                             "data": {
+                                "op_id": op_id,
+                                "op_type": "tool",
                                 "name": tool_name,
-                                "args": tool_input,
+                                "args": tool_input if isinstance(tool_input, dict) else {},
+                                "started_at": now_iso,
                             },
                         }
-
+                        logger.debug(
+                            "OP_TRACE source=deep_agent_service phase=emit_start "
+                            f"op_id={op_id} op_type=tool name={tool_name} "
+                            f"event_loop_ms={event_loop_ms} ts={now_iso}"
+                        )
+                        
                     elif event_type == "on_tool_end":
-                        # Tool execution completed
-                        # 注意：task 工具已经在前面处理过了
+                        # Tool execution completed (task 已在前面处理)
                         tool_output = event_data.get("output", "")
                         tool_name = event.get("name", "unknown")
                         
@@ -610,12 +644,21 @@ class DeepAgentService:
                         result_str = _safe_serialize(tool_output)
                         
                         yield {
-                            "event": "tool_result",
+                            "event": "operation_end",
                             "data": {
+                                "op_id": op_id,
+                                "op_type": "tool",
                                 "name": tool_name,
                                 "result": result_str,
+                                "success": True,
+                                "ended_at": now_iso,
                             },
                         }
+                        logger.debug(
+                            "OP_TRACE source=deep_agent_service phase=emit_end "
+                            f"op_id={op_id} op_type=tool name={tool_name} "
+                            f"event_loop_ms={event_loop_ms} ts={now_iso}"
+                        )
 
                 logger.info(f"Agent stream completed, total events: {event_count}")
                 yield {"event": "done", "data": {"status": "complete"}}

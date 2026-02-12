@@ -10,10 +10,11 @@ interface SubAgentCallPartProps {
 
 export function SubAgentCallPart({ data }: SubAgentCallPartProps) {
   const [expanded, setExpanded] = useState(false);
+  const durationMs = Number.isFinite(data.duration_ms) ? data.duration_ms : 0;
 
-  const durationDisplay = data.duration_ms < 1000
-    ? `${data.duration_ms}ms`
-    : `${(data.duration_ms / 1000).toFixed(1)}s`;
+  const durationDisplay = durationMs < 1000
+    ? `${durationMs}ms`
+    : `${(durationMs / 1000).toFixed(1)}s`;
 
   return (
     <div className="rounded-lg border bg-muted/30 my-1 overflow-hidden">
@@ -30,6 +31,11 @@ export function SubAgentCallPart({ data }: SubAgentCallPartProps) {
         <span className="text-xs text-muted-foreground tabular-nums shrink-0">
           {durationDisplay}
         </span>
+        {data.status && (
+          <span className="text-[10px] uppercase tracking-wide text-muted-foreground shrink-0">
+            {data.status}
+          </span>
+        )}
         <ChevronRight
           className={cn(
             "h-3 w-3 text-muted-foreground shrink-0 transition-transform duration-200",

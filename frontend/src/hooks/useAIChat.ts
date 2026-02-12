@@ -11,7 +11,7 @@ export function useAIChat() {
     streamingThinking,
     isThinking,
     streamingMessageId,
-    activeToolCall,
+    activeOperations,
     pendingParts,
     streamError,
     sendAIMessage,
@@ -53,7 +53,7 @@ export function useAIChat() {
     streamingThinking,
     isThinking,
     streamingMessageId,
-    activeToolCall,
+    activeOperations,
     pendingParts,
     error: streamError,
 
