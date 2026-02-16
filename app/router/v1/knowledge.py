@@ -22,6 +22,7 @@ from app.schema.knowledge import (
     VectorizationConfigUpdate,
     RowCreate,
     RowUpdate,
+    RowBatchUpdate,
     RowResponse,
     RowListResponse,
     ColumnAdd,
@@ -348,6 +349,28 @@ def update_row(
         if not row:
             raise HTTPException(404, "Row not found")
         return RowResponse.model_validate(row)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.patch(
+    "/datasets/{dataset_id}/rows/batch",
+    summary="Batch update rows",
+)
+def batch_update_rows(
+    dataset_id: UUID,
+    data: RowBatchUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Batch update row positions and/or data."""
+    try:
+        updated = svc.batch_update_rows(
+            db, dataset_id, current_user.id, data.updates
+        )
+        if updated is None:
+            raise HTTPException(404, "Dataset not found")
+        return {"updated": len(updated)}
     except ValueError as e:
         raise HTTPException(400, str(e))
 

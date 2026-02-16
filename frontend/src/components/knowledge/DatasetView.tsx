@@ -4,134 +4,71 @@ import {
   getCoreRowModel,
   flexRender,
   type ColumnDef,
+  type Row,
 } from '@tanstack/react-table';
-import { Plus, Trash2, Loader2, Settings } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { Plus, Loader2, Settings, GripVertical, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { knowledgeApi } from '@/lib/knowledgeApi';
-import type {
-  KnowledgeNode,
-  DatasetRow,
-  FieldDefinition,
-} from '@/lib/knowledgeApi';
-
-const FIELD_TYPES: FieldDefinition['type'][] = [
-  'text', 'number', 'date', 'datetime', 'boolean', 'select', 'multi_select', 'url',
-];
+import type { KnowledgeNode, DatasetRow, FieldDefinition } from '@/lib/knowledgeApi';
+import { CellRenderer } from './cells';
+import { AddColumnDialog } from './AddColumnDialog';
+import { ColumnHeaderMenu } from './ColumnHeaderMenu';
+import { RowContextMenu } from './RowContextMenu';
 
 interface DatasetViewProps {
   node: KnowledgeNode;
   onUpdate: () => void;
 }
 
-function InlineCell({
-  value,
-  field,
-  onSave,
+function SortableRow({
+  row,
+  renderCells,
 }: {
-  value: unknown;
-  field: FieldDefinition;
-  onSave: (val: unknown) => void;
+  row: Row<DatasetRow>;
+  renderCells: (dragHandleProps: {
+    attributes: object;
+    listeners?: object;
+  }) => React.ReactNode;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(String(value ?? ''));
-  const inputRef = useRef<HTMLInputElement>(null);
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: row.original.id });
 
-  useEffect(() => {
-    setDraft(String(value ?? ''));
-  }, [value]);
-
-  useEffect(() => {
-    if (editing && inputRef.current) inputRef.current.focus();
-  }, [editing]);
-
-  const commit = () => {
-    setEditing(false);
-    let parsed: unknown = draft;
-    if (field.type === 'number') parsed = draft === '' ? null : Number(draft);
-    else if (field.type === 'boolean') parsed = draft === 'true';
-    if (parsed !== value) onSave(parsed);
+  const innerStyle: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
   };
 
-  if (field.type === 'boolean') {
-    return (
-      <Select
-        value={String(value ?? '')}
-        onValueChange={(v) => onSave(v === 'true')}
-      >
-        <SelectTrigger className="h-7 border-none shadow-none text-xs">
-          <SelectValue placeholder="-" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="true">是</SelectItem>
-          <SelectItem value="false">否</SelectItem>
-        </SelectContent>
-      </Select>
-    );
-  }
-
-  if (field.type === 'select' && field.options?.length) {
-    return (
-      <Select
-        value={String(value ?? '')}
-        onValueChange={(v) => onSave(v)}
-      >
-        <SelectTrigger className="h-7 border-none shadow-none text-xs">
-          <SelectValue placeholder="-" />
-        </SelectTrigger>
-        <SelectContent>
-          {field.options.map((o) => (
-            <SelectItem key={o} value={o}>{o}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    );
-  }
-
-  if (!editing) {
-    return (
-      <div
-        className="px-2 py-1 text-xs min-h-[28px] cursor-text truncate"
-        onDoubleClick={() => setEditing(true)}
-        onClick={() => setEditing(true)}
-      >
-        {String(value ?? '') || <span className="text-muted-foreground">-</span>}
-      </div>
-    );
-  }
-
   return (
-    <Input
-      ref={inputRef}
-      type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') commit();
-        if (e.key === 'Escape') {
-          setDraft(String(value ?? ''));
-          setEditing(false);
-        }
-      }}
-      className="h-7 text-xs border-none shadow-none rounded-none focus-visible:ring-1 px-2"
-    />
+    <tr
+      ref={setNodeRef}
+      style={innerStyle}
+      className={`group hover:bg-accent/30 transition-colors ${isDragging ? 'opacity-50 bg-accent/50' : ''}`}
+    >
+      {renderCells({ attributes, listeners })}
+    </tr>
   );
 }
 
@@ -143,7 +80,8 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
   const [rows, setRows] = useState<DatasetRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [addColOpen, setAddColOpen] = useState(false);
-  const [newCol, setNewCol] = useState<Partial<FieldDefinition>>({ name: '', type: 'text' });
+  const [editColField, setEditColField] = useState<FieldDefinition | null>(null);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
 
   const schema = node.schema_definition;
   const fields: FieldDefinition[] = schema?.fields || [];
@@ -178,93 +116,163 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
     }
   };
 
-  const handleAddRow = async () => {
+  const handleAddRow = useCallback(async () => {
     try {
       const newRow = await knowledgeApi.createRow(node.id, { data: {} });
       setRows((prev) => [...prev, newRow]);
+      setTimeout(() => {
+        tableContainerRef.current?.scrollTo({
+          top: tableContainerRef.current.scrollHeight,
+          behavior: 'smooth',
+        });
+      }, 50);
     } catch {
       toast({ title: '添加失败', variant: 'destructive' });
     }
-  };
+  }, [node.id, toast]);
 
-  const handleDeleteRow = async (rowId: string) => {
-    try {
-      await knowledgeApi.deleteRow(node.id, rowId);
-      setRows((prev) => prev.filter((r) => r.id !== rowId));
-    } catch {
-      toast({ title: '删除失败', variant: 'destructive' });
-    }
-  };
+  const handleInsertRow = useCallback(
+    async (atIndex: number, above: boolean) => {
+      const insertIdx = above ? atIndex : atIndex + 1;
+      try {
+        const newRow = await knowledgeApi.createRow(node.id, { data: {} });
+        const reordered = [
+          ...rows.slice(0, insertIdx),
+          newRow,
+          ...rows.slice(insertIdx),
+        ];
+        const updates = reordered.map((r, i) => ({ id: r.id, position: i }));
+        await knowledgeApi.batchUpdateRows(node.id, updates);
+        setRows(reordered);
+      } catch {
+        toast({ title: '插入失败', variant: 'destructive' });
+      }
+    },
+    [node.id, rows, toast]
+  );
 
-  const handleAddColumn = async () => {
-    if (!newCol.name?.trim()) return;
-    try {
-      await knowledgeApi.addColumn(node.id, {
-        name: newCol.name.trim(),
-        type: (newCol.type as FieldDefinition['type']) || 'text',
-      });
-      setAddColOpen(false);
-      setNewCol({ name: '', type: 'text' });
-      onUpdate();
-    } catch (err) {
-      toast({
-        title: '添加列失败',
-        description: err instanceof Error ? err.message : '未知错误',
-        variant: 'destructive',
-      });
-    }
-  };
+  const handleMoveRow = useCallback(
+    async (fromIndex: number, toIndex: number) => {
+      if (fromIndex === toIndex) return;
+      const reordered = arrayMove(rows, fromIndex, toIndex);
+      const updates = reordered.map((r, i) => ({ id: r.id, position: i }));
+      try {
+        await knowledgeApi.batchUpdateRows(node.id, updates);
+        setRows(reordered);
+      } catch {
+        toast({ title: '移动失败', variant: 'destructive' });
+      }
+    },
+    [node.id, rows, toast]
+  );
 
-  const handleDeleteColumn = async (colName: string) => {
-    try {
-      await knowledgeApi.deleteColumn(node.id, colName);
-      onUpdate();
-    } catch {
-      toast({ title: '删除列失败', variant: 'destructive' });
-    }
-  };
+  const handleDeleteRow = useCallback(
+    async (rowId: string) => {
+      try {
+        await knowledgeApi.deleteRow(node.id, rowId);
+        setRows((prev) => prev.filter((r) => r.id !== rowId));
+      } catch {
+        toast({ title: '删除失败', variant: 'destructive' });
+      }
+    },
+    [node.id, toast]
+  );
 
-  // Build table columns
+  const handleAddColumn = useCallback(
+    async (field: FieldDefinition) => {
+      try {
+        await knowledgeApi.addColumn(node.id, field);
+        setAddColOpen(false);
+        onUpdate();
+      } catch (err) {
+        toast({
+          title: '添加列失败',
+          description: err instanceof Error ? err.message : '未知错误',
+          variant: 'destructive',
+        });
+      }
+    },
+    [node.id, onUpdate, toast]
+  );
+
+  const handleUpdateColumn = useCallback(
+    async (colName: string, updates: Partial<FieldDefinition>) => {
+      try {
+        await knowledgeApi.updateColumn(node.id, colName, updates);
+        setEditColField(null);
+        onUpdate();
+      } catch (err) {
+        toast({
+          title: '更新列失败',
+          description: err instanceof Error ? err.message : '未知错误',
+          variant: 'destructive',
+        });
+      }
+    },
+    [node.id, onUpdate, toast]
+  );
+
+  const handleDeleteColumn = useCallback(
+    async (colName: string) => {
+      try {
+        await knowledgeApi.deleteColumn(node.id, colName);
+        onUpdate();
+      } catch {
+        toast({ title: '删除列失败', variant: 'destructive' });
+      }
+    },
+    [node.id, onUpdate, toast]
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const fromIdx = rows.findIndex((r) => r.id === active.id);
+      const toIdx = rows.findIndex((r) => r.id === over.id);
+      if (fromIdx >= 0 && toIdx >= 0) handleMoveRow(fromIdx, toIdx);
+    },
+    [rows, handleMoveRow]
+  );
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor)
+  );
+
+  const rowIds = rows.map((r) => r.id);
+
   const columns: ColumnDef<DatasetRow>[] = [
-    // Row number
     {
       id: '_row_num',
       header: '#',
-      size: 40,
-      cell: ({ row }) => (
-        <span className="text-xs text-muted-foreground px-2">{row.index + 1}</span>
-      ),
+      size: 48,
+      cell: () => null,
     },
-    // Data columns from schema
-    ...fields.map((field): ColumnDef<DatasetRow> => ({
-      id: field.name,
-      header: () => (
-        <div className="flex items-center gap-1 group/header">
-          <span className="text-xs font-medium">{field.name}</span>
-          <span className="text-[10px] text-muted-foreground">{field.type}</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-4 w-4 opacity-0 group-hover/header:opacity-100 transition-opacity"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDeleteColumn(field.name);
-            }}
-          >
-            <Trash2 className="w-3 h-3" />
-          </Button>
-        </div>
-      ),
-      size: field.width || 150,
-      cell: ({ row }) => (
-        <InlineCell
-          value={row.original.data[field.name]}
-          field={field}
-          onSave={(val) => handleCellSave(row.original.id, field.name, val)}
-        />
-      ),
-    })),
-    // Actions
+    ...fields.map(
+      (field): ColumnDef<DatasetRow> => ({
+        id: field.name,
+        header: () => (
+          <div className="flex items-center gap-1 group/header">
+            <span className="text-xs font-medium">{field.name}</span>
+            <span className="text-[10px] text-muted-foreground">{field.type}</span>
+            <ColumnHeaderMenu
+              field={field}
+              onEdit={() => setEditColField(field)}
+              onDelete={() => handleDeleteColumn(field.name)}
+            />
+          </div>
+        ),
+        size: field.width || 150,
+        cell: ({ row }) => (
+          <CellRenderer
+            value={row.original.data[field.name]}
+            field={field}
+            onSave={(val) => handleCellSave(row.original.id, field.name, val)}
+          />
+        ),
+      })
+    ),
     {
       id: '_actions',
       header: '',
@@ -290,7 +298,6 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b shrink-0">
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-semibold">{node.name}</h2>
@@ -302,112 +309,157 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
           <Button variant="outline" size="sm" onClick={() => setAddColOpen(true)}>
             <Settings className="w-3.5 h-3.5 mr-1" /> 添加列
           </Button>
-          <Button size="sm" onClick={handleAddRow}>
-            <Plus className="w-3.5 h-3.5 mr-1" /> 添加行
-          </Button>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto">
+      <div ref={tableContainerRef} className="flex-1 overflow-auto">
         {loading ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-muted/50 backdrop-blur-sm z-10">
-              {table.getHeaderGroups().map((hg) => (
-                <tr key={hg.id}>
-                  {hg.headers.map((header) => (
-                    <th
-                      key={header.id}
-                      className="text-left px-2 py-1.5 border-b border-r last:border-r-0 font-normal"
-                      style={{ width: header.getSize() }}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-muted/50 backdrop-blur-sm z-10">
+                {table.getHeaderGroups().map((hg) => (
+                  <tr key={hg.id}>
+                    {hg.headers.map((header) => (
+                      <th
+                        key={header.id}
+                        className="text-left px-2 py-1.5 border-b border-r last:border-r-0 font-normal"
+                        style={{ width: header.getSize() }}
+                      >
+                        {header.isPlaceholder
+                          ? null
+                          : flexRender(
+                              header.column.columnDef.header,
+                              header.getContext()
+                            )}
+                      </th>
+                    ))}
+                  </tr>
+                ))}
+              </thead>
+              <tbody>
+                <SortableContext
+                  items={rowIds}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {table.getRowModel().rows.map((row) => (
+                    <RowContextMenu
+                      key={row.original.id}
+                      rowIndex={row.index}
+                      totalRows={rows.length}
+                      onInsertAbove={() => handleInsertRow(row.index, true)}
+                      onInsertBelow={() => handleInsertRow(row.index, false)}
+                      onMoveToTop={() => handleMoveRow(row.index, 0)}
+                      onMoveUp={() => handleMoveRow(row.index, row.index - 1)}
+                      onMoveDown={() => handleMoveRow(row.index, row.index + 1)}
+                      onMoveToBottom={() =>
+                        handleMoveRow(row.index, rows.length - 1)
+                      }
+                      onDelete={() => handleDeleteRow(row.original.id)}
                     >
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(header.column.columnDef.header, header.getContext())}
-                    </th>
+                      <SortableRow
+                        row={row}
+                        renderCells={({ attributes, listeners }) => (
+                          <>
+                            <td
+                              className="border-b border-r p-0"
+                              style={{ width: 48 }}
+                            >
+                              <div className="flex items-center gap-0.5 px-1">
+                                <span
+                                  {...(attributes as Record<string, unknown>)}
+                                  {...((listeners ?? {}) as Record<string, unknown>)}
+                                  className="cursor-grab active:cursor-grabbing touch-none p-1 rounded hover:bg-accent/50 text-muted-foreground"
+                                  tabIndex={0}
+                                  role="button"
+                                  aria-label="拖拽排序"
+                                >
+                                  <GripVertical className="w-3.5 h-3.5" />
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {row.index + 1}
+                                </span>
+                              </div>
+                            </td>
+                            {row.getVisibleCells().map((cell) => {
+                              if (cell.column.id === '_row_num') return null;
+                              return (
+                                <td
+                                  key={cell.id}
+                                  className="border-b border-r last:border-r-0 p-0"
+                                  style={{ width: cell.column.getSize() }}
+                                >
+                                  {flexRender(
+                                    cell.column.columnDef.cell,
+                                    cell.getContext()
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </>
+                        )}
+                      />
+                    </RowContextMenu>
                   ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody>
-              {table.getRowModel().rows.map((row) => (
-                <tr key={row.id} className="group hover:bg-accent/30 transition-colors">
-                  {row.getVisibleCells().map((cell) => (
+                </SortableContext>
+                {rows.length === 0 && (
+                  <tr>
                     <td
-                      key={cell.id}
-                      className="border-b border-r last:border-r-0 p-0"
-                      style={{ width: cell.column.getSize() }}
+                      colSpan={columns.length}
+                      className="text-center py-8 text-muted-foreground"
                     >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      暂无数据，点击下方"添加行"开始
                     </td>
-                  ))}
-                </tr>
-              ))}
-              {rows.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={columns.length}
-                    className="text-center py-8 text-muted-foreground"
-                  >
-                    暂无数据，点击"添加行"开始
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </DndContext>
         )}
       </div>
 
-      {/* Add column dialog */}
-      <Dialog open={addColOpen} onOpenChange={setAddColOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>添加列</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <Label>列名</Label>
-              <Input
-                value={newCol.name || ''}
-                onChange={(e) => setNewCol({ ...newCol, name: e.target.value })}
-                placeholder="列名称"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label>类型</Label>
-              <Select
-                value={newCol.type || 'text'}
-                onValueChange={(v) =>
-                  setNewCol({ ...newCol, type: v as FieldDefinition['type'] })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {FIELD_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAddColOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={handleAddColumn} disabled={!newCol.name?.trim()}>
-              添加
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <div className="border-t px-2 py-2 shrink-0">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full"
+          onClick={handleAddRow}
+        >
+          <Plus className="w-3.5 h-3.5 mr-1" /> 添加行
+        </Button>
+      </div>
+
+      <AddColumnDialog
+        open={addColOpen}
+        onOpenChange={setAddColOpen}
+        onSubmit={handleAddColumn}
+        title="添加列"
+      />
+
+      <AddColumnDialog
+        open={!!editColField}
+        onOpenChange={(open) => !open && setEditColField(null)}
+        onSubmit={(field) =>
+          editColField &&
+          handleUpdateColumn(editColField.name, {
+            type: field.type,
+            description: field.description,
+            required: field.required,
+            options: field.options,
+            default: field.default,
+            width: field.width,
+          })
+        }
+        initialField={editColField ?? undefined}
+        title="编辑列"
+      />
     </div>
   );
 }

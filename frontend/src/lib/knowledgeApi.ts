@@ -262,6 +262,17 @@ export const knowledgeApi = {
     await api.delete(`/api/v1/knowledge/datasets/${datasetId}/rows/${rowId}`);
   },
 
+  batchUpdateRows: async (
+    datasetId: string,
+    updates: Array<{ id: string; position?: number; data?: Record<string, unknown> }>
+  ): Promise<{ updated: number }> => {
+    const { data } = await api.patch(
+      `/api/v1/knowledge/datasets/${datasetId}/rows/batch`,
+      { updates }
+    );
+    return data;
+  },
+
   // Dataset columns
   addColumn: async (
     datasetId: string,

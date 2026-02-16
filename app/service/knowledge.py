@@ -503,6 +503,52 @@ class KnowledgeService:
         db.commit()
         return True
 
+    def batch_update_rows(
+        self,
+        db: Session,
+        dataset_id: UUID,
+        user_id: UUID,
+        updates: list[dict[str, Any]],
+    ) -> Optional[list[DatasetRow]]:
+        """Batch update row positions and/or data. Returns updated rows or None if dataset not found."""
+        dataset = self.get_node(db, dataset_id, user_id)
+        if not dataset or dataset.node_type != "dataset":
+            return None
+
+        rows_to_refresh: list[DatasetRow] = []
+        for item in updates:
+            row_id = item.get("id")
+            if not row_id:
+                raise ValueError("Each update must have an 'id'")
+            try:
+                rid = UUID(row_id) if isinstance(row_id, str) else row_id
+            except (TypeError, ValueError):
+                raise ValueError(f"Invalid row id: {row_id}")
+
+            row = db.get(DatasetRow, rid)
+            if not row or row.is_deleted or row.dataset_id != dataset_id:
+                raise ValueError(f"Row {row_id} not found or does not belong to dataset")
+
+            if "data" in item:
+                validate_row_data(item["data"], dataset.schema_definition)
+                row.data = item["data"]
+                if self._is_vectorized(db, dataset):
+                    db.execute(
+                        delete(KnowledgeEmbedding).where(KnowledgeEmbedding.row_id == row.id)
+                    )
+                    db.flush()
+                    folder = self._get_vectorized_folder(db, dataset)
+                    if folder:
+                        self._embed_row(db, row, dataset, folder)
+            if "position" in item:
+                row.position = int(item["position"])
+            rows_to_refresh.append(row)
+
+        db.commit()
+        for r in rows_to_refresh:
+            db.refresh(r)
+        return rows_to_refresh
+
     # ------------------------------------------------------------------
     # Dataset Schema Mutations
     # ------------------------------------------------------------------

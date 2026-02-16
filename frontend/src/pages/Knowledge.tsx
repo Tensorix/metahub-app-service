@@ -180,19 +180,16 @@ export default function Knowledge() {
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Search bar */}
-      <div className="shrink-0 px-4 py-3 border-b bg-card">
-        <KnowledgeSearchPanel
-          folderIds={selectedId && findTreeNode(tree, selectedId)?.node_type === 'folder'
-            ? [selectedId]
-            : undefined}
-          onSelectNode={setSelectedId}
-        />
-      </div>
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Left: Tree */}
-        <div className="w-64 shrink-0 border-r bg-card flex flex-col overflow-hidden">
+    <div className="relative flex h-full overflow-hidden">
+      {/* Floating search */}
+      <KnowledgeSearchPanel
+        folderIds={selectedId && findTreeNode(tree, selectedId)?.node_type === 'folder'
+          ? [selectedId]
+          : undefined}
+        onSelectNode={setSelectedId}
+      />
+      {/* Left: Tree */}
+      <div className="w-64 shrink-0 border-r bg-card flex flex-col overflow-hidden">
           <KnowledgeTree
           items={tree}
           selectedId={selectedId}
@@ -202,12 +199,11 @@ export default function Knowledge() {
           onDelete={setDeleteTarget}
           onToggleVector={handleToggleVector}
         />
-        </div>
+      </div>
 
-        {/* Right: Content */}
-        <div className="flex-1 min-w-0 overflow-hidden">
-          {renderContent()}
-        </div>
+      {/* Right: Content */}
+      <div className="flex-1 min-w-0 overflow-hidden">
+        {renderContent()}
       </div>
 
       {/* Delete confirmation */}

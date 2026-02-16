@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Search, FileText, Table2, ChevronDown } from 'lucide-react';
+import { Search, FileText, Table2, ChevronDown, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -32,6 +32,7 @@ export function KnowledgeSearchPanel({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return;
@@ -82,7 +83,30 @@ export function KnowledgeSearchPanel({
     v != null ? `${(v * 100).toFixed(1)}%` : '-';
 
   return (
-    <div className="border rounded-lg bg-card p-4 space-y-4">
+    <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
+      {!expanded ? (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="flex items-center gap-2 px-4 py-3 rounded-full shadow-lg bg-card border hover:bg-accent/50 transition-colors"
+          title="搜索知识库"
+        >
+          <Search className="w-5 h-5 text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">搜索</span>
+        </button>
+      ) : (
+        <div className="w-[420px] max-w-[calc(100vw-2rem)] rounded-xl border shadow-xl bg-card p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">知识库搜索</span>
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              className="p-1.5 rounded-md hover:bg-muted transition-colors"
+              title="收起"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
       <div className="flex gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -145,12 +169,12 @@ export function KnowledgeSearchPanel({
         )}
       </div>
 
-      {hits.length > 0 && (
+      {hits.length > 0 ? (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">
             共 {total} 条结果
           </p>
-          <div className="max-h-[400px] overflow-y-auto space-y-2">
+          <div className="max-h-[320px] overflow-y-auto space-y-2">
             {hits.map((hit, idx) => {
               const isExpanded = expandedId === String(idx);
               return (
@@ -235,6 +259,8 @@ export function KnowledgeSearchPanel({
               );
             })}
           </div>
+        </div>
+      ) : null}
         </div>
       )}
     </div>
