@@ -301,17 +301,18 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
       id: '_add_col',
       header: () => (
         <Button
-          variant="outline"
-          size="sm"
-          className="h-7 w-full"
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 text-muted-foreground hover:text-foreground"
           onClick={() => setAddColOpen(true)}
+          title="添加列"
         >
-          <Plus className="w-3.5 h-3.5 mr-1" /> 添加列
+          <Plus className="w-3.5 h-3.5" />
         </Button>
       ),
-      size: 90,
-      minSize: 80,
-      maxSize: 120,
+      size: 40,
+      minSize: 40,
+      maxSize: 40,
       enableResizing: false,
       cell: () => null,
     },
@@ -460,23 +461,21 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
                       colSpan={columns.length}
                       className="text-center py-8 text-muted-foreground"
                     >
-                      暂无数据，点击下方"添加行"开始
+                      暂无数据，点击下方 + 添加行 开始
                     </td>
                   </tr>
                 )}
                 <tr className="hover:bg-transparent">
                   <td
                     colSpan={columns.length}
-                    className="border-b-0 px-2 py-2"
+                    className="border-b-0 px-1 py-1"
                   >
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full"
+                    <button
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-accent"
                       onClick={handleAddRow}
                     >
-                      <Plus className="w-3.5 h-3.5 mr-1" /> 添加行
-                    </Button>
+                      <Plus className="w-3 h-3" /> 添加行
+                    </button>
                   </td>
                 </tr>
               </tbody>
