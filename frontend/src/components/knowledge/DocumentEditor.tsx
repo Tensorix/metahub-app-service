@@ -1,28 +1,112 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Save, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { knowledgeApi } from '@/lib/knowledgeApi';
 import type { KnowledgeNode } from '@/lib/knowledgeApi';
+import { NovelEditor } from '@/components/novel';
+import type { JSONContent } from 'novel';
+import { createImageUpload } from 'novel';
+import { api } from '@/lib/api';
+
+const MAX_SIZE_MB = 10;
+const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
 
 interface DocumentEditorProps {
   node: KnowledgeNode;
   onUpdate: () => void;
 }
 
+function parseInitialContent(content: string | null): JSONContent | undefined {
+  if (!content || !content.trim()) {
+    return undefined;
+  }
+  const trimmed = content.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(content!) as JSONContent;
+      if (parsed && typeof parsed === 'object' && parsed.type === 'doc') {
+        return parsed;
+      }
+    } catch {
+      // Fall through to legacy Markdown handling
+    }
+  }
+  return {
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: trimmed
+          ? [{ type: 'text', text: trimmed }]
+          : undefined,
+      },
+    ],
+  };
+}
+
 export function DocumentEditor({ node, onUpdate }: DocumentEditorProps) {
   const { toast } = useToast();
   const [title, setTitle] = useState(node.name);
-  const [content, setContent] = useState(node.content || '');
+  const [contentJson, setContentJson] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const editorRef = useRef<HTMLDivElement>(null);
+  const initialMount = useRef(true);
+
+  const initialContent = parseInitialContent(node.content);
+
+  const uploadFn = useMemo(() => createImageUpload({
+    validateFn: (file) => {
+      if (!file.type.startsWith('image/')) {
+        toast({
+          title: '不支持的文件类型',
+          description: '请上传图片文件（jpg、png、gif、webp 等）',
+          variant: 'destructive',
+        });
+        return false;
+      }
+      if (file.size > MAX_SIZE_BYTES) {
+        toast({
+          title: '文件过大',
+          description: `图片大小不能超过 ${MAX_SIZE_MB}MB`,
+          variant: 'destructive',
+        });
+        return false;
+      }
+      return true;
+    },
+    onUpload: async (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const { data } = await api.post<{ url: string }>(
+        '/api/v1/knowledge/upload-image',
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+
+      if (!data?.url) {
+        throw new Error('上传失败：未返回图片 URL');
+      }
+
+      return data.url;
+    },
+  }), [toast]);
 
   useEffect(() => {
     setTitle(node.name);
-    setContent(node.content || '');
     setDirty(false);
+    initialMount.current = true;
+    if (node.content) {
+      setContentJson(node.content);
+    } else {
+      setContentJson('');
+    }
   }, [node.id, node.name, node.content]);
 
   const handleSave = useCallback(async () => {
@@ -30,7 +114,7 @@ export function DocumentEditor({ node, onUpdate }: DocumentEditorProps) {
     try {
       const updates: Record<string, string> = {};
       if (title !== node.name) updates.name = title;
-      if (content !== (node.content || '')) updates.content = content;
+      if (contentJson !== (node.content || '')) updates.content = contentJson;
       if (Object.keys(updates).length > 0) {
         await knowledgeApi.updateNode(node.id, updates);
         toast({ title: '已保存' });
@@ -42,7 +126,7 @@ export function DocumentEditor({ node, onUpdate }: DocumentEditorProps) {
     } finally {
       setSaving(false);
     }
-  }, [title, content, node, toast, onUpdate]);
+  }, [title, contentJson, node, toast, onUpdate]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -54,6 +138,15 @@ export function DocumentEditor({ node, onUpdate }: DocumentEditorProps) {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSave]);
+
+  const handleEditorChange = useCallback((json: JSONContent) => {
+    const str = JSON.stringify(json);
+    setContentJson(str);
+    if (!initialMount.current) {
+      setDirty(true);
+    }
+    initialMount.current = false;
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -84,20 +177,14 @@ export function DocumentEditor({ node, onUpdate }: DocumentEditorProps) {
         </Button>
       </div>
 
-      {/* Editor area — textarea for Markdown editing (Novel integration placeholder) */}
+      {/* Novel editor */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto p-6">
-          <textarea
-            ref={editorRef as unknown as React.RefObject<HTMLTextAreaElement>}
-            value={content}
-            onChange={(e) => {
-              setContent(e.target.value);
-              setDirty(true);
-            }}
-            className="w-full min-h-[calc(100vh-200px)] bg-transparent border-none outline-none resize-none text-sm leading-relaxed font-mono"
-            placeholder="开始编写文档内容（Markdown 格式）..."
-          />
-        </div>
+        <NovelEditor
+          key={node.id}
+          initialContent={initialContent}
+          onChange={handleEditorChange}
+          uploadFn={uploadFn}
+        />
       </div>
     </div>
   );

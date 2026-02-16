@@ -1,9 +1,11 @@
 """Knowledge Base API endpoints."""
 
+import uuid
 from math import ceil
+from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -32,6 +34,48 @@ from app.service.background_task import BackgroundTaskService, run_task_in_backg
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 svc = KnowledgeService()
+
+# Upload directory for knowledge base images (project root)
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+UPLOAD_DIR = _PROJECT_ROOT / "uploads" / "knowledge"
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+
+# ========================== Image Upload ==========================
+
+
+@router.post("/upload-image", summary="Upload image for knowledge base")
+def upload_image(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Upload an image file and return its URL. Used by the Novel editor."""
+    if not file.filename:
+        raise HTTPException(400, "No filename")
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            400,
+            f"Invalid file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}",
+        )
+    try:
+        content = file.file.read()
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(400, f"File too large. Max size: {MAX_FILE_SIZE // (1024*1024)}MB")
+    finally:
+        file.file.seek(0)
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = f"{uuid.uuid4().hex}{ext}"
+    dest = UPLOAD_DIR / safe_name
+    with open(dest, "wb") as f:
+        f.write(content)
+
+    base = str(request.base_url).rstrip("/")
+    url = f"{base}/uploads/knowledge/{safe_name}"
+    return {"url": url}
 
 
 # ========================== Tree ==========================

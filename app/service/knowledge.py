@@ -1,5 +1,6 @@
 """Knowledge Base service — tree CRUD, dataset row CRUD, vectorization, search."""
 
+import json
 from math import ceil
 from typing import Any, Optional
 from uuid import UUID
@@ -34,6 +35,36 @@ from app.service.embedding import get_active_embedding_service
 
 DEFAULT_CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 100
+
+
+def extract_text_from_tiptap_json(content: str) -> str:
+    """Extract plain text from TipTap/Novel JSON content for vectorization."""
+    if not content or not content.strip():
+        return ""
+    text = content.strip()
+    if not text.startswith("{"):
+        return text  # Legacy Markdown or plain text
+    try:
+        doc = json.loads(content)
+        if not isinstance(doc, dict) or doc.get("type") != "doc":
+            return text
+        texts: list[str] = []
+
+        def walk(nodes: list) -> None:
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                if node.get("type") == "text":
+                    t = node.get("text")
+                    if isinstance(t, str):
+                        texts.append(t)
+                if "content" in node and isinstance(node["content"], list):
+                    walk(node["content"])
+
+        walk(doc.get("content") or [])
+        return "\n".join(texts) if texts else text
+    except (json.JSONDecodeError, TypeError):
+        return text
 
 
 def chunk_text(text: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> list[str]:
@@ -556,7 +587,8 @@ class KnowledgeService:
         """Generate and store embeddings for a document node."""
         if node.node_type != "document" or not node.content:
             return
-        texts = chunk_text(node.content)
+        plain_text = extract_text_from_tiptap_json(node.content)
+        texts = chunk_text(plain_text)
         if not texts:
             return
         self._store_embeddings(db, texts, node_id=node.id)

@@ -64,6 +64,11 @@ def health():
 
 
 app.mount("/assets", StaticFiles(directory="frontend/dist/assets"), name="assets")
+
+# Mount uploads directory for knowledge base images
+uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
+os.makedirs(uploads_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 @app.get("/{full_path:path}")
 async def serve_frontend(full_path: str):
     if full_path is None or full_path == "":
