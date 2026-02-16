@@ -9,8 +9,8 @@ from app.db.session import get_db
 from app.db.model.user import User
 from app.deps import get_current_user
 from app.service.session import (
-    SessionService, TopicService, MessageService, 
-    MessageSenderService, AgentService
+    SessionService, TopicService, MessageService,
+    MessageSenderService, AgentService, WorkspaceService
 )
 from app.schema.session import (
     SessionCreate, SessionUpdate, SessionResponse, SessionListQuery, SessionListResponse,
@@ -25,9 +25,12 @@ router = APIRouter()
 
 # ============ Session APIs ============
 @router.post("/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED, summary="创建会话")
-def create_session(data: SessionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def create_session(data: SessionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
         session = SessionService.create_session(db, data, current_user.id)
+        # Initialize workspace namespace for agent sessions
+        if session.agent_id:
+            await WorkspaceService.init_workspace(session.id, session.agent)
         resp = SessionResponse.model_validate(session)
         resp.unread_count = 0
         return resp
@@ -70,10 +73,14 @@ def get_sessions(
 
 
 @router.put("/sessions/{session_id}", response_model=SessionResponse, summary="更新会话")
-def update_session(session_id: UUID, data: SessionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def update_session(session_id: UUID, data: SessionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     session = SessionService.update_session(db, session_id, data, current_user.id)
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
+
+    # Always sync workspace files for agent sessions (idempotent upsert).
+    if session.agent_id:
+        await WorkspaceService.init_workspace(session.id, session.agent)
     
     resp = SessionResponse.model_validate(session)
     resp.unread_count = SessionService.get_unread_count(db, session_id, current_user.id)
@@ -422,4 +429,3 @@ def backfill_all_embeddings(
     except Exception as e:
         logger.error(f"Backfill all embeddings for user {current_user.id} failed: {e}")
         raise HTTPException(status_code=500, detail=f"补建 embedding 失败: {str(e)}")
-

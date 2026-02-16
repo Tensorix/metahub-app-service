@@ -18,7 +18,7 @@ from uuid import UUID
 from datetime import datetime, timezone
 
 from deepagents import create_deep_agent, SubAgent
-from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
+from deepagents.backends import CompositeBackend, StoreBackend
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres import AsyncPostgresStore
@@ -88,7 +88,7 @@ class DeepAgentService:
                 - temperature: Model temperature (default: 0.7)
                 - max_tokens: Max tokens (default: 4096)
                 - subagents: List of subagent configurations
-                - skills: List of skill directory paths
+                - skills: List of skill content objects [{name, content}]
                 - memory: List of memory file paths
             checkpointer: Optional PostgreSQL checkpointer for persistence
             store: Optional PostgreSQL store for long-term memory
@@ -97,6 +97,97 @@ class DeepAgentService:
         self.checkpointer = checkpointer
         self.store = store
         self._agent = None
+        self._mounted_files: dict[str, dict] = {}  # AGENTS.md + skills for thread store
+
+    def _build_skill_files(self) -> tuple[list[str], dict[str, dict]]:
+        """Build skill source paths and files dict from config.
+
+        Converts skill content objects [{name, content}] from the database
+        into the file format expected by deepagents SkillsMiddleware.
+
+        Skills are written to the thread-scoped store before each invoke
+        so SkillsMiddleware discovers them via backend.ls_info("/skills/").
+
+        Returns:
+            Tuple of (skills_source_paths, files_dict):
+            - skills_source_paths: e.g. ["/skills/"] for create_deep_agent
+            - files_dict: e.g. {"/skills/research/SKILL.md": {content, ...}}
+        """
+        skills_data = self.config.get("skills") or []
+        if not skills_data:
+            return [], {}
+
+        from deepagents.backends.utils import create_file_data
+
+        files = {}
+        for skill in skills_data:
+            name = skill.get("name") if isinstance(skill, dict) else getattr(skill, "name", None)
+            content = skill.get("content") if isinstance(skill, dict) else getattr(skill, "content", None)
+            if not name or not content:
+                logger.warning(f"Skipping invalid skill entry: {skill}")
+                continue
+            path = f"/skills/{name}/SKILL.md"
+            files[path] = create_file_data(content)
+
+        if files:
+            logger.info(f"Prepared {len(files)} skill(s): {list(files.keys())}")
+
+        return ["/skills/"] if files else [], files
+
+    def _build_agents_memory_file(self) -> dict[str, dict]:
+        """Build root AGENTS.md file data from memory config."""
+        memory_data = self.config.get("memory") or []
+        if not memory_data:
+            return {}
+
+        memory_content = ""
+        for item in memory_data:
+            name = item.get("name") if isinstance(item, dict) else getattr(item, "name", None)
+            content = item.get("content") if isinstance(item, dict) else getattr(item, "content", None)
+            normalized = (name or "").strip().lower().removesuffix(".md")
+            if normalized == "agents":
+                memory_content = content or ""
+                break
+            if not memory_content and content:
+                memory_content = content
+
+        if not memory_content:
+            return {}
+
+        from deepagents.backends.utils import create_file_data
+        return {"/AGENTS.md": create_file_data(memory_content)}
+
+    def _build_mounted_files(self) -> tuple[list[str], dict[str, dict]]:
+        """Build all mounted files (AGENTS.md + skills) for thread store.
+
+        Returns:
+            Tuple of (skills_source_paths, mounted_files_dict).
+        """
+        skills_paths, skill_files = self._build_skill_files()
+        agents_md = self._build_agents_memory_file()
+
+        mounted = {}
+        mounted.update(agents_md)
+        mounted.update(skill_files)
+        return skills_paths, mounted
+
+    async def _write_mounted_files_to_store(self, thread_id: str):
+        """Write mounted files to thread-scoped store before invoke.
+
+        Uses store.aput (upsert) so it's safe to call on every invoke.
+        Files are stored in namespace (thread_id, "filesystem").
+        """
+        if not self.store or not self._mounted_files:
+            return
+
+        namespace = (str(thread_id), "filesystem")
+        for path, file_data in self._mounted_files.items():
+            await self.store.aput(namespace, path, file_data)
+
+        logger.debug(
+            f"Wrote {len(self._mounted_files)} mounted file(s) to "
+            f"thread store namespace={namespace}"
+        )
 
     def _get_model_string(self) -> str:
         """Build provider:model format string."""
@@ -177,25 +268,27 @@ class DeepAgentService:
 
     def _build_backend(self):
         """
-        Build CompositeBackend with persistent memory routes.
+        Build CompositeBackend with two-tier lifecycle storage.
 
         Routes:
-        - /memories/* → StoreBackend (persistent, cross-conversation, visible to frontend)
-        - All others → StateBackend (ephemeral, conversation-scoped, not visible to frontend)
-        
-        Frontend API can only access files in /memories/ since they are stored in the database.
-        Temporary files in other paths only exist during Agent runtime.
+        - /workspace/* → StoreBackend (session lifecycle, namespace=(session_id, "filesystem"))
+        - All others  → ThreadScopedStoreBackend (thread lifecycle, namespace=(thread_id, "filesystem"))
+
+        Root files (AGENTS.md, skills, agent temp files) are per-thread and visible
+        in the frontend via thread_id. Workspace files are per-session and shared
+        across all threads.
         """
         if not self.store:
             return None
 
-        # Return a factory function that creates backends with runtime
         def backend_factory(runtime):
+            from app.agent.backends import ThreadScopedStoreBackend
+
             return CompositeBackend(
-                default=StateBackend(runtime),
-                routes={"/memories/": StoreBackend(runtime)}
+                default=ThreadScopedStoreBackend(runtime),
+                routes={"/workspace/": StoreBackend(runtime)},
             )
-        
+
         return backend_factory
 
     async def _get_subagent_mcp_tools(self, sa_config: dict) -> list:
@@ -382,11 +475,10 @@ class DeepAgentService:
                 "name": self.config.get("name"),
             }
 
-            # Skills (reusable workflows from SKILL.md files)
-            # TODO: Implement virtual filesystem for skills stored in database
-            # skills = self.config.get("skills")
-            # if skills:
-            #     agent_kwargs["skills"] = skills
+            # Mounted files: AGENTS.md + skills for thread store
+            skills_paths, self._mounted_files = self._build_mounted_files()
+            if skills_paths:
+                agent_kwargs["skills"] = skills_paths
 
             # Memory (persistent context from AGENTS.md files)
             # TODO: Implement virtual filesystem for memory stored in database
@@ -397,7 +489,8 @@ class DeepAgentService:
             logger.info(
                 f"Creating deep agent: model={model_string}, "
                 f"tools={len(builtin_tools)} builtin + {len(mcp_tools)} mcp, "
-                f"subagents={len(subagents)}"
+                f"subagents={len(subagents)}, "
+                f"mounted_files={len(self._mounted_files)}"
             )
 
             self._agent = create_deep_agent(**agent_kwargs)
@@ -440,10 +533,12 @@ class DeepAgentService:
                     cfg["metadata"] = {}
                 cfg["metadata"]["assistant_id"] = str(session_id)
 
-            response = await agent.ainvoke(
-                {"messages": [{"role": "user", "content": message}]},
-                config=cfg,
-            )
+            # Write AGENTS.md + skills to thread store so SkillsMiddleware
+            # discovers them via backend.ls_info("/skills/")
+            await self._write_mounted_files_to_store(thread_id)
+
+            input_data = {"messages": [{"role": "user", "content": message}]}
+            response = await agent.ainvoke(input_data, config=cfg)
 
             # Extract the last AI message
             messages = response.get("messages", [])
@@ -498,13 +593,19 @@ class DeepAgentService:
 
             logger.info(f"Starting deep agent stream for thread {thread_id}")
 
+            # Write AGENTS.md + skills to thread store so SkillsMiddleware
+            # discovers them via backend.ls_info("/skills/")
+            await self._write_mounted_files_to_store(thread_id)
+
             try:
                 event_count = 0
                 # 追踪活跃的 SubAgent op_id，用于过滤内部事件
                 _active_subagent_op_ids = set()
-                
+
+                input_data = {"messages": [{"role": "user", "content": message}]}
+
                 async for event in agent.astream_events(
-                    {"messages": [{"role": "user", "content": message}]},
+                    input_data,
                     config=cfg,
                     version="v2",
                 ):

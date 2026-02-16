@@ -62,9 +62,8 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
   const [mcpServers, setMcpServers] = useState<McpServerResponse[]>([]);
   const [mountedSubagents, setMountedSubagents] = useState<MountedSubagentSummary[]>([]);
 
-  // Skill/Memory editing states
+  // Skill editing state
   const [editingSkill, setEditingSkill] = useState<{ name: string; content: string } | null>(null);
-  const [editingMemory, setEditingMemory] = useState<{ name: string; content: string } | null>(null);
 
   useEffect(() => {
     if (agent) {
@@ -167,24 +166,23 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
     });
   };
 
-  const addMemoryFile = () => {
-    if (editingMemory && editingMemory.name.trim()) {
-      const memory_files = formData.memory_files || [];
-      const existingIndex = memory_files.findIndex(m => m.name === editingMemory.name);
-      if (existingIndex >= 0) {
-        memory_files[existingIndex] = editingMemory;
-      } else {
-        memory_files.push(editingMemory);
-      }
-      setFormData({ ...formData, memory_files });
-      setEditingMemory(null);
-    }
+  const getAgentsMemoryContent = () => {
+    const files = formData.memory_files || [];
+    const preferred = files.find((m) => {
+      const normalized = (m.name || '').trim().toLowerCase().replace(/\.md$/, '');
+      return normalized === 'agents';
+    });
+    return preferred?.content || files[0]?.content || '';
   };
 
-  const removeMemoryFile = (name: string) => {
+  const setAgentsMemoryContent = (content: string) => {
+    if (!content.trim()) {
+      setFormData({ ...formData, memory_files: [] });
+      return;
+    }
     setFormData({
       ...formData,
-      memory_files: (formData.memory_files || []).filter(m => m.name !== name),
+      memory_files: [{ name: 'AGENTS', content }],
     });
   };
 
@@ -426,10 +424,13 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                   {editingSkill ? (
                     <div className="border rounded-lg p-4 space-y-3">
                       <Input
-                        placeholder="技能名称（如：research）"
+                        placeholder="文件名（如：research）"
                         value={editingSkill.name}
                         onChange={(e) => setEditingSkill({ ...editingSkill, name: e.target.value })}
                       />
+                      <p className="text-xs text-muted-foreground">
+                        路径：{editingSkill.name ? `/skills/${editingSkill.name}/SKILL.md` : '/skills/<name>/SKILL.md'}
+                      </p>
                       <textarea
                         className="flex min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
                         placeholder="# Skill Content&#10;&#10;描述这个技能的工作流程..."
@@ -454,13 +455,13 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                         onClick={() => setEditingSkill({ name: '', content: '' })}
                       >
                         <Plus className="h-4 w-4 mr-2" />
-                        添加 Skill
+                        新建 Skill 文件
                       </Button>
                       <div className="space-y-2">
                         {(formData.skills || []).map((skill, index) => (
                           <div key={index} className="border rounded-lg p-3 flex justify-between items-start">
                             <div className="flex-1">
-                              <p className="font-medium">{skill.name}</p>
+                              <p className="font-medium font-mono text-sm">/skills/{skill.name}/SKILL.md</p>
                               <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{skill.content}</p>
                             </div>
                             <div className="flex gap-2">
@@ -487,79 +488,22 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                     </>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    Skills 是可重用的工作流，Agent 会自动读取
+                    使用文件系统风格编辑 skills，运行时会挂载到 /skills/*。
                   </p>
                 </div>
 
-                {/* Memory Files Section */}
+                {/* AGENTS Memory Section */}
                 <div className="grid gap-2">
-                  <Label>Memory Files（记忆）</Label>
-                  
-                  {editingMemory ? (
-                    <div className="border rounded-lg p-4 space-y-3">
-                      <Input
-                        placeholder="记忆名称（如：project_context）"
-                        value={editingMemory.name}
-                        onChange={(e) => setEditingMemory({ ...editingMemory, name: e.target.value })}
-                      />
-                      <textarea
-                        className="flex min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                        placeholder="# Memory Content&#10;&#10;项目上下文、用户偏好等..."
-                        value={editingMemory.content}
-                        onChange={(e) => setEditingMemory({ ...editingMemory, content: e.target.value })}
-                      />
-                      <div className="flex gap-2">
-                        <Button type="button" size="sm" onClick={addMemoryFile}>
-                          保存
-                        </Button>
-                        <Button type="button" size="sm" variant="outline" onClick={() => setEditingMemory(null)}>
-                          取消
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setEditingMemory({ name: '', content: '' })}
-                      >
-                        <Plus className="h-4 w-4 mr-2" />
-                        添加 Memory
-                      </Button>
-                      <div className="space-y-2">
-                        {(formData.memory_files || []).map((memory, index) => (
-                          <div key={index} className="border rounded-lg p-3 flex justify-between items-start">
-                            <div className="flex-1">
-                              <p className="font-medium">{memory.name}</p>
-                              <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{memory.content}</p>
-                            </div>
-                            <div className="flex gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => setEditingMemory(memory)}
-                              >
-                                编辑
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => removeMemoryFile(memory.name)}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
+                  <Label>记忆（AGENTS.md）</Label>
+                  <p className="text-xs text-muted-foreground font-mono">/AGENTS.md</p>
+                  <textarea
+                    className="flex min-h-[220px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+                    placeholder="# AGENTS&#10;&#10;记录长期记忆、项目约束、偏好和规范..."
+                    value={getAgentsMemoryContent()}
+                    onChange={(e) => setAgentsMemoryContent(e.target.value)}
+                  />
                   <p className="text-xs text-muted-foreground">
-                    Memory 提供持久化上下文，跨对话保持
+                    统一使用单文件 AGENTS.md 作为持久记忆。
                   </p>
                 </div>
               </>

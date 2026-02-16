@@ -257,12 +257,12 @@ export default function Agents() {
                       )}
                       {agent.skills && agent.skills.length > 0 && (
                         <Badge variant="secondary">
-                          {agent.skills.length} Skills
+                          {agent.skills.length} 技能
                         </Badge>
                       )}
                       {agent.memory_files && agent.memory_files.length > 0 && (
                         <Badge variant="secondary">
-                          {agent.memory_files.length} Memory
+                          记忆 (AGENTS.md)
                         </Badge>
                       )}
                       {agent.mcp_servers && agent.mcp_servers.length > 0 && (

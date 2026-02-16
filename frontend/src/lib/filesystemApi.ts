@@ -22,6 +22,8 @@ export interface FileInfo {
   size: number | null;
   modified_at: string | null;
   created_at: string | null;
+  lifecycle: 'thread' | 'session' | null;
+  readonly: boolean;
 }
 
 export interface FileListResponse {
@@ -60,11 +62,14 @@ export interface FileEvent {
  */
 export async function listFiles(
   sessionId: string,
-  path: string = '/'
+  path: string = '/',
+  topicId?: string
 ): Promise<FileListResponse> {
+  const params: Record<string, string> = { path };
+  if (topicId) params.topic_id = topicId;
   const { data } = await api.get<FileListResponse>(
     `/api/v1/sessions/${sessionId}/files`,
-    { params: { path } }
+    { params }
   );
   return data;
 }
@@ -74,11 +79,14 @@ export async function listFiles(
  */
 export async function readFile(
   sessionId: string,
-  path: string
+  path: string,
+  topicId?: string
 ): Promise<FileReadResponse> {
+  const params: Record<string, string> = { path };
+  if (topicId) params.topic_id = topicId;
   const { data } = await api.get<FileReadResponse>(
     `/api/v1/sessions/${sessionId}/files/read`,
-    { params: { path } }
+    { params }
   );
   return data;
 }
@@ -89,11 +97,15 @@ export async function readFile(
 export async function writeFile(
   sessionId: string,
   path: string,
-  content: string
+  content: string,
+  topicId?: string
 ): Promise<FileWriteResponse> {
+  const params: Record<string, string> = {};
+  if (topicId) params.topic_id = topicId;
   const { data } = await api.post<FileWriteResponse>(
     `/api/v1/sessions/${sessionId}/files/write`,
-    { path, content }
+    { path, content },
+    { params }
   );
   return data;
 }
@@ -103,11 +115,14 @@ export async function writeFile(
  */
 export async function deleteFile(
   sessionId: string,
-  path: string
+  path: string,
+  topicId?: string
 ): Promise<FileDeleteResponse> {
+  const params: Record<string, string> = { path };
+  if (topicId) params.topic_id = topicId;
   const { data } = await api.delete<FileDeleteResponse>(
     `/api/v1/sessions/${sessionId}/files`,
-    { params: { path } }
+    { params }
   );
   return data;
 }
@@ -248,6 +263,8 @@ export interface FileTreeNode {
   isDir: boolean;
   size: number | null;
   modifiedAt: string | null;
+  readonly: boolean;
+  lifecycle: string | null;
   children: FileTreeNode[];
 }
 
@@ -274,6 +291,8 @@ export function buildFileTree(files: FileInfo[]): FileTreeNode[] {
           isDir: true,
           size: null,
           modifiedAt: null,
+          readonly: false,
+          lifecycle: null,
           children: [],
         };
         nodeMap.set(currentPath, dirNode);
@@ -290,6 +309,8 @@ export function buildFileTree(files: FileInfo[]): FileTreeNode[] {
       isDir: file.is_dir,
       size: file.size,
       modifiedAt: file.modified_at,
+      readonly: file.readonly ?? false,
+      lifecycle: file.lifecycle ?? null,
       children: [],
     };
     

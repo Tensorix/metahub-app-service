@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 from sqlalchemy.orm import Session
@@ -376,3 +377,77 @@ class AgentService:
             db.delete(agent)
         db.commit()
         return True
+
+
+class WorkspaceService:
+    """Workspace filesystem initialization for sessions."""
+
+    @staticmethod
+    async def init_workspace(session_id: UUID, agent: Optional[Agent] = None) -> None:
+        """Initialize empty workspace namespace for a new session.
+
+        Creates a .workspace marker in the session's store namespace
+        so the namespace exists for future file operations.
+
+        Also seeds lightweight workspace templates (first init only):
+        - /AGENTS.md
+        - /skills/example/SKILL.md
+        """
+        from app.agent import AgentFactory
+        from deepagents.backends.utils import create_file_data
+
+        store = await AgentFactory.get_store()
+        namespace = (str(session_id), "filesystem")
+        now = datetime.now(timezone.utc).isoformat()
+        await store.aput(namespace, "/.workspace", {
+            "content": ["initialized"],
+            "created_at": now,
+            "modified_at": now,
+        })
+
+        # Create workspace AGENTS.md template on first init.
+        existing_agents_md = await store.aget(namespace, "/AGENTS.md")
+        if not existing_agents_md:
+            sample_agents_md = (
+                "# AGENTS\n\n"
+                "## Project Context\n"
+                "- Describe your project goals here.\n\n"
+                "## Constraints\n"
+                "- List important rules or boundaries.\n\n"
+                "## Preferences\n"
+                "- Record style, workflow, and output preferences.\n"
+            )
+            await store.aput(namespace, "/AGENTS.md", create_file_data(sample_agents_md))
+
+        # Seed a unified, simple skills template once.
+        # Do not sync from agent.skills: workspace files are user-owned.
+        existing_skill_items = await store.asearch(namespace, limit=1000)
+        has_skills = any(item.key.startswith("/skills/") for item in existing_skill_items)
+        if not has_skills:
+            sample_skill_content = (
+                "---\n"
+                "name: example\n"
+                "description: A minimal skill template.\n"
+                "---\n\n"
+                "# Example Skill\n\n"
+                "## Purpose\n"
+                "Briefly describe what this skill does.\n\n"
+                "## Steps\n"
+                "1. Read the request.\n"
+                "2. Do the task.\n"
+                "3. Return a concise result.\n"
+            )
+            await store.aput(
+                namespace,
+                "/skills/README.md",
+                create_file_data(
+                    "# Skills\n\n"
+                    "Add skill files under `/workspace/skills/<name>/SKILL.md`.\n"
+                    "Use `/workspace/skills/example/SKILL.md` as a starter template."
+                ),
+            )
+            await store.aput(
+                namespace,
+                "/skills/example/SKILL.md",
+                create_file_data(sample_skill_content),
+            )

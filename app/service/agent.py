@@ -20,6 +20,30 @@ from app.schema.agent import (
 
 class AgentService:
     """Agent service for CRUD operations."""
+
+    @staticmethod
+    def _normalize_memory_files(memory_files):
+        """Normalize memory files to a single AGENTS.md entry."""
+        if memory_files is None:
+            return None
+        if not memory_files:
+            return []
+
+        preferred = None
+        fallback = None
+        for item in memory_files:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content") or ""
+            name = (item.get("name") or "").strip().lower().removesuffix(".md")
+            if name == "agents":
+                preferred = content
+                break
+            if not fallback and content:
+                fallback = content
+
+        final_content = preferred if preferred is not None else (fallback or "")
+        return [{"name": "AGENTS", "content": final_content}]
     
     @staticmethod
     def create_agent(
@@ -34,6 +58,10 @@ class AgentService:
             exclude_unset=True,
             exclude={"summarization", "mount_subagents"},
         )
+        if "memory_files" in agent_dict:
+            agent_dict["memory_files"] = AgentService._normalize_memory_files(
+                agent_dict["memory_files"]
+            )
 
         if summarization_data:
             agent_dict["summarization_config"] = summarization_data.model_dump()
@@ -105,6 +133,10 @@ class AgentService:
             exclude_unset=True,
             exclude={"summarization"},
         )
+        if "memory_files" in update_data:
+            update_data["memory_files"] = AgentService._normalize_memory_files(
+                update_data["memory_files"]
+            )
 
         for field, value in update_data.items():
             setattr(agent, field, value)

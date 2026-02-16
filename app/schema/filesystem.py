@@ -15,13 +15,15 @@ from pydantic import BaseModel, Field
 
 class FileInfo(BaseModel):
     """File or directory information."""
-    
-    path: str = Field(..., description="File path (e.g., /memories/notes.txt)")
+
+    path: str = Field(..., description="File path (e.g., /workspace/notes.txt)")
     name: str = Field(..., description="File name")
     is_dir: bool = Field(False, description="Whether this is a directory")
     size: Optional[int] = Field(None, description="File size in bytes")
     modified_at: Optional[datetime] = Field(None, description="Last modification time")
     created_at: Optional[datetime] = Field(None, description="Creation time")
+    lifecycle: Optional[str] = Field(None, description="'thread' or 'session'")
+    readonly: bool = Field(False, description="True for agent-mounted files (Agent.md, skills)")
 
 
 class FileListResponse(BaseModel):

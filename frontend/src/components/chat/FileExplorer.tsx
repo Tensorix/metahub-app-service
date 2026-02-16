@@ -45,11 +45,12 @@ import { useToast } from '@/hooks/use-toast';
 
 interface FileExplorerProps {
   sessionId: string;
+  topicId?: string;
   className?: string;
   onClose?: () => void;
 }
 
-export function FileExplorer({ sessionId, className, onClose }: FileExplorerProps) {
+export function FileExplorer({ sessionId, topicId, className, onClose }: FileExplorerProps) {
   const { toast } = useToast();
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [tree, setTree] = useState<FileTreeNode[]>([]);
@@ -58,6 +59,7 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
   
   // Selected file state
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedReadonly, setSelectedReadonly] = useState(false);
   const [fileContent, setFileContent] = useState<string>('');
   const [originalContent, setOriginalContent] = useState<string>('');
   const [loadingFile, setLoadingFile] = useState(false);
@@ -80,7 +82,7 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
     setError(null);
     
     try {
-      const response = await listFiles(sessionId);
+      const response = await listFiles(sessionId, '/', topicId);
       setFiles(response.files);
       setTree(buildFileTree(response.files));
     } catch (e) {
@@ -94,14 +96,14 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
     } finally {
       setLoading(false);
     }
-  }, [sessionId, toast]);
+  }, [sessionId, topicId, toast]);
 
   // Load file content
   const loadFileContent = useCallback(async (path: string) => {
     setLoadingFile(true);
     
     try {
-      const response = await readFile(sessionId, path);
+      const response = await readFile(sessionId, path, topicId);
       setFileContent(response.content);
       setOriginalContent(response.content);
       setHasChanges(false);
@@ -115,7 +117,7 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
     } finally {
       setLoadingFile(false);
     }
-  }, [sessionId, toast]);
+  }, [sessionId, topicId, toast]);
 
   // Save file
   const saveFile = useCallback(async () => {
@@ -124,7 +126,7 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
     setSaving(true);
     
     try {
-      await writeFile(sessionId, selectedPath, fileContent);
+      await writeFile(sessionId, selectedPath, fileContent, topicId);
       setOriginalContent(fileContent);
       setHasChanges(false);
       toast({
@@ -141,7 +143,7 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
     } finally {
       setSaving(false);
     }
-  }, [sessionId, selectedPath, fileContent, hasChanges, toast]);
+  }, [sessionId, topicId, selectedPath, fileContent, hasChanges, toast]);
 
   // Create new file
   const createFile = useCallback(async () => {
@@ -150,7 +152,7 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
     const path = newFilePath.startsWith('/') ? newFilePath : `/${newFilePath}`;
     
     try {
-      await writeFile(sessionId, path, '');
+      await writeFile(sessionId, path, '', topicId);
       setShowNewFile(false);
       setNewFilePath('');
       await loadFiles();
@@ -169,14 +171,14 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
         description: message,
       });
     }
-  }, [sessionId, newFilePath, loadFiles, toast]);
+  }, [sessionId, topicId, newFilePath, loadFiles, toast]);
 
   // Delete file
   const handleDeleteFile = useCallback(async (path: string) => {
     if (!confirm(`确定要删除 ${path} 吗？`)) return;
     
     try {
-      await deleteFile(sessionId, path);
+      await deleteFile(sessionId, path, topicId);
       if (selectedPath === path) {
         setSelectedPath(null);
         setFileContent('');
@@ -195,16 +197,17 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
         description: message,
       });
     }
-  }, [sessionId, selectedPath, loadFiles, toast]);
+  }, [sessionId, topicId, selectedPath, loadFiles, toast]);
 
   // Handle file selection
-  const handleSelectFile = useCallback((path: string) => {
+  const handleSelectFile = useCallback((path: string, readonly: boolean = false) => {
     if (hasChanges) {
       if (!confirm('当前文件有未保存的更改，确定要切换吗？')) {
         return;
       }
     }
     setSelectedPath(path);
+    setSelectedReadonly(readonly);
     loadFileContent(path);
   }, [hasChanges, loadFileContent]);
 
@@ -239,31 +242,31 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
     loadFileContentRef.current = loadFileContent;
   }, [loadFileContent]);
 
-  // Initialize - only depends on sessionId
+  // Initialize - depends on sessionId and topicId
   useEffect(() => {
     loadFilesRef.current();
-    
+
     // Handle file change events
     const handleFileEvent = (event: FileEvent) => {
       console.log('File event:', event);
       loadFilesRef.current();
-      
+
       // If the current file was updated externally, reload it
       if (event.path === selectedPathRef.current && event.event === 'updated') {
         loadFileContentRef.current(selectedPathRef.current);
       }
     };
-    
+
     // Set up file watcher
     const watcher = new FileWatcher(sessionId);
     watcherRef.current = watcher;
     watcher.addListener(handleFileEvent);
     watcher.connect();
-    
+
     return () => {
       watcher.disconnect();
     };
-  }, [sessionId]);
+  }, [sessionId, topicId]);
 
   // Track content changes
   useEffect(() => {
@@ -304,7 +307,7 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
             if (node.isDir) {
               toggleFolder(node.path);
             } else {
-              handleSelectFile(node.path);
+              handleSelectFile(node.path, node.readonly);
             }
           }}
         >
@@ -328,7 +331,10 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
             </>
           )}
           <span className="truncate flex-1 text-sm">{node.name}</span>
-          {!node.isDir && (
+          {node.readonly && !node.isDir && (
+            <span className="text-[10px] text-muted-foreground/60 shrink-0">只读</span>
+          )}
+          {!node.isDir && !node.readonly && (
             <Button
               variant="ghost"
               size="icon"
@@ -451,22 +457,27 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
                 <div className="flex items-center gap-2 overflow-hidden">
                   {getFileIcon(selectedPath)}
                   <span className="text-sm truncate">{selectedPath}</span>
-                  {hasChanges && (
+                  {selectedReadonly && (
+                    <span className="text-xs text-muted-foreground">只读</span>
+                  )}
+                  {hasChanges && !selectedReadonly && (
                     <span className="text-xs text-orange-500">●</span>
                   )}
                 </div>
-                <Button
-                  size="sm"
-                  onClick={saveFile}
-                  disabled={!hasChanges || saving}
-                >
-                  {saving ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4" />
-                  )}
-                  <span className="ml-1">保存</span>
-                </Button>
+                {!selectedReadonly && (
+                  <Button
+                    size="sm"
+                    onClick={saveFile}
+                    disabled={!hasChanges || saving}
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                    <span className="ml-1">保存</span>
+                  </Button>
+                )}
               </div>
 
               {/* File editor */}
@@ -481,6 +492,7 @@ export function FileExplorer({ sessionId, className, onClose }: FileExplorerProp
                   onChange={(e) => setFileContent(e.target.value)}
                   placeholder="文件内容..."
                   spellCheck={false}
+                  readOnly={selectedReadonly}
                 />
               )}
             </>

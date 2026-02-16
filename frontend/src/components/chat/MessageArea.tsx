@@ -501,6 +501,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
           >
             <FileExplorer
               sessionId={currentSessionId}
+              topicId={currentTopicId ?? undefined}
               className="h-full"
               onClose={() => setFileExplorerOpen(false)}
             />
