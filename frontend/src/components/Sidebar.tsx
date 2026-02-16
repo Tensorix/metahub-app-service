@@ -1,4 +1,4 @@
-import { Home, MessageSquare, Settings, LogOut, ChevronLeft, Menu, Bot, X, CheckSquare } from 'lucide-react';
+import { Home, MessageSquare, Settings, LogOut, ChevronLeft, Menu, Bot, X, CheckSquare, BookOpen } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
@@ -23,6 +23,7 @@ const menuItems = [
   { icon: MessageSquare, label: '会话', path: '/sessions' },
   { icon: Bot, label: 'Agents', path: '/agents' },
   { icon: CheckSquare, label: '活动', path: '/activities' },
+  { icon: BookOpen, label: '知识库', path: '/knowledge' },
   { icon: Settings, label: '设置', path: '/settings' },
 ];
 
@@ -135,7 +136,9 @@ export function Sidebar({
       <nav className="flex-1 space-y-1 p-2">
         {menuItems.map((item) => {
           const Icon = item.icon;
-          const isActive = location.pathname === item.path;
+          const isActive =
+            location.pathname === item.path ||
+            (item.path !== '/' && location.pathname.startsWith(item.path + '/'));
 
           return (
             <Link key={item.path} to={item.path} onClick={handleNavClick}>

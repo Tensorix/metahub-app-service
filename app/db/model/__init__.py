@@ -17,3 +17,6 @@ from .embedding_config import EmbeddingConfig
 from .message_search_index import MessageSearchIndex
 from .message_embedding import MessageEmbedding
 from .background_task import BackgroundTask
+from .knowledge_node import KnowledgeNode
+from .dataset_row import DatasetRow
+from .knowledge_embedding import KnowledgeEmbedding

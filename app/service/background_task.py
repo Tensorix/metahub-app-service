@@ -316,6 +316,59 @@ def execute_backfill_embeddings_task(
             BackgroundTaskService.update_task_status(db, task_id, "failed", error=str(e))
 
 
+def execute_vectorize_collection_task(
+    task_id: UUID,
+    user_id: UUID,
+    collection_id: UUID,
+):
+    """Legacy: Execute collection vectorization in background."""
+    execute_vectorize_folder_task(task_id, user_id=user_id, folder_id=collection_id)
+
+
+def execute_vectorize_folder_task(
+    task_id: UUID,
+    user_id: UUID,
+    folder_id: UUID,
+):
+    """Execute folder vectorization in background (knowledge base)."""
+    from app.service.knowledge import KnowledgeService
+
+    with SessionLocal() as db:
+        try:
+            BackgroundTaskService.update_task_status(db, task_id, "running")
+
+            task = BackgroundTaskService.get_task(db, task_id)
+            if not task or task.status == "cancelled":
+                return
+
+            svc = KnowledgeService()
+            result = svc.vectorize_folder(db, folder_id, user_id)
+
+            if result.get("status") == "error":
+                BackgroundTaskService.update_task_status(
+                    db, task_id, "failed", error=result.get("error", "Unknown error")
+                )
+                return
+
+            total = result.get("total", 0)
+            processed = result.get("processed", 0)
+            failed = result.get("failed", 0)
+            BackgroundTaskService.update_task_progress(db, task_id, processed, failed)
+            result_msg = f"Vectorized {processed}/{total} items"
+            if failed > 0:
+                result_msg += f" ({failed} failed)"
+            BackgroundTaskService.update_task_status(
+                db, task_id, "completed", result=result_msg
+            )
+            logger.info(f"Task {task_id} completed: {result_msg}")
+
+        except Exception as e:
+            logger.exception(f"Task {task_id} failed: {e}")
+            BackgroundTaskService.update_task_status(
+                db, task_id, "failed", error=str(e)
+            )
+
+
 def execute_reindex_session_task(
     task_id: UUID,
     user_id: UUID,
