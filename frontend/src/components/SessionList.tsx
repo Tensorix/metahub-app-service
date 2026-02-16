@@ -188,52 +188,50 @@ export function SessionList({
               </div>
             </Card>
 
-            {/* 话题列表 */}
+            {/* 话题列表 - 样式与文件系统一致 */}
             {isExpanded && sessionTopics.length > 0 && (
-              <div className="ml-8 space-y-1">
+              <div className="ml-8 space-y-0.5">
                 {sessionTopics.map((topic) => (
-                  <Card
+                  <div
                     key={topic.id}
-                    className="p-2 cursor-pointer transition-all hover:shadow-sm border border-border hover:border-primary/50"
+                    className="flex items-center gap-2 px-2 py-1 cursor-pointer hover:bg-accent rounded-sm group"
                     onClick={(e) => {
                       e.stopPropagation();
                       onSessionSelect(session.id);
                     }}
                   >
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm truncate">
-                          {topic.name || '未命名话题'}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDate(topic.created_at)}
-                        </p>
-                      </div>
-
-                      <div onClick={(e) => e.stopPropagation()}>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger>
-                            <Button variant="ghost" size="icon-sm">
-                              <MoreVertical className="h-3 w-3" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => onTopicEdit(topic)}>
-                              <Edit className="h-4 w-4 mr-2" />
-                              编辑
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => onTopicDelete(topic.id)}
-                              className="text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              删除
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm truncate">
+                        {topic.name || '未命名话题'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDate(topic.created_at)}
+                      </p>
                     </div>
-                  </Card>
+
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100">
+                            <MoreVertical className="h-3 w-3" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => onTopicEdit(topic)}>
+                            <Edit className="h-4 w-4 mr-2" />
+                            编辑
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => onTopicDelete(topic.id)}
+                            className="text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            删除
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}

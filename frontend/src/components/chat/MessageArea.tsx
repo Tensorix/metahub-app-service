@@ -471,21 +471,26 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
         </div>
       </div>
 
-      {/* 右侧：话题列表 (仅桌面端) - 带动画的折叠/展开和拖拽调整宽度 */}
-      {isDesktop && !topicSidebarCollapsed && (
-        <>
-          {/* 拖拽手柄 */}
+      {/* 右侧：话题列表 (仅桌面端) - 参考侧边栏的滑入滑出动画 */}
+      {isDesktop && (
+        <div
+          className={cn(
+            'shrink-0 flex overflow-hidden transition-[width] duration-300 ease-in-out',
+            topicSidebarCollapsed && 'pointer-events-none'
+          )}
+          style={{ width: topicSidebarCollapsed ? 0 : topicSidebarWidth + 8 }}
+        >
           <ResizableHandle
             direction="horizontal"
             onResize={handleTopicSidebarResize}
           />
           <div
-            className="shrink-0 overflow-hidden border rounded-lg bg-background"
+            className="shrink-0 overflow-hidden border-l bg-background"
             style={{ width: topicSidebarWidth }}
           >
             <TopicSidebar className="h-full" style={{ width: topicSidebarWidth }} />
           </div>
-        </>
+        </div>
       )}
       
       {/* 右侧：文件系统面板 (仅 AI 会话) */}
