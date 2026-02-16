@@ -13,6 +13,7 @@ import { ToolCallPart } from './ToolCallPart';
 import { SubAgentCallPart } from './SubAgentCallPart';
 import { ErrorPart } from './ErrorPart';
 import { RegenerateButton } from './RegenerateButton';
+import { FloatingTodo } from './TodoVisualization';
 import { cn } from '@/lib/utils';
 import { Bot, User } from 'lucide-react';
 import type { Message, MessagePart, SubAgentCallContent } from '@/lib/api';
@@ -22,7 +23,8 @@ export function AIMessageList({ className }: { className?: string }) {
   const { 
     currentSessionId, 
     currentTopicId, 
-    messages, 
+    messages,
+    isStreaming: storeIsStreaming,
     streamingMessageId,
     streamingThinking,
     isThinking,
@@ -34,6 +36,9 @@ export function AIMessageList({ className }: { className?: string }) {
 
   return (
     <div className={cn("flex-1 overflow-y-auto p-4 space-y-4", className)}>
+      {/* Floating todo card — sticky at the top of the scroll area */}
+      <FloatingTodo messages={messageList} isStreaming={storeIsStreaming} />
+
       {messageList.map((message) => (
         <MessageItem
           key={message.id}

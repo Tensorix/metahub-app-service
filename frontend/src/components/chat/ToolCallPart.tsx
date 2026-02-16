@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronRight, Wrench, CheckCircle, XCircle } from 'lucide-react';
 import type { MessagePart } from '@/lib/api';
 import { parseToolCallContent, parseToolResultContent } from '@/lib/api';
+import { TodoInlineHint, parseTodoArgs } from './TodoVisualization';
 
 interface ToolCallPartProps {
   callPart: MessagePart;
@@ -18,6 +19,14 @@ export function ToolCallPart({ callPart, resultPart }: ToolCallPartProps) {
 
   const hasResult = !!resultContent;
   const isSuccess = resultContent?.success ?? true;
+
+  // write_todos: show compact inline hint (full card is floating at the top)
+  if (callContent.name === 'write_todos') {
+    const todoItems = parseTodoArgs(callContent.args);
+    if (todoItems) {
+      return <TodoInlineHint todos={todoItems} hasResult={hasResult} />;
+    }
+  }
 
   return (
     <div className="my-2 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
