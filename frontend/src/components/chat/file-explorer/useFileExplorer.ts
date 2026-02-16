@@ -108,40 +108,60 @@ export function useFileExplorer(sessionId: string, topicId?: string) {
     }
   }, [sessionId, topicId, selectedPath, fileContent, hasChanges, toast]);
 
+  const pathExists = useCallback(
+    (path: string) => {
+      const norm = (s: string) => (s.replace(/\/$/, '') || '/');
+      const p = path.startsWith('/') ? path : `/${path}`;
+      const pNorm = norm(p);
+      return files.some((f) => norm(f.path) === pNorm);
+    },
+    [files]
+  );
+
   const createFileAtPath = useCallback(
     async (path: string) => {
       const p = path.startsWith('/') ? path : `/${path}`;
+      if (pathExists(p)) {
+        toast({ variant: 'destructive', title: '创建失败', description: `文件已存在: ${p}` });
+        return;
+      }
       try {
-        await writeFile(sessionId, p, '', topicId);
+        await writeFile(sessionId, p, '', topicId, true);
         await loadFiles();
         setInlineCreate(null);
         setSelectedPath(p);
         setFileContent('');
         setOriginalContent('');
         toast({ title: '创建成功', description: `文件 ${p} 已创建` });
-      } catch (e) {
-        const message = e instanceof Error ? e.message : 'Failed to create file';
+      } catch (e: unknown) {
+        const err = e as { response?: { status?: number; data?: { detail?: string } } };
+        const message = err?.response?.data?.detail ?? (e instanceof Error ? e.message : 'Failed to create file');
         toast({ variant: 'destructive', title: '创建失败', description: message });
       }
     },
-    [sessionId, topicId, loadFiles, toast]
+    [sessionId, topicId, loadFiles, toast, pathExists]
   );
 
   const createFolderAtPath = useCallback(
     async (path: string) => {
       const p = path.startsWith('/') ? path : `/${path}`;
+      if (pathExists(p)) {
+        toast({ variant: 'destructive', title: '创建失败', description: `文件夹已存在: ${p}` });
+        return;
+      }
       try {
         await createFolder(sessionId, p, topicId);
         await loadFiles();
         setInlineCreate(null);
         setExpandedFolders((prev) => new Set(prev).add(p));
         toast({ title: '创建成功', description: `文件夹 ${p} 已创建` });
-      } catch (e) {
-        const message = e instanceof Error ? e.message : 'Failed to create folder';
+      } catch (e: unknown) {
+        const err = e as { response?: { status?: number; data?: { detail?: string } } };
+        const message = err?.response?.data?.detail ?? (e instanceof Error ? e.message : 'Failed to create folder');
         toast({ variant: 'destructive', title: '创建失败', description: message });
       }
     },
-    [sessionId, topicId, loadFiles, toast]
+    [sessionId, topicId, loadFiles, toast, pathExists]
   );
 
   const handleDelete = useCallback(

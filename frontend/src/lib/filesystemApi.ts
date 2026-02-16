@@ -93,15 +93,18 @@ export async function readFile(
 
 /**
  * Write or update a file.
+ * @param createOnly If true, fail with 409 when file already exists (for "create new" semantics)
  */
 export async function writeFile(
   sessionId: string,
   path: string,
   content: string,
-  topicId?: string
+  topicId?: string,
+  createOnly?: boolean
 ): Promise<FileWriteResponse> {
   const params: Record<string, string> = {};
   if (topicId) params.topic_id = topicId;
+  if (createOnly) params.create_only = 'true';
   const { data } = await api.post<FileWriteResponse>(
     `/api/v1/sessions/${sessionId}/files/write`,
     { path, content },
