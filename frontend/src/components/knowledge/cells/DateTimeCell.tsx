@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import dayjs from 'dayjs';
+import { CalendarIcon } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { FieldDefinition } from '@/lib/knowledgeApi';
 
@@ -51,7 +53,6 @@ export function DateTimeCell({ value, field, onSave }: DateTimeCellProps) {
       const [h, m] = timeStr.split(':').map(Number);
       const merged = dayjs(d).hour(h || 0).minute(m || 0);
       onSave(merged.format('YYYY-MM-DDTHH:mm:ss'));
-      // Keep open for time adjustment; user closes via click outside
     } else {
       onSave(dayjs(d).format('YYYY-MM-DD'));
       setOpen(false);
@@ -68,6 +69,11 @@ export function DateTimeCell({ value, field, onSave }: DateTimeCellProps) {
     }
   };
 
+  const handleClear = () => {
+    onSave(null);
+    setOpen(false);
+  };
+
   const initialDate = date ?? new Date();
 
   return (
@@ -78,29 +84,52 @@ export function DateTimeCell({ value, field, onSave }: DateTimeCellProps) {
           tabIndex={0}
           onKeyDown={(e) => e.key === 'Enter' && setOpen((o) => !o)}
           className={cn(
-            'w-full min-h-[28px] px-2 py-1 text-xs text-left truncate flex items-center',
+            'w-full min-h-[28px] px-2 py-1 text-xs text-left truncate flex items-center gap-1',
             'border-none bg-transparent cursor-pointer hover:bg-accent/50 rounded',
             'focus:outline-none focus:ring-1 focus:ring-ring'
           )}
         >
-          {displayText || <span className="text-muted-foreground">-</span>}
+          {displayText ? (
+            <>
+              <CalendarIcon className="w-3 h-3 text-muted-foreground shrink-0" />
+              <span className="truncate">{displayText}</span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">-</span>
+          )}
         </div>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-auto p-2">
+      <PopoverContent align="start" className="w-auto p-0">
         <Calendar
           mode="single"
+          captionLayout="dropdown"
           selected={date}
           onSelect={handleSelect}
           defaultMonth={initialDate}
+          startMonth={new Date(1970, 0)}
+          endMonth={new Date(2050, 11)}
         />
         {isDateTime && (
-          <div className="mt-2 pt-2 border-t">
+          <div className="flex items-center gap-2 px-3 pb-2 border-t pt-2">
+            <span className="text-xs text-muted-foreground shrink-0">时间</span>
             <Input
               type="time"
               value={timeStr}
               onChange={handleTimeChange}
-              className="h-7 text-xs"
+              className="h-7 text-xs flex-1"
             />
+          </div>
+        )}
+        {date && (
+          <div className="px-3 pb-3 pt-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full h-7 text-xs text-muted-foreground"
+              onClick={handleClear}
+            >
+              清除
+            </Button>
           </div>
         )}
       </PopoverContent>

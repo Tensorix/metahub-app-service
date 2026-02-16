@@ -55,42 +55,39 @@ export function MultiSelectCell({ value, field, onSave }: MultiSelectCellProps) 
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger>
-        <div
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === 'Enter' && setOpen((o) => !o)}
-          className={cn(
-            'w-full min-h-[28px] px-2 py-1 text-xs text-left flex items-center gap-1 flex-wrap',
-            'border-none bg-transparent cursor-pointer hover:bg-accent/50 rounded',
-            'focus:outline-none focus:ring-1 focus:ring-ring min-w-0'
-          )}
-        >
-          {selected.length > 0 ? (
-            selected.map((s) => (
-              <Badge
-                key={s}
-                variant="outline"
-                className={cn(
-                  'font-normal text-xs py-0 pr-1 gap-0.5',
-                  getOptionColor(options.indexOf(s))
-                )}
+      <PopoverTrigger
+        className={cn(
+          'min-h-[28px] px-2 py-1 text-xs text-left inline-flex items-center gap-1 flex-wrap',
+          'bg-transparent cursor-pointer hover:bg-accent/50 rounded',
+          'focus:outline-none focus:ring-1 focus:ring-ring'
+        )}
+      >
+        {selected.length > 0 ? (
+          selected.map((s) => (
+            <Badge
+              key={s}
+              variant="outline"
+              className={cn(
+                'font-normal text-xs py-0 pr-1 gap-0.5',
+                getOptionColor(options.indexOf(s))
+              )}
+            >
+              <span className="truncate max-w-[80px]">{s}</span>
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => remove(s, e)}
+                onKeyDown={(e) => e.key === 'Enter' && remove(s, e as unknown as React.MouseEvent)}
+                className="hover:bg-black/10 rounded p-0.5 cursor-pointer"
+                aria-label="移除"
               >
-                <span className="truncate max-w-[80px]">{s}</span>
-                <button
-                  type="button"
-                  onClick={(e) => remove(s, e)}
-                  className="hover:bg-black/10 rounded p-0.5"
-                  aria-label="移除"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </Badge>
-            ))
-          ) : (
-            <span className="text-muted-foreground">-</span>
-          )}
-        </div>
+                <X className="w-3 h-3" />
+              </span>
+            </Badge>
+          ))
+        ) : (
+          <span className="text-muted-foreground">-</span>
+        )}
       </PopoverTrigger>
       <PopoverContent align="start" className="min-w-[12rem] p-2">
         {options.length > 5 && (

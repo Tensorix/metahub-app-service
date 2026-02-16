@@ -44,25 +44,20 @@ export function SelectCell({ value, field, onSave }: SelectCellProps) {
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger>
-        <div
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === 'Enter' && setOpen((o) => !o)}
-          className={cn(
-            'w-full min-h-[28px] px-2 py-1 text-xs text-left truncate flex items-center',
-            'border-none bg-transparent cursor-pointer hover:bg-accent/50 rounded',
-            'focus:outline-none focus:ring-1 focus:ring-ring'
-          )}
-        >
-          {selectedLabel ? (
-            <Badge variant="outline" className={cn('font-normal text-xs', colorClass)}>
-              {selectedLabel}
-            </Badge>
-          ) : (
-            <span className="text-muted-foreground">-</span>
-          )}
-        </div>
+      <PopoverTrigger
+        className={cn(
+          'min-h-[28px] px-2 py-1 text-xs text-left inline-flex items-center',
+          'bg-transparent cursor-pointer hover:bg-accent/50 rounded',
+          'focus:outline-none focus:ring-1 focus:ring-ring'
+        )}
+      >
+        {selectedLabel ? (
+          <Badge variant="outline" className={cn('font-normal text-xs', colorClass)}>
+            {selectedLabel}
+          </Badge>
+        ) : (
+          <span className="text-muted-foreground">-</span>
+        )}
       </PopoverTrigger>
       <PopoverContent align="start" className="min-w-[12rem] p-2">
         {options.length > 5 && (
