@@ -22,7 +22,7 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Plus, Loader2, Settings, GripVertical, Trash2 } from 'lucide-react';
+import { Plus, Loader2, GripVertical, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { knowledgeApi } from '@/lib/knowledgeApi';
@@ -247,11 +247,18 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
       id: '_row_num',
       header: '#',
       size: 48,
+      minSize: 40,
+      maxSize: 60,
+      enableResizing: false,
       cell: () => null,
     },
     ...fields.map(
       (field): ColumnDef<DatasetRow> => ({
         id: field.name,
+        size: field.width || 150,
+        minSize: 60,
+        maxSize: 600,
+        enableResizing: true,
         header: () => (
           <div className="flex items-center gap-1 group/header">
             <span className="text-xs font-medium">{field.name}</span>
@@ -263,12 +270,11 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
             />
           </div>
         ),
-        size: field.width || 150,
         cell: ({ row }) => (
           <CellRenderer
             value={row.original.data[field.name]}
             field={field}
-            onSave={(val) => handleCellSave(row.original.id, field.name, val)}
+            onSave={(val: unknown) => handleCellSave(row.original.id, field.name, val)}
           />
         ),
       })
@@ -277,6 +283,9 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
       id: '_actions',
       header: '',
       size: 40,
+      minSize: 40,
+      maxSize: 60,
+      enableResizing: false,
       cell: ({ row }) => (
         <Button
           variant="ghost"
@@ -288,12 +297,36 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
         </Button>
       ),
     },
+    {
+      id: '_add_col',
+      header: () => (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 w-full"
+          onClick={() => setAddColOpen(true)}
+        >
+          <Plus className="w-3.5 h-3.5 mr-1" /> 添加列
+        </Button>
+      ),
+      size: 90,
+      minSize: 80,
+      maxSize: 120,
+      enableResizing: false,
+      cell: () => null,
+    },
   ];
 
   const table = useReactTable({
     data: rows,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    enableColumnResizing: true,
+    columnResizeMode: 'onChange',
+    defaultColumn: {
+      minSize: 60,
+      maxSize: 600,
+    },
   });
 
   return (
@@ -304,11 +337,6 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
           <span className="text-xs text-muted-foreground">
             {rows.length} 行 · {fields.length} 列
           </span>
-        </div>
-        <div className="flex items-center gap-1">
-          <Button variant="outline" size="sm" onClick={() => setAddColOpen(true)}>
-            <Settings className="w-3.5 h-3.5 mr-1" /> 添加列
-          </Button>
         </div>
       </div>
 
@@ -323,15 +351,23 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
           >
-            <table className="w-full text-sm">
+            <table
+              className="w-full text-sm table-fixed"
+              style={{ minWidth: table.getTotalSize() }}
+            >
+              <colgroup>
+                {table.getHeaderGroups()[0]?.headers.map((header) => (
+                  <col key={header.id} style={{ width: header.getSize() }} />
+                ))}
+              </colgroup>
               <thead className="sticky top-0 bg-muted/50 backdrop-blur-sm z-10">
                 {table.getHeaderGroups().map((hg) => (
                   <tr key={hg.id}>
                     {hg.headers.map((header) => (
                       <th
                         key={header.id}
-                        className="text-left px-2 py-1.5 border-b border-r last:border-r-0 font-normal"
-                        style={{ width: header.getSize() }}
+                        className="text-left px-2 py-1.5 border-b border-r last:border-r-0 font-normal relative select-none"
+                        style={{ width: header.getSize(), minWidth: header.getSize() }}
                       >
                         {header.isPlaceholder
                           ? null
@@ -339,6 +375,15 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
                               header.column.columnDef.header,
                               header.getContext()
                             )}
+                        {header.column.getCanResize() && (
+                          <div
+                            onMouseDown={header.getResizeHandler()}
+                            onTouchStart={header.getResizeHandler()}
+                            className="absolute right-0 top-0 h-full w-1.5 -mr-0.5 cursor-col-resize touch-none hover:bg-primary/30 active:bg-primary/40 rounded"
+                            style={{ userSelect: 'none' }}
+                            aria-label="调节列宽"
+                          />
+                        )}
                       </th>
                     ))}
                   </tr>
@@ -419,21 +464,25 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
                     </td>
                   </tr>
                 )}
+                <tr className="hover:bg-transparent">
+                  <td
+                    colSpan={columns.length}
+                    className="border-b-0 px-2 py-2"
+                  >
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={handleAddRow}
+                    >
+                      <Plus className="w-3.5 h-3.5 mr-1" /> 添加行
+                    </Button>
+                  </td>
+                </tr>
               </tbody>
             </table>
           </DndContext>
         )}
-      </div>
-
-      <div className="border-t px-2 py-2 shrink-0">
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full"
-          onClick={handleAddRow}
-        >
-          <Plus className="w-3.5 h-3.5 mr-1" /> 添加行
-        </Button>
       </div>
 
       <AddColumnDialog
