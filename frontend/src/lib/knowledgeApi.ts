@@ -24,6 +24,21 @@ export interface SchemaDefinition {
   fields: FieldDefinition[];
 }
 
+export interface PreprocessingRules {
+  remove_extra_whitespace?: boolean;
+  remove_urls?: boolean;
+}
+
+export interface VectorizationConfig {
+  model_id: string;
+  chunk_size: number;
+  chunk_overlap: number;
+  separators: string[];
+  preprocessing_rules?: PreprocessingRules;
+  parent_child_mode: boolean;
+  parent_chunk_size: number;
+}
+
 export interface KnowledgeNode {
   id: string;
   parent_id: string | null;
@@ -31,6 +46,7 @@ export interface KnowledgeNode {
   name: string;
   node_type: NodeType;
   vector_enabled: boolean;
+  vectorization_config?: VectorizationConfig | null;
   content: string | null;
   schema_definition: SchemaDefinition | null;
   description: string | null;
@@ -70,10 +86,14 @@ export interface DatasetRow {
 export interface SearchHit {
   node_id: string | null;
   row_id: string | null;
+  chunk_id?: string | null;
   node_name: string;
   node_type: string;
   content_preview: string;
   score: number | null;
+  fuzzy_score?: number | null;
+  vector_score?: number | null;
+  parent_content?: string | null;
 }
 
 // ==================== Request types ====================
@@ -96,6 +116,17 @@ export interface NodeUpdate {
   content?: string;
   schema_definition?: SchemaDefinition;
   vector_enabled?: boolean;
+  vectorization_config?: VectorizationConfig;
+}
+
+export interface VectorizationConfigUpdate {
+  model_id?: string;
+  chunk_size?: number;
+  chunk_overlap?: number;
+  separators?: string[];
+  preprocessing_rules?: PreprocessingRules;
+  parent_child_mode?: boolean;
+  parent_chunk_size?: number;
 }
 
 export interface NodeMove {
@@ -121,9 +152,14 @@ export interface RowListResponse {
   pages: number;
 }
 
+export type SearchMode = 'fuzzy' | 'vector' | 'hybrid';
+
 export interface SearchRequest {
   folder_ids?: string[];
   query?: string;
+  search_mode?: SearchMode;
+  fuzzy_weight?: number;
+  vector_weight?: number;
   top_k?: number;
   min_score?: number;
   page?: number;
@@ -133,6 +169,12 @@ export interface SearchRequest {
 export interface SearchResponse {
   hits: SearchHit[];
   total: number;
+}
+
+export interface EmbeddingModelInfo {
+  model_id: string;
+  dimensions: number;
+  provider: string;
 }
 
 // ==================== API ====================
@@ -171,6 +213,22 @@ export const knowledgeApi = {
 
   setVectorization: async (id: string, enabled: boolean): Promise<KnowledgeNode> => {
     const { data } = await api.post(`/api/v1/knowledge/nodes/${id}/vectorize`, { enabled });
+    return data;
+  },
+
+  updateVectorizationConfig: async (
+    nodeId: string,
+    config: VectorizationConfigUpdate
+  ): Promise<KnowledgeNode> => {
+    const { data } = await api.patch(
+      `/api/v1/knowledge/nodes/${nodeId}/vectorization-config`,
+      config
+    );
+    return data;
+  },
+
+  getEmbeddingModels: async (): Promise<{ models: EmbeddingModelInfo[] }> => {
+    const { data } = await api.get('/api/v1/knowledge/embedding-models');
     return data;
   },
 

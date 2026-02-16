@@ -243,3 +243,11 @@ def get_active_embedding_service(
     model_id = row.model_id if row else DEFAULT_EMBEDDING_MODEL
     model_config = get_model_config(model_id)
     return EmbeddingService(model_config), model_config
+
+
+def get_embedding_service_by_model(
+    model_id: str,
+) -> tuple[EmbeddingService, EmbeddingModelConfig]:
+    """Get embedding service for a specific model_id."""
+    model_config = get_model_config(model_id)
+    return EmbeddingService(model_config), model_config

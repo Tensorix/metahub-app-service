@@ -13,7 +13,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { knowledgeApi } from '@/lib/knowledgeApi';
 import type { NodeTreeItem, KnowledgeNode, NodeType } from '@/lib/knowledgeApi';
-import { KnowledgeTree, DocumentEditor, DatasetView, FolderDetail } from '@/components/knowledge';
+import { KnowledgeTree, DocumentEditor, DatasetView, FolderDetail, KnowledgeSearchPanel } from '@/components/knowledge';
 
 export default function Knowledge() {
   const { toast } = useToast();
@@ -167,6 +167,7 @@ export default function Knowledge() {
               if (treeNode) handleToggleVector(treeNode);
             }}
             onCreate={(type) => handleCreate(selectedNode.id, type)}
+            onConfigUpdate={handleNodeUpdate}
           />
         );
       case 'document':
@@ -179,10 +180,20 @@ export default function Knowledge() {
   };
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Left: Tree */}
-      <div className="w-64 shrink-0 border-r bg-card flex flex-col">
-        <KnowledgeTree
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Search bar */}
+      <div className="shrink-0 px-4 py-3 border-b bg-card">
+        <KnowledgeSearchPanel
+          folderIds={selectedId && findTreeNode(tree, selectedId)?.node_type === 'folder'
+            ? [selectedId]
+            : undefined}
+          onSelectNode={setSelectedId}
+        />
+      </div>
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {/* Left: Tree */}
+        <div className="w-64 shrink-0 border-r bg-card flex flex-col overflow-hidden">
+          <KnowledgeTree
           items={tree}
           selectedId={selectedId}
           onSelect={handleSelect}
@@ -191,11 +202,12 @@ export default function Knowledge() {
           onDelete={setDeleteTarget}
           onToggleVector={handleToggleVector}
         />
-      </div>
+        </div>
 
-      {/* Right: Content */}
-      <div className="flex-1 min-w-0 overflow-hidden">
-        {renderContent()}
+        {/* Right: Content */}
+        <div className="flex-1 min-w-0 overflow-hidden">
+          {renderContent()}
+        </div>
       </div>
 
       {/* Delete confirmation */}

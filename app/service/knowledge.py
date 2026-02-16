@@ -25,16 +25,18 @@ from app.schema.knowledge import (
     SortSpec,
     SchemaDefinition,
     SearchHit,
+    VectorizationConfig,
 )
-from app.service.embedding import get_active_embedding_service
+from app.service.embedding import (
+    get_active_embedding_service,
+    get_embedding_service_by_model,
+)
+from app.service.chunking import chunk_text_with_config
 
 
 # ---------------------------------------------------------------------------
 # Chunking helpers
 # ---------------------------------------------------------------------------
-
-DEFAULT_CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 100
 
 
 def extract_text_from_tiptap_json(content: str) -> str:
@@ -67,20 +69,9 @@ def extract_text_from_tiptap_json(content: str) -> str:
         return text
 
 
-def chunk_text(text: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> list[str]:
-    """Split text into overlapping chunks for embedding."""
-    if not text or len(text.strip()) < 2:
-        return []
-    text = text.strip()
-    chunks: list[str] = []
-    start = 0
-    while start < len(text):
-        end = min(start + chunk_size, len(text))
-        chunk = text[start:end]
-        if chunk.strip():
-            chunks.append(chunk)
-        start = end - CHUNK_OVERLAP if end < len(text) else len(text)
-    return chunks
+def _default_vectorization_config() -> VectorizationConfig:
+    """Return default vectorization config when folder has none."""
+    return VectorizationConfig()
 
 
 def serialize_row_data(data: dict) -> str:
@@ -462,7 +453,9 @@ class KnowledgeService:
         db.flush()
 
         if self._is_vectorized(db, dataset):
-            self._embed_row(db, row, dataset)
+            folder = self._get_vectorized_folder(db, dataset)
+            if folder:
+                self._embed_row(db, row, dataset, folder)
 
         db.commit()
         db.refresh(row)
@@ -489,7 +482,9 @@ class KnowledgeService:
                 delete(KnowledgeEmbedding).where(KnowledgeEmbedding.row_id == row.id)
             )
             db.flush()
-            self._embed_row(db, row, dataset)
+            folder = self._get_vectorized_folder(db, dataset)
+            if folder:
+                self._embed_row(db, row, dataset, folder)
 
         db.commit()
         db.refresh(row)
@@ -583,30 +578,67 @@ class KnowledgeService:
     # Embedding
     # ------------------------------------------------------------------
 
-    def _embed_document(self, db: Session, node: KnowledgeNode) -> None:
+    def _get_folder_config(self, folder: KnowledgeNode) -> VectorizationConfig:
+        """Get vectorization config from folder, or defaults."""
+        if folder.vectorization_config and isinstance(
+            folder.vectorization_config, dict
+        ):
+            try:
+                return VectorizationConfig.model_validate(
+                    folder.vectorization_config
+                )
+            except Exception:
+                pass
+        return _default_vectorization_config()
+
+    def _embed_document(
+        self, db: Session, node: KnowledgeNode, folder: KnowledgeNode
+    ) -> None:
         """Generate and store embeddings for a document node."""
         if node.node_type != "document" or not node.content:
             return
         plain_text = extract_text_from_tiptap_json(node.content)
-        texts = chunk_text(plain_text)
-        if not texts:
+        config = self._get_folder_config(folder)
+        chunk_items = chunk_text_with_config(plain_text, config)
+        if not chunk_items:
             return
-        self._store_embeddings(db, texts, node_id=node.id)
+        texts = [c["text"] for c in chunk_items]
+        parent_texts = [c.get("parent_text") for c in chunk_items]
+        self._store_embeddings(
+            db,
+            texts,
+            node_id=node.id,
+            model_id=config.model_id,
+            parent_texts=parent_texts,
+        )
 
     def _re_embed_document(self, db: Session, node: KnowledgeNode) -> None:
+        folder = self._get_vectorized_folder(db, node)
+        if not folder:
+            return
         db.execute(
             delete(KnowledgeEmbedding).where(KnowledgeEmbedding.node_id == node.id)
         )
         db.flush()
-        self._embed_document(db, node)
+        self._embed_document(db, node, folder)
 
     def _embed_row(
-        self, db: Session, row: DatasetRow, dataset: KnowledgeNode
+        self,
+        db: Session,
+        row: DatasetRow,
+        dataset: KnowledgeNode,
+        folder: KnowledgeNode,
     ) -> None:
         text = serialize_row_data(row.data)
         if not text:
             return
-        self._store_embeddings(db, [text], row_id=row.id)
+        config = self._get_folder_config(folder)
+        self._store_embeddings(
+            db,
+            [text],
+            row_id=row.id,
+            model_id=config.model_id,
+        )
 
     def _store_embeddings(
         self,
@@ -614,26 +646,61 @@ class KnowledgeService:
         texts: list[str],
         node_id: Optional[UUID] = None,
         row_id: Optional[UUID] = None,
+        model_id: Optional[str] = None,
+        parent_texts: Optional[list[Optional[str]]] = None,
     ) -> None:
         try:
-            embedding_svc, model_config = get_active_embedding_service(db, "document")
+            if model_id:
+                embedding_svc, model_config = get_embedding_service_by_model(
+                    model_id
+                )
+            else:
+                embedding_svc, model_config = get_active_embedding_service(
+                    db, "document"
+                )
         except Exception as e:
             logger.error(f"Failed to get embedding service: {e}")
             return
+        parent_texts = parent_texts or [None] * len(texts)
+        if len(parent_texts) < len(texts):
+            parent_texts = parent_texts + [None] * (len(texts) - len(parent_texts))
         try:
             embeddings = embedding_svc.generate_embeddings_batch(texts)
+            parent_cache: dict[str, UUID] = {}
             for i, (text, emb) in enumerate(zip(texts, embeddings)):
-                if emb:
-                    rec = KnowledgeEmbedding(
-                        node_id=node_id,
-                        row_id=row_id,
-                        model_id=model_config.model_id,
-                        embedding=emb,
-                        chunk_index=i,
-                        chunk_text=text,
-                        status="completed",
-                    )
-                    db.add(rec)
+                if not emb:
+                    continue
+                parent_id_val: Optional[UUID] = None
+                ptext = parent_texts[i] if i < len(parent_texts) else None
+                if node_id and ptext and ptext.strip():
+                    pkey = ptext[:200]
+                    if pkey not in parent_cache:
+                        parent_emb = embedding_svc.generate_embedding(ptext)
+                        if parent_emb:
+                            parent_rec = KnowledgeEmbedding(
+                                node_id=node_id,
+                                row_id=None,
+                                model_id=model_config.model_id,
+                                embedding=parent_emb,
+                                chunk_index=-1,
+                                chunk_text=ptext,
+                                status="completed",
+                            )
+                            db.add(parent_rec)
+                            db.flush()
+                            parent_cache[pkey] = parent_rec.id
+                    parent_id_val = parent_cache.get(pkey)
+                rec = KnowledgeEmbedding(
+                    node_id=node_id,
+                    row_id=row_id,
+                    parent_id=parent_id_val,
+                    model_id=model_config.model_id,
+                    embedding=emb,
+                    chunk_index=i,
+                    chunk_text=text,
+                    status="completed",
+                )
+                db.add(rec)
         except Exception as e:
             logger.error(f"Embedding generation failed: {e}")
 
@@ -702,7 +769,7 @@ class KnowledgeService:
         for doc in documents:
             total += 1
             try:
-                self._embed_document(db, doc)
+                self._embed_document(db, doc, folder)
                 processed += 1
             except Exception as e:
                 logger.error(f"Vectorize failed for document {doc.id}: {e}")
@@ -722,7 +789,7 @@ class KnowledgeService:
             for row in rows:
                 total += 1
                 try:
-                    self._embed_row(db, row, ds)
+                    self._embed_row(db, row, ds, folder)
                     processed += 1
                 except Exception as e:
                     logger.error(f"Vectorize failed for row {row.id}: {e}")
@@ -755,6 +822,8 @@ class KnowledgeService:
     # Search
     # ------------------------------------------------------------------
 
+    RRF_K = 60
+
     def search(
         self,
         db: Session,
@@ -762,25 +831,58 @@ class KnowledgeService:
         folder_ids: Optional[list[UUID]] = None,
         query: Optional[str] = None,
         filters: Optional[list[FilterCondition]] = None,
+        search_mode: str = "fuzzy",
+        fuzzy_weight: float = 0.4,
+        vector_weight: float = 0.6,
         top_k: int = 10,
         min_score: Optional[float] = None,
         page: int = 1,
         size: int = 20,
     ) -> tuple[list[SearchHit], int]:
-        """Hybrid search across vectorized knowledge content."""
-        if not query:
+        """Search across vectorized knowledge: fuzzy | vector | hybrid."""
+        if not query or not query.strip():
             return [], 0
 
-        try:
-            embedding_svc, model_config = get_active_embedding_service(db, "document")
-        except Exception:
+        all_node_ids, row_ids_in_scope = self._search_scope(db, user_id, folder_ids)
+        if not all_node_ids and not row_ids_in_scope:
             return [], 0
 
-        qvec = embedding_svc.generate_query_embedding(query)
-        if not qvec:
-            return [], 0
+        scope_sql, params = self._build_search_scope_sql(all_node_ids, row_ids_in_scope)
 
-        # Determine which folders to search
+        if search_mode == "fuzzy":
+            raw_results = self._knowledge_fuzzy_search(
+                db, query, scope_sql, params, top_k * 3
+            )
+        elif search_mode == "vector":
+            raw_results = self._knowledge_vector_search(
+                db, query, scope_sql, params, top_k * 3
+            )
+        else:
+            # hybrid
+            fuzzy_results = self._knowledge_fuzzy_search(
+                db, query, scope_sql, params, top_k * 3
+            )
+            vector_results = self._knowledge_vector_search(
+                db, query, scope_sql, params, top_k * 3
+            )
+            raw_results = self._rrf_fusion(
+                fuzzy_results, vector_results, fuzzy_weight, vector_weight, top_k
+            )
+
+        if min_score is not None:
+            raw_results = [r for r in raw_results if (r.get("score") or 0) >= min_score]
+
+        total = len(raw_results)
+        offset = (page - 1) * size
+        raw_results = raw_results[offset: offset + size]
+
+        hits = self._enrich_search_hits(db, raw_results)
+        return hits, total
+
+    def _search_scope(
+        self, db: Session, user_id: UUID, folder_ids: Optional[list[UUID]]
+    ) -> tuple[list[UUID], list[UUID]]:
+        """Compute node_ids and row_ids in scope."""
         if folder_ids:
             all_node_ids: list[UUID] = []
             for fid in folder_ids:
@@ -794,90 +896,193 @@ class KnowledgeService:
                     )
                 ).all()
             )
+        row_ids_in_scope = []
+        if all_node_ids:
+            row_ids_in_scope = list(
+                db.scalars(
+                    select(DatasetRow.id).where(
+                        DatasetRow.dataset_id.in_(all_node_ids),
+                        DatasetRow.is_deleted == False,  # noqa: E712
+                    )
+                ).all()
+            )
+        return all_node_ids, row_ids_in_scope
 
-        if not all_node_ids:
-            return [], 0
-
-        # Get row IDs under these nodes
-        row_ids_in_scope = list(
-            db.scalars(
-                select(DatasetRow.id).where(
-                    DatasetRow.dataset_id.in_(all_node_ids),
-                    DatasetRow.is_deleted == False,  # noqa: E712
-                )
-            ).all()
-        )
-
-        vec_str = "[" + ",".join(map(str, qvec)) + "]"
-        cast_expr = model_config.index_cast
-
-        from sqlalchemy import text as sa_text
-
-        # Build scope conditions
+    def _build_search_scope_sql(
+        self,
+        all_node_ids: list[UUID],
+        row_ids_in_scope: list[UUID],
+    ) -> tuple[str, dict[str, Any]]:
         scope_parts = []
-        params: dict[str, Any] = {
-            "vec": vec_str,
-            "model_id": model_config.model_id,
-            "limit": top_k,
-        }
-        for i, nid in enumerate(all_node_ids):
-            params[f"n{i}"] = nid
-        node_placeholders = ", ".join(f":n{i}" for i in range(len(all_node_ids)))
-
-        if node_placeholders:
+        params: dict[str, Any] = {}
+        if all_node_ids:
+            for i, nid in enumerate(all_node_ids):
+                params[f"n{i}"] = nid
+            node_placeholders = ", ".join(f":n{i}" for i in range(len(all_node_ids)))
             scope_parts.append(f"e.node_id IN ({node_placeholders})")
         if row_ids_in_scope:
             for i, rid in enumerate(row_ids_in_scope):
                 params[f"r{i}"] = rid
             row_placeholders = ", ".join(f":r{i}" for i in range(len(row_ids_in_scope)))
             scope_parts.append(f"e.row_id IN ({row_placeholders})")
-
         scope_sql = " OR ".join(scope_parts) if scope_parts else "FALSE"
+        return scope_sql, params
 
+    def _knowledge_fuzzy_search(
+        self,
+        db: Session,
+        query: str,
+        scope_sql: str,
+        params: dict[str, Any],
+        limit: int,
+    ) -> list[dict]:
+        from sqlalchemy import text as sa_text
+
+        params = {**params, "query": query, "threshold": 0.1, "limit": limit}
         sql = sa_text(f"""
-            SELECT e.node_id, e.row_id, e.chunk_text,
-                   (1 - (e.embedding::{cast_expr} <=> :vec::{cast_expr})) AS score
+            SELECT e.id, e.node_id, e.row_id, e.chunk_text, e.parent_id,
+                   similarity(e.chunk_text, :query) AS fuzzy_score
+            FROM knowledge_embedding e
+            WHERE ({scope_sql})
+              AND e.status = 'completed'
+              AND similarity(e.chunk_text, :query) > :threshold
+            ORDER BY fuzzy_score DESC
+            LIMIT :limit
+        """)
+        rows = db.execute(sql, params).fetchall()
+        return [
+            {
+                "chunk_id": r.id,
+                "node_id": r.node_id,
+                "row_id": r.row_id,
+                "chunk_text": r.chunk_text,
+                "parent_id": r.parent_id,
+                "score": float(r.fuzzy_score),
+                "fuzzy_score": float(r.fuzzy_score),
+                "vector_score": 0.0,
+            }
+            for r in rows
+        ]
+
+    def _knowledge_vector_search(
+        self,
+        db: Session,
+        query: str,
+        scope_sql: str,
+        params: dict[str, Any],
+        limit: int,
+    ) -> list[dict]:
+        from sqlalchemy import text as sa_text
+
+        try:
+            embedding_svc, model_config = get_active_embedding_service(db, "document")
+        except Exception:
+            return []
+        qvec = embedding_svc.generate_query_embedding(query)
+        if not qvec:
+            return []
+
+        vec_str = "[" + ",".join(map(str, qvec)) + "]"
+        cast_expr = model_config.index_cast
+        params = {
+            **params,
+            "vec": vec_str,
+            "model_id": model_config.model_id,
+            "threshold": 0.1,
+            "limit": limit,
+        }
+        sql = sa_text(f"""
+            SELECT e.id, e.node_id, e.row_id, e.chunk_text, e.parent_id,
+                   (1 - (e.embedding::{cast_expr} <=> :vec::{cast_expr})) AS vector_score
             FROM knowledge_embedding e
             WHERE ({scope_sql})
               AND e.model_id = :model_id
               AND e.status = 'completed'
+              AND (1 - (e.embedding::{cast_expr} <=> :vec::{cast_expr})) > :threshold
             ORDER BY e.embedding::{cast_expr} <=> :vec::{cast_expr}
             LIMIT :limit
         """)
-        raw_rows = db.execute(sql, params).fetchall()
+        rows = db.execute(sql, params).fetchall()
+        return [
+            {
+                "chunk_id": r.id,
+                "node_id": r.node_id,
+                "row_id": r.row_id,
+                "chunk_text": r.chunk_text,
+                "parent_id": r.parent_id,
+                "score": float(r.vector_score),
+                "fuzzy_score": 0.0,
+                "vector_score": float(r.vector_score),
+            }
+            for r in rows
+        ]
 
-        if min_score is not None:
-            raw_rows = [r for r in raw_rows if r.score >= min_score]
+    def _rrf_fusion(
+        self,
+        list_a: list[dict],
+        list_b: list[dict],
+        weight_a: float,
+        weight_b: float,
+        top_k: int,
+    ) -> list[dict]:
+        k = self.RRF_K
+        id_key = "chunk_id"
+        ranks_a = {str(r[id_key]): rank for rank, r in enumerate(list_a, start=1)}
+        ranks_b = {str(r[id_key]): rank for rank, r in enumerate(list_b, start=1)}
+        all_results = {}
+        for r in list_a + list_b:
+            rid = str(r[id_key])
+            if rid not in all_results:
+                all_results[rid] = dict(r)
+        scored = []
+        for rid, result in all_results.items():
+            rank_a = ranks_a.get(rid)
+            rank_b = ranks_b.get(rid)
+            rrf_a = (1.0 / (k + rank_a)) if rank_a else 0.0
+            rrf_b = (1.0 / (k + rank_b)) if rank_b else 0.0
+            result["score"] = weight_a * rrf_a + weight_b * rrf_b
+            result["fuzzy_score"] = list_a[rank_a - 1]["fuzzy_score"] if rank_a else 0.0
+            result["vector_score"] = (
+                list_b[rank_b - 1]["vector_score"] if rank_b else 0.0
+            )
+            scored.append(result)
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:top_k]
 
-        total = len(raw_rows)
-        offset = (page - 1) * size
-        raw_rows = raw_rows[offset: offset + size]
-
+    def _enrich_search_hits(self, db: Session, raw_results: list[dict]) -> list[SearchHit]:
         hits: list[SearchHit] = []
-        for r in raw_rows:
+        for r in raw_results:
             node_name = ""
             node_type = ""
-            if r.node_id:
-                n = db.get(KnowledgeNode, r.node_id)
+            parent_content: Optional[str] = None
+            if r.get("node_id"):
+                n = db.get(KnowledgeNode, r["node_id"])
                 if n:
                     node_name = n.name
                     node_type = n.node_type
-            elif r.row_id:
-                row_obj = db.get(DatasetRow, r.row_id)
+            elif r.get("row_id"):
+                row_obj = db.get(DatasetRow, r["row_id"])
                 if row_obj:
                     ds = db.get(KnowledgeNode, row_obj.dataset_id)
                     if ds:
                         node_name = ds.name
                         node_type = "dataset_row"
+            if r.get("parent_id"):
+                parent_emb = db.get(KnowledgeEmbedding, r["parent_id"])
+                if parent_emb and parent_emb.chunk_text:
+                    parent_content = parent_emb.chunk_text[:500]
             hits.append(
                 SearchHit(
-                    node_id=r.node_id,
-                    row_id=r.row_id,
+                    node_id=r.get("node_id"),
+                    row_id=r.get("row_id"),
+                    chunk_id=r.get("chunk_id"),
                     node_name=node_name,
                     node_type=node_type,
-                    content_preview=r.chunk_text[:200] if r.chunk_text else "",
-                    score=r.score,
+                    content_preview=(r.get("chunk_text") or "")[:200],
+                    score=r.get("score"),
+                    fuzzy_score=r.get("fuzzy_score"),
+                    vector_score=r.get("vector_score"),
+                    parent_content=parent_content,
                 )
             )
-
-        return hits, total
+        return hits

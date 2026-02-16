@@ -18,6 +18,8 @@ from app.schema.knowledge import (
     NodeResponse,
     TreeResponse,
     VectorizeRequest,
+    VectorizationConfig,
+    VectorizationConfigUpdate,
     RowCreate,
     RowUpdate,
     RowResponse,
@@ -34,6 +36,26 @@ from app.service.background_task import BackgroundTaskService, run_task_in_backg
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 svc = KnowledgeService()
+
+
+# ========================== Embedding Models ==========================
+
+
+@router.get("/embedding-models", summary="List available embedding models")
+def list_embedding_models() -> dict:
+    """Return available embedding model IDs and metadata."""
+    from app.config.embedding import EMBEDDING_MODELS
+
+    models = [
+        {
+            "model_id": m.model_id,
+            "dimensions": m.dimensions,
+            "provider": m.provider,
+        }
+        for m in EMBEDDING_MODELS.values()
+    ]
+    return {"models": models}
+
 
 # Upload directory for knowledge base images (project root)
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -171,6 +193,49 @@ def move_node(
         return NodeResponse.model_validate(node)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.patch(
+    "/nodes/{node_id}/vectorization-config",
+    response_model=NodeResponse,
+    summary="Update vectorization config",
+)
+def update_vectorization_config(
+    node_id: UUID,
+    data: VectorizationConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update vectorization config for a folder. Requires re-vectorization to take effect."""
+    node = svc.get_node(db, node_id, current_user.id)
+    if not node:
+        raise HTTPException(404, "Node not found")
+    if node.node_type != "folder":
+        raise HTTPException(400, "Vectorization config can only be set on folders")
+
+    current = (
+        VectorizationConfig.model_validate(node.vectorization_config)
+        if node.vectorization_config
+        else VectorizationConfig()
+    )
+    update_data = data.model_dump(exclude_none=True)
+    if "preprocessing_rules" in update_data and update_data["preprocessing_rules"]:
+        pr = update_data["preprocessing_rules"]
+        if isinstance(pr, dict):
+            current.preprocessing_rules = current.preprocessing_rules.model_copy(
+                update=pr
+            )
+        else:
+            current.preprocessing_rules = pr
+        del update_data["preprocessing_rules"]
+    merged = current.model_copy(update=update_data)
+    node = svc.update_node(
+        db,
+        node_id,
+        current_user.id,
+        NodeUpdate(vectorization_config=merged),
+    )
+    return NodeResponse.model_validate(node)
 
 
 # ========================== Vectorize ==========================
@@ -385,6 +450,9 @@ def search_knowledge(
         folder_ids=data.folder_ids,
         query=data.query,
         filters=data.filters,
+        search_mode=data.search_mode,
+        fuzzy_weight=data.fuzzy_weight,
+        vector_weight=data.vector_weight,
         top_k=data.top_k,
         min_score=data.min_score,
         page=data.page,

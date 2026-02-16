@@ -52,6 +52,47 @@ class SchemaDefinition(BaseModel):
 
 
 # =============================================================================
+# Vectorization Config
+# =============================================================================
+
+
+class PreprocessingRules(BaseModel):
+    """Text preprocessing rules before chunking."""
+
+    remove_extra_whitespace: bool = True
+    remove_urls: bool = False
+
+
+class VectorizationConfig(BaseModel):
+    """Folder-level vectorization settings."""
+
+    model_id: str = "openai-3-large"
+    chunk_size: int = Field(1000, ge=100, le=10000)
+    chunk_overlap: int = Field(100, ge=0, le=1000)
+    separators: list[str] = Field(
+        default_factory=lambda: ["\n\n", "\n"],
+        description="Split separators (try in order)",
+    )
+    preprocessing_rules: PreprocessingRules = Field(
+        default_factory=PreprocessingRules
+    )
+    parent_child_mode: bool = False
+    parent_chunk_size: int = Field(2000, ge=200, le=20000)
+
+
+class VectorizationConfigUpdate(BaseModel):
+    """Partial update of vectorization config."""
+
+    model_id: Optional[str] = None
+    chunk_size: Optional[int] = Field(None, ge=100, le=10000)
+    chunk_overlap: Optional[int] = Field(None, ge=0, le=1000)
+    separators: Optional[list[str]] = None
+    preprocessing_rules: Optional[PreprocessingRules] = None
+    parent_child_mode: Optional[bool] = None
+    parent_chunk_size: Optional[int] = Field(None, ge=200, le=20000)
+
+
+# =============================================================================
 # Node CRUD
 # =============================================================================
 
@@ -84,6 +125,7 @@ class NodeUpdate(BaseModel):
     content: Optional[str] = None
     schema_definition: Optional[SchemaDefinition] = None
     vector_enabled: Optional[bool] = None
+    vectorization_config: Optional[VectorizationConfig] = None
 
 
 class NodeMove(BaseModel):
@@ -109,6 +151,7 @@ class NodeResponse(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None
     position: int = 0
+    vectorization_config: Optional[dict] = None
     metadata_: Optional[dict] = Field(
         None,
         alias="metadata",
@@ -266,15 +309,21 @@ class VectorizeRequest(BaseModel):
 
 
 class KnowledgeSearchRequest(BaseModel):
-    """Hybrid search: vector + structured filter."""
+    """Hybrid search: fuzzy + vector + structured filter."""
 
     folder_ids: Optional[list[UUID]] = Field(
         None, description="Limit to these folders (null = all)"
     )
     query: Optional[str] = Field(
-        None, description="Natural language query for vector search"
+        None, description="Search query (required for fuzzy/vector/hybrid)"
     )
     filters: Optional[list[FilterCondition]] = None
+    search_mode: Literal["fuzzy", "vector", "hybrid"] = Field(
+        "fuzzy",
+        description="fuzzy | vector | hybrid",
+    )
+    fuzzy_weight: float = Field(0.4, ge=0.0, le=1.0)
+    vector_weight: float = Field(0.6, ge=0.0, le=1.0)
     top_k: int = Field(10, ge=1, le=100)
     min_score: Optional[float] = Field(None, ge=0.0, le=1.0)
     page: int = Field(1, ge=1)
@@ -286,10 +335,14 @@ class SearchHit(BaseModel):
 
     node_id: Optional[UUID] = None
     row_id: Optional[UUID] = None
+    chunk_id: Optional[UUID] = None
     node_name: str = ""
     node_type: str = ""
     content_preview: str = ""
     score: Optional[float] = None
+    fuzzy_score: Optional[float] = None
+    vector_score: Optional[float] = None
+    parent_content: Optional[str] = None
 
 
 class KnowledgeSearchResponse(BaseModel):

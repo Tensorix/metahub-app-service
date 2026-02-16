@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from app.db.model.knowledge_node import KnowledgeNode
 
 
-class KnowledgeEmbedding(Base):
+class KnowledgeEmbedding(Base):  # type: ignore[name-defined]
     """Vector embedding for a chunk of knowledge content.
 
     Can reference either a KnowledgeNode (document content) or a DatasetRow.
@@ -44,6 +44,12 @@ class KnowledgeEmbedding(Base):
         nullable=True,
         index=True,
         comment="Source dataset row (for structured data)",
+    )
+    parent_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("knowledge_embedding.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="Parent chunk ID (for parent-child mode)",
     )
     model_id: Mapped[str] = mapped_column(
         String(100), nullable=False, comment="Embedding model ID"
@@ -81,10 +87,16 @@ class KnowledgeEmbedding(Base):
         back_populates="embeddings",
         foreign_keys=[row_id],
     )
+    parent: Mapped[Optional["KnowledgeEmbedding"]] = relationship(
+        "KnowledgeEmbedding",
+        remote_side="KnowledgeEmbedding.id",
+        foreign_keys=[parent_id],
+    )
 
     __table_args__ = (
         Index("idx_ke_node", "node_id"),
         Index("idx_ke_row", "row_id"),
+        Index("idx_ke_parent", "parent_id"),
         Index("idx_ke_model", "model_id"),
         Index(
             "idx_ke_model_status",

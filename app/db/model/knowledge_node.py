@@ -58,6 +58,11 @@ class KnowledgeNode(Base):
     )
 
     # --- folder fields ---
+    vectorization_config: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Vectorization settings (folder only): model_id, chunk_size, separators, etc.",
+    )
     vector_enabled: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
