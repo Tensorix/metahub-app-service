@@ -1,4 +1,5 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import type { Message, Topic } from '@/lib/api';
 import type { VirtualTopic } from '@/lib/virtualTopic';
 import { useChatStore } from '@/store/chat';
@@ -25,10 +26,6 @@ const TOPIC_SIDEBAR_MIN_WIDTH = 200;
 const TOPIC_SIDEBAR_MAX_WIDTH = 400;
 const TOPIC_SIDEBAR_DEFAULT_WIDTH = 280;
 
-// 文件系统侧边栏宽度常量
-const FILE_EXPLORER_MIN_WIDTH = 280;
-const FILE_EXPLORER_MAX_WIDTH = 600;
-const FILE_EXPLORER_DEFAULT_WIDTH = 400;
 
 interface MessageAreaProps {
   onBack?: () => void;
@@ -54,6 +51,8 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   const setRightDrawerOpen = useChatStore((state) => state.setRightDrawerOpen);
   const topicSidebarCollapsed = useChatStore((state) => state.topicSidebarCollapsed);
   const setTopicSidebarCollapsed = useChatStore((state) => state.setTopicSidebarCollapsed);
+  const fileExplorerOpen = useChatStore((state) => state.fileExplorerOpen);
+  const setFileExplorerOpen = useChatStore((state) => state.setFileExplorerOpen);
   const updateSession = useChatStore((state) => state.updateSession);
   
   // AI 聊天 hook
@@ -69,22 +68,14 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   
   // 话题侧边栏可调整宽度
   const [topicSidebarWidth, setTopicSidebarWidth] = useState(TOPIC_SIDEBAR_DEFAULT_WIDTH);
+  // 拖拽调整大小时禁用过渡，避免动画导致右侧异常收缩
+  const [topicSidebarResizing, setTopicSidebarResizing] = useState(false);
   
-  // 文件系统侧边栏状态
-  const [fileExplorerOpen, setFileExplorerOpen] = useState(false);
-  const [fileExplorerWidth, setFileExplorerWidth] = useState(FILE_EXPLORER_DEFAULT_WIDTH);
   
   const handleTopicSidebarResize = useCallback((delta: number) => {
     // 话题侧边栏在右侧，拖拽方向相反
     setTopicSidebarWidth((prev) =>
       Math.min(TOPIC_SIDEBAR_MAX_WIDTH, Math.max(TOPIC_SIDEBAR_MIN_WIDTH, prev - delta))
-    );
-  }, []);
-
-  const handleFileExplorerResize = useCallback((delta: number) => {
-    // 文件系统侧边栏在右侧，拖拽方向相反
-    setFileExplorerWidth((prev) =>
-      Math.min(FILE_EXPLORER_MAX_WIDTH, Math.max(FILE_EXPLORER_MIN_WIDTH, prev - delta))
     );
   }, []);
 
@@ -277,8 +268,11 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
               <Button
                 size="icon"
                 variant={fileExplorerOpen ? "secondary" : "ghost"}
-                onClick={() => setFileExplorerOpen(!fileExplorerOpen)}
-                title={fileExplorerOpen ? "关闭文件系统" : "打开文件系统"}
+                onClick={() => {
+                  const next = !fileExplorerOpen;
+                  setFileExplorerOpen(next);
+                }}
+                title={fileExplorerOpen ? "关闭文件系统" : "在消息区域打开文件系统"}
               >
                 <FolderOpen className="h-5 w-5" />
               </Button>
@@ -299,6 +293,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
                 size="icon"
                 variant="ghost"
                 onClick={() => setRightDrawerOpen(true)}
+                title="话题列表"
               >
                 <Hash className="h-5 w-5" />
               </Button>
@@ -319,8 +314,34 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
       </div>
 
       <div className="flex-1 flex flex-row min-h-0">
-        <div className="flex-1 flex flex-col min-w-0 h-full relative group/message-area">
-          {/* 消息列表 */}
+        <div className="flex-1 flex flex-col min-w-0 h-full relative group/message-area overflow-hidden">
+          {/* 消息列表 或 文件系统 - 点击文件图标时切换，带滑入滑出动画 */}
+          <AnimatePresence mode="wait" initial={false}>
+            {currentSession?.type === 'ai' && fileExplorerOpen && currentSessionId ? (
+              <motion.div
+                key="file-explorer"
+                initial={{ opacity: 0, x: 32 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 32 }}
+                transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
+                className="flex-1 flex flex-col min-h-0 absolute inset-0"
+              >
+                <FileExplorer
+                  sessionId={currentSessionId}
+                  topicId={currentTopicId ?? undefined}
+                  className="flex-1 min-h-0"
+                  onClose={() => setFileExplorerOpen(false)}
+                />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="message-list"
+                initial={{ opacity: 0, x: -24 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -24 }}
+                transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
+                className="flex-1 flex flex-col min-h-0 absolute inset-0"
+              >
           <div
             ref={messageContainerRef as React.RefObject<HTMLDivElement>}
             className={cn(
@@ -388,8 +409,8 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
           </div>
         </div>
 
-          {/* 浮动话题切换器 - 固定在消息区域右侧 */}
-          {currentSession && displayMode === 'paged' && (
+          {/* 浮动话题切换器 - 固定在消息区域右侧（仅消息模式显示） */}
+          {currentSession && displayMode === 'paged' && !fileExplorerOpen && (
             <div className={cn(
               "absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2 z-20 transition-all duration-300 group/indicator",
               "opacity-30 hover:opacity-100",
@@ -453,7 +474,8 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
             </div>
           )}
 
-        {/* 输入框 */}
+        {/* 输入框 - 文件系统模式时隐藏 */}
+        {!fileExplorerOpen && (
         <div className="border-t px-4 py-3">
           {currentSession?.type === 'ai' ? (
             <MessageInput
@@ -469,13 +491,18 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
             />
           )}
         </div>
+        )}
+              </motion.div>
+            )}
+          </AnimatePresence>
       </div>
 
-      {/* 右侧：话题列表 (仅桌面端) - 参考侧边栏的滑入滑出动画 */}
+      {/* 右侧：话题列表 (仅桌面端) */}
       {isDesktop && (
         <div
           className={cn(
-            'shrink-0 flex overflow-hidden transition-[width] duration-300 ease-in-out',
+            'shrink-0 flex overflow-hidden',
+            !topicSidebarResizing && 'transition-[width] duration-300 ease-in-out',
             topicSidebarCollapsed && 'pointer-events-none'
           )}
           style={{ width: topicSidebarCollapsed ? 0 : topicSidebarWidth + 8 }}
@@ -483,6 +510,8 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
           <ResizableHandle
             direction="horizontal"
             onResize={handleTopicSidebarResize}
+            onDragStart={() => setTopicSidebarResizing(true)}
+            onDragEnd={() => setTopicSidebarResizing(false)}
           />
           <div
             className="shrink-0 overflow-hidden border-l bg-background"
@@ -491,27 +520,6 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
             <TopicSidebar className="h-full" style={{ width: topicSidebarWidth }} />
           </div>
         </div>
-      )}
-      
-      {/* 右侧：文件系统面板 (仅 AI 会话) */}
-      {currentSession?.type === 'ai' && fileExplorerOpen && currentSessionId && (
-        <>
-          <ResizableHandle
-            direction="horizontal"
-            onResize={handleFileExplorerResize}
-          />
-          <div
-            className="shrink-0 overflow-hidden"
-            style={{ width: fileExplorerWidth }}
-          >
-            <FileExplorer
-              sessionId={currentSessionId}
-              topicId={currentTopicId ?? undefined}
-              className="h-full"
-              onClose={() => setFileExplorerOpen(false)}
-            />
-          </div>
-        </>
       )}
       </div>
       {/* Session Settings Dialog */}

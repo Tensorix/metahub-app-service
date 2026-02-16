@@ -5,12 +5,18 @@ interface ResizableHandleProps {
   onResize: (delta: number) => void;
   direction?: 'horizontal' | 'vertical';
   className?: string;
+  /** 拖拽开始时调用，可用于禁用父级过渡动画 */
+  onDragStart?: () => void;
+  /** 拖拽结束时调用 */
+  onDragEnd?: () => void;
 }
 
 export function ResizableHandle({
   onResize,
   direction = 'horizontal',
   className,
+  onDragStart,
+  onDragEnd,
 }: ResizableHandleProps) {
   const [isDragging, setIsDragging] = React.useState(false);
   const startPosRef = React.useRef(0);
@@ -20,8 +26,9 @@ export function ResizableHandle({
       e.preventDefault();
       setIsDragging(true);
       startPosRef.current = direction === 'horizontal' ? e.clientX : e.clientY;
+      onDragStart?.();
     },
-    [direction]
+    [direction, onDragStart]
   );
 
   const handleTouchStart = React.useCallback(
@@ -29,8 +36,9 @@ export function ResizableHandle({
       setIsDragging(true);
       const touch = e.touches[0];
       startPosRef.current = direction === 'horizontal' ? touch.clientX : touch.clientY;
+      onDragStart?.();
     },
-    [direction]
+    [direction, onDragStart]
   );
 
   React.useEffect(() => {
@@ -53,6 +61,7 @@ export function ResizableHandle({
 
     const handleEnd = () => {
       setIsDragging(false);
+      onDragEnd?.();
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -72,7 +81,7 @@ export function ResizableHandle({
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-  }, [isDragging, direction, onResize]);
+  }, [isDragging, direction, onResize, onDragEnd]);
 
   return (
     <div
