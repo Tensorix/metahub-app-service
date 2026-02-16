@@ -438,6 +438,7 @@ async def write_file(
     session_id: UUID,
     request: FileWriteRequest,
     topic_id: Optional[UUID] = Query(None, description="Topic ID for root files"),
+    create_only: bool = Query(False, description="If True, fail with 409 when file already exists"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -465,6 +466,12 @@ async def write_file(
     try:
         existing = await store.aget(namespace, store_key)
         created = existing is None
+
+        if create_only and existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"File already exists: {request.path}",
+            )
 
         now = datetime.now(timezone.utc)
         content_lines = request.content.split("\n") if request.content else []
@@ -533,7 +540,10 @@ async def mkdir(
         existing = await store.aget(namespace, store_key)
         if existing:
             if isinstance(existing.value, dict) and existing.value.get("__type") == "directory":
-                return MkdirResponse(path=path, created=False)
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Directory already exists: {path}",
+                )
             raise HTTPException(
                 status_code=400,
                 detail=f"Path exists and is not a directory: {path}",
