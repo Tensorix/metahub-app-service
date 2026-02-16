@@ -86,3 +86,40 @@ class FileEvent(BaseModel):
     path: str = Field(..., description="Affected file path")
     session_id: str = Field(..., description="Session ID")
     timestamp: datetime = Field(..., description="Event timestamp")
+
+
+class MkdirRequest(BaseModel):
+    """Request for creating a directory."""
+
+    path: str = Field(..., description="Directory path, e.g. /workspace/reports")
+
+
+class MkdirResponse(BaseModel):
+    """Response after creating a directory."""
+
+    path: str = Field(..., description="Created directory path")
+    created: bool = Field(..., description="Whether the directory was newly created")
+
+
+class MoveRequest(BaseModel):
+    """Request for moving/renaming a file or folder."""
+
+    source: str = Field(..., description="Source path")
+    destination: str = Field(..., description="Destination path")
+
+
+class MoveResponse(BaseModel):
+    """Response after moving files."""
+
+    source: str = Field(..., description="Source path")
+    destination: str = Field(..., description="Destination path")
+    moved_count: int = Field(..., description="Number of files moved (including children)")
+
+
+class UploadResponse(BaseModel):
+    """Response after uploading a file."""
+
+    path: str = Field(..., description="Uploaded file path")
+    size: int = Field(..., description="File size in bytes")
+    created: bool = Field(..., description="Whether the file was newly created")
+    modified_at: datetime = Field(..., description="Modification time")

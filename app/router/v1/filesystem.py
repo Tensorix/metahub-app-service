@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -31,11 +31,16 @@ from app.db.model.user import User
 from app.agent import AgentFactory
 from app.schema.filesystem import (
     FileInfo,
+    FileDeleteResponse,
     FileListResponse,
     FileReadResponse,
     FileWriteRequest,
     FileWriteResponse,
-    FileDeleteResponse,
+    MkdirRequest,
+    MkdirResponse,
+    MoveRequest,
+    MoveResponse,
+    UploadResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -212,6 +217,25 @@ def _parse_file_info(
     """Parse store item into FileInfo with lifecycle metadata."""
     display_path = path_prefix + key if path_prefix else key
     name = display_path.rsplit("/", 1)[-1] if "/" in display_path else display_path
+
+    # Directory marker (empty folder persisted with __type: directory)
+    if isinstance(value, dict) and value.get("__type") == "directory":
+        created_at = None
+        if "created_at" in value:
+            try:
+                created_at = datetime.fromisoformat(value["created_at"].replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+        return FileInfo(
+            path=display_path,
+            name=name,
+            is_dir=True,
+            size=None,
+            modified_at=None,
+            created_at=created_at,
+            lifecycle=lifecycle,
+            readonly=False,
+        )
 
     # Get content from value
     if isinstance(value, dict):
@@ -473,17 +497,251 @@ async def write_file(
         raise HTTPException(status_code=500, detail=f"Failed to write file: {str(e)}")
 
 
+@router.post("/sessions/{session_id}/files/mkdir", response_model=MkdirResponse)
+async def mkdir(
+    session_id: UUID,
+    request: MkdirRequest,
+    topic_id: Optional[UUID] = Query(None, description="Topic ID for root paths"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Create a directory.
+
+    - /workspace/* → session namespace
+    - Other paths → thread namespace (topic_id required)
+    """
+    await _validate_session(session_id, db, current_user.id)
+
+    path = request.path.rstrip("/")
+    if not path or path == "/":
+        raise HTTPException(status_code=400, detail="Invalid directory path")
+
+    if _is_mounted_readonly(path):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cannot create directory under readonly path: {path}",
+        )
+
+    store = await AgentFactory.get_store()
+    namespace, store_key = _resolve_namespace(path, session_id, topic_id)
+    store_key = store_key.rstrip("/") or "/"
+
+    logger.info(f"Creating directory {path} (store_key={store_key})")
+
+    try:
+        existing = await store.aget(namespace, store_key)
+        if existing:
+            if isinstance(existing.value, dict) and existing.value.get("__type") == "directory":
+                return MkdirResponse(path=path, created=False)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Path exists and is not a directory: {path}",
+            )
+
+        now = datetime.now(timezone.utc)
+        dir_data = {"__type": "directory", "created_at": now.isoformat()}
+        await store.aput(namespace, store_key, dir_data)
+
+        logger.info(f"Created directory {path}")
+        await _notify_file_change(session_id, "created", path)
+
+        return MkdirResponse(path=path, created=True)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating directory {path}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create directory: {str(e)}")
+
+
+@router.post("/sessions/{session_id}/files/move", response_model=MoveResponse)
+async def move_file(
+    session_id: UUID,
+    request: MoveRequest,
+    topic_id: Optional[UUID] = Query(None, description="Topic ID for root paths"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Move or rename a file or folder.
+
+    Supports recursive move: when source is a directory, moves all children.
+    Source and destination must be in the same namespace (both workspace or both thread).
+    """
+    await _validate_session(session_id, db, current_user.id)
+
+    source = request.source.rstrip("/") if request.source != "/" else request.source
+    dest = request.destination.rstrip("/") if request.destination != "/" else request.destination
+
+    if not source or not dest:
+        raise HTTPException(status_code=400, detail="Invalid source or destination path")
+
+    if _is_mounted_readonly(source) or _is_mounted_readonly(dest):
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot move mounted readonly files",
+        )
+
+    store = await AgentFactory.get_store()
+    src_ns, src_key = _resolve_namespace(source, session_id, topic_id)
+    dst_ns, dst_key = _resolve_namespace(dest, session_id, topic_id)
+
+    if src_ns != dst_ns:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot move between thread and session namespaces",
+        )
+
+    # Normalize keys for prefix match
+    src_prefix = src_key if src_key.endswith("/") or src_key == "/" else src_key + "/"
+    if src_key == "/":
+        src_prefix = "/"
+
+    try:
+        items = await store.asearch(src_ns, limit=2000)
+        to_move = []
+
+        for item in items:
+            if item.key == "/.workspace":
+                continue
+            # Match exact or children (for directory move)
+            if item.key == src_key or (
+                src_key != "/" and item.key.startswith(src_prefix)
+            ):
+                to_move.append((item.key, item.value))
+
+        if not to_move:
+            raise HTTPException(status_code=404, detail=f"Source not found: {source}")
+
+        # Compute dest keys: replace src_prefix with dst_prefix
+        dst_prefix = dst_key.rstrip("/")
+        if "/" in dst_prefix:
+            dst_prefix = dst_prefix + "/"
+        else:
+            dst_prefix = dst_prefix + "/"
+
+        moved_count = 0
+        for old_key, value in to_move:
+            if old_key == src_key:
+                new_key = dst_key
+            elif src_key == "/":
+                new_key = dst_key.rstrip("/") + old_key
+            else:
+                suffix = old_key[len(src_key):]
+                new_key = (dst_key.rstrip("/") + suffix) if suffix.startswith("/") else (dst_key.rstrip("/") + "/" + suffix)
+
+            await store.aput(src_ns, new_key, value)
+            await store.adelete(src_ns, old_key)
+            moved_count += 1
+
+        # Notify for each path (simplified: notify source and dest)
+        await _notify_file_change(session_id, "deleted", source)
+        await _notify_file_change(session_id, "created", dest)
+
+        logger.info(f"Moved {source} -> {dest} ({moved_count} items)")
+        return MoveResponse(source=source, destination=dest, moved_count=moved_count)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error moving {source} to {dest}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to move: {str(e)}")
+
+
+@router.post("/sessions/{session_id}/files/upload", response_model=UploadResponse)
+async def upload_file(
+    session_id: UUID,
+    file: UploadFile = File(...),
+    path: str = Query("/", description="Target directory for upload"),
+    topic_id: Optional[UUID] = Query(None, description="Topic ID for root paths"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Upload a file into the session filesystem.
+
+    - Text files: stored as line array (same as write)
+    - Binary files: stored as base64-encoded content with __encoding: base64 marker
+    - path: target directory, e.g. /workspace or /workspace/docs
+    """
+    await _validate_session(session_id, db, current_user.id)
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
+    target_dir = path.rstrip("/") or "/"
+    file_path = f"{target_dir}/{file.filename}" if target_dir != "/" else f"/{file.filename}"
+
+    if _is_mounted_readonly(file_path):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cannot upload to readonly path: {file_path}",
+        )
+
+    store = await AgentFactory.get_store()
+    namespace, store_key = _resolve_namespace(file_path, session_id, topic_id)
+
+    try:
+        content_bytes = await file.read()
+        now = datetime.now(timezone.utc)
+
+        # Try to decode as text
+        try:
+            text = content_bytes.decode("utf-8")
+            content_lines = text.split("\n")
+            file_data = {
+                "content": content_lines,
+                "modified_at": now.isoformat(),
+            }
+        except UnicodeDecodeError:
+            # Binary: store as base64
+            import base64
+            file_data = {
+                "content": [base64.b64encode(content_bytes).decode("ascii")],
+                "__encoding": "base64",
+                "modified_at": now.isoformat(),
+            }
+
+        existing = await store.aget(namespace, store_key)
+        created = existing is None
+        if created:
+            file_data["created_at"] = now.isoformat()
+        elif existing and isinstance(existing.value, dict):
+            file_data["created_at"] = existing.value.get("created_at", now.isoformat())
+
+        await store.aput(namespace, store_key, file_data)
+
+        logger.info(f"Uploaded file {file_path}")
+        await _notify_file_change(session_id, "created" if created else "updated", file_path)
+
+        return UploadResponse(
+            path=file_path,
+            size=len(content_bytes),
+            created=created,
+            modified_at=now,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading {file_path}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to upload: {str(e)}")
+
+
 @router.delete("/sessions/{session_id}/files", response_model=FileDeleteResponse)
 async def delete_file(
     session_id: UUID,
-    path: str = Query(..., description="File path to delete"),
+    path: str = Query(..., description="File or directory path to delete"),
+    recursive: bool = Query(False, description="If True, recursively delete directory and all children"),
     topic_id: Optional[UUID] = Query(None, description="Topic ID for root files"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Delete a file.
+    Delete a file or directory.
 
+    - recursive=True: delete directory and all its contents
     - /AGENTS.md and /skills/* are readonly (403)
     - /workspace/* → session namespace
     - Other paths → thread namespace (topic_id required, 400 if missing)
@@ -498,13 +756,33 @@ async def delete_file(
 
     store = await AgentFactory.get_store()
     namespace, store_key = _resolve_namespace(path, session_id, topic_id)
+    store_key = store_key.rstrip("/") or store_key
 
-    logger.info(f"Deleting file {path} (store_key={store_key}, namespace={namespace})")
+    logger.info(f"Deleting {path} (recursive={recursive})")
 
     try:
+        if recursive:
+            prefix = store_key if store_key.endswith("/") else store_key + "/"
+            items = await store.asearch(namespace, limit=2000)
+            deleted = 0
+            for item in items:
+                if item.key == "/.workspace":
+                    continue
+                if item.key == store_key or (store_key != "/" and item.key.startswith(prefix)):
+                    await store.adelete(namespace, item.key)
+                    deleted += 1
+            if deleted == 0:
+                raise HTTPException(status_code=404, detail=f"Path not found: {path}")
+            logger.info(f"Recursively deleted {path} ({deleted} items)")
+            await _notify_file_change(session_id, "deleted", path)
+            return FileDeleteResponse(path=path, success=True)
+
         existing = await store.aget(namespace, store_key)
         if not existing:
-            raise HTTPException(status_code=404, detail=f"File not found: {path}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"File not found: {path} (use recursive=True for directories)",
+            )
 
         await store.adelete(namespace, store_key)
 
@@ -516,8 +794,8 @@ async def delete_file(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting file {path}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
+        logger.error(f"Error deleting {path}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete: {str(e)}")
 
 
 # --- WebSocket / Notifications ---

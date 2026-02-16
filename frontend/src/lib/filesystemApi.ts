@@ -111,17 +111,78 @@ export async function writeFile(
 }
 
 /**
- * Delete a file.
+ * Delete a file or directory.
+ * @param recursive If true, recursively delete directory and all children
  */
 export async function deleteFile(
   sessionId: string,
   path: string,
-  topicId?: string
+  topicId?: string,
+  recursive?: boolean
 ): Promise<FileDeleteResponse> {
   const params: Record<string, string> = { path };
   if (topicId) params.topic_id = topicId;
+  if (recursive) params.recursive = 'true';
   const { data } = await api.delete<FileDeleteResponse>(
     `/api/v1/sessions/${sessionId}/files`,
+    { params }
+  );
+  return data;
+}
+
+/**
+ * Create a directory.
+ */
+export async function createFolder(
+  sessionId: string,
+  path: string,
+  topicId?: string
+): Promise<{ path: string; created: boolean }> {
+  const params: Record<string, string> = {};
+  if (topicId) params.topic_id = topicId;
+  const { data } = await api.post<{ path: string; created: boolean }>(
+    `/api/v1/sessions/${sessionId}/files/mkdir`,
+    { path },
+    { params }
+  );
+  return data;
+}
+
+/**
+ * Move or rename a file or folder.
+ */
+export async function moveFile(
+  sessionId: string,
+  source: string,
+  destination: string,
+  topicId?: string
+): Promise<{ source: string; destination: string; moved_count: number }> {
+  const params: Record<string, string> = {};
+  if (topicId) params.topic_id = topicId;
+  const { data } = await api.post<{ source: string; destination: string; moved_count: number }>(
+    `/api/v1/sessions/${sessionId}/files/move`,
+    { source, destination },
+    { params }
+  );
+  return data;
+}
+
+/**
+ * Upload a file to the session filesystem.
+ */
+export async function uploadFile(
+  sessionId: string,
+  file: File,
+  targetDir: string = '/',
+  topicId?: string
+): Promise<{ path: string; size: number; created: boolean; modified_at: string }> {
+  const params: Record<string, string> = { path: targetDir };
+  if (topicId) params.topic_id = topicId;
+  const formData = new FormData();
+  formData.append('file', file);
+  const { data } = await api.post<{ path: string; size: number; created: boolean; modified_at: string }>(
+    `/api/v1/sessions/${sessionId}/files/upload`,
+    formData,
     { params }
   );
   return data;
