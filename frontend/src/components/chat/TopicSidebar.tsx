@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { Hash, Plus, X, ChevronUp, ChevronDown, Check, MessageSquare, Search, MoreHorizontal, Settings2, Pencil, Trash2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Hash, Plus, X, ChevronUp, ChevronDown, Check, MessageSquare, Search, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +26,8 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
   const [newTopicName, setNewTopicName] = useState('');
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const topicRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const currentSessionId = useChatStore((state) => state.currentSessionId);
@@ -41,7 +44,12 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
 
   // 直接调用函数，因为这些函数内部会从 store 获取最新状态
   const currentSession = getCurrentSession();
-  const topics = getAllTopicsForSession(currentSessionId);
+  const allTopics = getAllTopicsForSession(currentSessionId);
+  const topics = searchQuery.trim()
+    ? allTopics.filter((t) =>
+        (t.name || '').toLowerCase().includes(searchQuery.trim().toLowerCase())
+      )
+    : allTopics;
 
   // 当前选中的话题变化时，滚动到该话题
   useEffect(() => {
@@ -119,21 +127,75 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
 
   return (
     <div className={cn('flex h-full flex-col bg-background', className)} style={style}>
-      <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Hash className="h-4 w-4" />
-          <span className="text-sm font-semibold">话题</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-6 w-6">
-            <Search className="h-4 w-4" />
-          </Button>
-          <Button variant="ghost" size="icon" className="h-6 w-6" title="话题设置">
-            <Settings2 className="h-4 w-4" />
-          </Button>
-          <Button variant="ghost" size="icon" className="h-6 w-6">
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
+      {/* 使用 @container 实现：侧边栏较窄时搜索框换行；两侧状态等高避免布局跳动 */}
+      <div className="@container shrink-0 border-b px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 @[240px]:flex-nowrap" style={{ minHeight: 32 }}>
+          <div className="flex items-center gap-2 shrink-0 min-w-0 order-1">
+            <Hash className="h-4 w-4 shrink-0" />
+            <span className="text-sm font-semibold truncate">话题</span>
+          </div>
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-1 order-2 ml-auto">
+            <AnimatePresence mode="wait">
+              {isSearching ? (
+                <motion.div
+                  key="search"
+                  initial={{ opacity: 0, x: 24 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 24 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                  className="flex flex-1 min-w-0 items-center gap-1 @[240px]:min-w-[140px]"
+                >
+                  <input
+                    type="text"
+                    placeholder="搜索话题..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        setIsSearching(false);
+                        setSearchQuery('');
+                      }
+                    }}
+                    autoFocus
+                    className={cn(
+                      'h-8 min-w-0 flex-1 rounded border border-input bg-background px-2.5 text-xs placeholder:text-muted-foreground',
+                      'outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset'
+                    )}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => {
+                      setIsSearching(false);
+                      setSearchQuery('');
+                    }}
+                    title="关闭搜索"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="search-btn"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setIsSearching(true)}
+                    title="搜索话题"
+                  >
+                    <Search className="h-4 w-4" />
+                  </Button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 
@@ -255,7 +317,9 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
 
           {currentSession && topics.length === 0 && !isCreating && (
             <p className="py-4 text-center text-xs text-muted-foreground">
-              暂无话题，发送第一条消息将自动创建
+              {searchQuery.trim()
+                ? '没有找到匹配的话题'
+                : '暂无话题，发送第一条消息将自动创建'}
             </p>
           )}
 
