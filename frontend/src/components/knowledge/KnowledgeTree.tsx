@@ -108,7 +108,7 @@ function TreeNode({
             <FileText className="w-4 h-4 mr-2" /> 新建文档
           </ContextMenuItem>
           <ContextMenuItem onClick={() => onCreate(node.id, 'dataset')}>
-            <Table2 className="w-4 h-4 mr-2" /> 新建数据集
+            <Table2 className="w-4 h-4 mr-2" /> 新建表格
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem onClick={() => onToggleVector(node)}>
@@ -234,7 +234,7 @@ export function KnowledgeTree({
               <FileText className="w-4 h-4 mr-2" /> 新建文档
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onCreate(null, 'dataset')}>
-              <Table2 className="w-4 h-4 mr-2" /> 新建数据集
+              <Table2 className="w-4 h-4 mr-2" /> 新建表格
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

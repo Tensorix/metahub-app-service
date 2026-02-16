@@ -47,7 +47,7 @@ export function FolderDetail({ node, onToggleVector, onCreate }: FolderDetailPro
           <FileText className="w-4 h-4 mr-2" /> 新建文档
         </Button>
         <Button variant="outline" onClick={() => onCreate('dataset')}>
-          <Table2 className="w-4 h-4 mr-2" /> 新建数据集
+          <Table2 className="w-4 h-4 mr-2" /> 新建表格
         </Button>
       </div>
     </div>

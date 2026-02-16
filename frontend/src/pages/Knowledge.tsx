@@ -70,7 +70,7 @@ export default function Knowledge() {
     const nameMap: Record<NodeType, string> = {
       folder: '新建文件夹',
       document: '新建文档',
-      dataset: '新建数据集',
+      dataset: '新建表格',
     };
     try {
       const node = await knowledgeApi.createNode({
