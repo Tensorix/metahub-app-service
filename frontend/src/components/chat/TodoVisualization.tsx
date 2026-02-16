@@ -197,14 +197,15 @@ export function FloatingTodo({
 
   const todos = useMemo(() => extractLatestTodos(messages), [messages]);
 
-  if (!todos || todos.length === 0) return null;
-
-  const allCompleted = todos.every((t) => t.status === 'completed');
-
   const sortedTodos = useMemo(() => {
+    if (!todos || todos.length === 0) return [];
     const order = { in_progress: 0, pending: 1, completed: 2 };
     return [...todos].sort((a, b) => order[a.status] - order[b.status]);
   }, [todos]);
+
+  if (!todos || todos.length === 0) return null;
+
+  const allCompleted = todos.every((t) => t.status === 'completed');
 
   return (
     <div

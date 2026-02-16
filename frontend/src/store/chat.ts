@@ -785,7 +785,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   started_at: event.data.ended_at || new Date().toISOString(),
                 }),
                 op_type: opType,
-                name: event.data.name || existing?.name || 'unknown',
+                name: existing?.name || event.data.name || 'unknown',
                 status: (event.data.status || (event.data.success ? 'success' : 'error')) as 'success' | 'error' | 'cancelled',
                 result: event.data.result || '',
                 ended_at: event.data.ended_at || new Date().toISOString(),
@@ -845,7 +845,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 type: 'subagent_call' as const,
                 content: JSON.stringify({
                   op_id: opId,
-                  name: event.data.name,
+                  name: existing?.name || event.data.name || 'unknown',
                   description: existing?.description || '',
                   result: event.data.result || '',
                   duration_ms: event.data.duration_ms ?? 0,
