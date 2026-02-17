@@ -77,18 +77,15 @@ export function DateTimeCell({ value, field, onSave }: DateTimeCellProps) {
   const initialDate = date ?? new Date();
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger>
-        <div
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === 'Enter' && setOpen((o) => !o)}
-          className={cn(
-            'w-full min-h-[28px] px-2 py-1 text-xs text-left truncate flex items-center gap-1',
-            'border-none bg-transparent cursor-pointer hover:bg-accent/50 rounded',
-            'focus:outline-none focus:ring-1 focus:ring-ring'
-          )}
-        >
+    <Popover open={open} onOpenChange={setOpen} className="w-full">
+      <PopoverTrigger
+        className={cn(
+          'w-full h-full min-h-[28px] px-2 py-1 text-xs text-left flex items-center',
+          'bg-transparent cursor-pointer hover:bg-accent/50 rounded',
+          'focus:outline-none focus:ring-1 focus:ring-ring'
+        )}
+      >
+        <div className="w-full min-h-[22px] truncate flex items-center gap-1">
           {displayText ? (
             <>
               <CalendarIcon className="w-3 h-3 text-muted-foreground shrink-0" />

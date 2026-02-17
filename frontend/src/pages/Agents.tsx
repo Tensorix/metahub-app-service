@@ -133,7 +133,7 @@ export default function Agents() {
   };
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <div className="container mx-auto p-6 space-y-6 flex-1 min-h-0 overflow-y-auto">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Agent 管理</h1>

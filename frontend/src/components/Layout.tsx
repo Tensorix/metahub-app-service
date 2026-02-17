@@ -1,12 +1,15 @@
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { useState } from 'react';
 import { Menu } from 'lucide-react';
 import { Sidebar, SIDEBAR_DEFAULT_WIDTH } from './Sidebar';
 import { Button } from './ui/button';
+import { cn } from '@/lib/utils';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 
 export function Layout() {
   const { isMobile } = useBreakpoints();
+  const location = useLocation();
+  const isKnowledge = location.pathname.includes('/knowledge');
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -37,7 +40,14 @@ export function Layout() {
           </div>
         )}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-          <div className="container mx-auto p-4 md:p-6 max-w-7xl flex-1 flex flex-col min-h-0">
+          <div
+            className={cn(
+              'flex-1 flex flex-col min-h-0',
+              isKnowledge
+                ? 'p-0 w-full'
+                : 'container mx-auto p-4 md:p-6 max-w-7xl'
+            )}
+          >
             <Outlet />
           </div>
         </div>

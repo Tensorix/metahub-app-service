@@ -43,10 +43,10 @@ export function SelectCell({ value, field, onSave }: SelectCellProps) {
     : '';
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} className="w-full">
       <PopoverTrigger
         className={cn(
-          'min-h-[28px] px-2 py-1 text-xs text-left inline-flex items-center',
+          'w-full h-full min-h-[28px] px-2 py-1 text-xs text-left flex items-center justify-start',
           'bg-transparent cursor-pointer hover:bg-accent/50 rounded',
           'focus:outline-none focus:ring-1 focus:ring-ring'
         )}

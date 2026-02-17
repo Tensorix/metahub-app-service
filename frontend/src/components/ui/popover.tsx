@@ -12,9 +12,15 @@ interface PopoverProps {
   children: React.ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  className?: string;
 }
 
-const Popover = ({ children, open: controlledOpen, onOpenChange }: PopoverProps) => {
+const Popover = ({
+  children,
+  open: controlledOpen,
+  onOpenChange,
+  className,
+}: PopoverProps) => {
   const [internalOpen, setInternalOpen] = React.useState(false);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : internalOpen;
@@ -30,7 +36,7 @@ const Popover = ({ children, open: controlledOpen, onOpenChange }: PopoverProps)
   );
   return (
     <PopoverContext.Provider value={{ open, setOpen }}>
-      <div className="relative inline-block">{children}</div>
+      <div className={cn('relative inline-block', className)}>{children}</div>
     </PopoverContext.Provider>
   );
 };

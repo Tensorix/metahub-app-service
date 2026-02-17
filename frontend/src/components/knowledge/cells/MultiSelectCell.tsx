@@ -54,10 +54,10 @@ export function MultiSelectCell({ value, field, onSave }: MultiSelectCellProps) 
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} className="w-full">
       <PopoverTrigger
         className={cn(
-          'min-h-[28px] px-2 py-1 text-xs text-left inline-flex items-center gap-1 flex-wrap',
+          'w-full h-full min-h-[28px] px-2 py-1 text-xs text-left flex items-center gap-1 flex-wrap',
           'bg-transparent cursor-pointer hover:bg-accent/50 rounded',
           'focus:outline-none focus:ring-1 focus:ring-ring'
         )}
