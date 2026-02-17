@@ -17,6 +17,7 @@ from .admin_embedding import router as admin_embedding_router
 from .tools import router as tools_router
 from .session_transfer import router as session_transfer_router
 from .background_task import router as background_task_router
+from .scheduled_task import router as scheduled_task_router
 
 router = APIRouter()
 router.include_router(experimental_router, prefix="", tags=["v1"])
@@ -37,3 +38,4 @@ router.include_router(admin_embedding_router, prefix="", tags=["admin-embedding"
 router.include_router(tools_router, prefix="", tags=["tools"])
 router.include_router(session_transfer_router, prefix="", tags=["session-transfer"])
 router.include_router(background_task_router, prefix="", tags=["background-tasks"])
+router.include_router(scheduled_task_router, prefix="", tags=["scheduled-tasks"])

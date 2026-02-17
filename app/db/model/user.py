@@ -38,6 +38,9 @@ class User(Base):
     # 关联 background_tasks
     background_tasks: Mapped[list["BackgroundTask"]] = relationship("BackgroundTask", back_populates="user", cascade="all, delete-orphan")
 
+    # 关联 scheduled_tasks
+    scheduled_tasks: Mapped[list["ScheduledTask"]] = relationship("ScheduledTask", back_populates="user", cascade="all, delete-orphan")
+
 
 class UserToken(Base):
     __tablename__ = "user_token"

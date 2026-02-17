@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export interface Toast {
   id: string;
@@ -25,7 +25,7 @@ export function useToast() {
     };
   }, []);
 
-  const toast = ({ title, description, variant = 'default' }: Omit<Toast, 'id'>) => {
+  const toast = useCallback(({ title, description, variant = 'default' }: Omit<Toast, 'id'>) => {
     const id = `toast-${toastCount++}`;
     const newToast: Toast = { id, title, description, variant };
     
@@ -37,7 +37,7 @@ export function useToast() {
       memoryToasts = memoryToasts.filter((t) => t.id !== id);
       notifyListeners();
     }, 3000);
-  };
+  }, []);
 
   const dismiss = (id: string) => {
     memoryToasts = memoryToasts.filter((t) => t.id !== id);

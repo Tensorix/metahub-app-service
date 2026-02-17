@@ -20,3 +20,4 @@ from .background_task import BackgroundTask
 from .knowledge_node import KnowledgeNode
 from .dataset_row import DatasetRow
 from .knowledge_embedding import KnowledgeEmbedding
+from .scheduled_task import ScheduledTask

@@ -25,7 +25,25 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to pre-initialize AgentFactory store: {e}")
     
+    # Start the scheduled-task scheduler
+    try:
+        from app.scheduler import SchedulerService
+        from app.db.session import SessionLocal
+        SchedulerService.init()
+        with SessionLocal() as db:
+            await SchedulerService.start(db)
+        logger.info("Scheduler started")
+    except Exception as e:
+        logger.warning(f"Failed to start scheduler: {e}")
+    
     yield
+    
+    # Shutdown the scheduler
+    try:
+        from app.scheduler import SchedulerService
+        await SchedulerService.shutdown()
+    except Exception as e:
+        logger.warning(f"Failed to shutdown scheduler: {e}")
 
 
 app = FastAPI(

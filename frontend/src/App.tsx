@@ -12,6 +12,7 @@ import { Settings } from './pages/Settings';
 import Agents from './pages/Agents';
 import Activities from './pages/Activities';
 import Knowledge from './pages/Knowledge';
+import ScheduledTasks from './pages/ScheduledTasks';
 
 function App() {
   const { initialize } = useAuthStore();
@@ -41,6 +42,7 @@ function App() {
           <Route path="agents" element={<Agents />} />
           <Route path="activities" element={<Activities />} />
           <Route path="knowledge" element={<Knowledge />} />
+          <Route path="scheduled-tasks" element={<ScheduledTasks />} />
           <Route path="settings" element={<Settings />} />
         </Route>
         
