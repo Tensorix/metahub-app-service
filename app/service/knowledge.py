@@ -1037,15 +1037,16 @@ class KnowledgeService:
             "threshold": 0.1,
             "limit": limit,
         }
+        # Escape :: after :vec so SQLAlchemy doesn't parse :halfvec as bind param
         sql = sa_text(f"""
             SELECT e.id, e.node_id, e.row_id, e.chunk_text, e.parent_id,
-                   (1 - (e.embedding::{cast_expr} <=> :vec::{cast_expr})) AS vector_score
+                   (1 - (e.embedding::{cast_expr} <=> :vec\:\:{cast_expr})) AS vector_score
             FROM knowledge_embedding e
             WHERE ({scope_sql})
               AND e.model_id = :model_id
               AND e.status = 'completed'
-              AND (1 - (e.embedding::{cast_expr} <=> :vec::{cast_expr})) > :threshold
-            ORDER BY e.embedding::{cast_expr} <=> :vec::{cast_expr}
+              AND (1 - (e.embedding::{cast_expr} <=> :vec\:\:{cast_expr})) > :threshold
+            ORDER BY e.embedding::{cast_expr} <=> :vec\:\:{cast_expr}
             LIMIT :limit
         """)
         rows = db.execute(sql, params).fetchall()

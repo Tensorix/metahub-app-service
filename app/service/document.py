@@ -550,15 +550,16 @@ class DocumentService:
         from sqlalchemy import text
         coll_list = list(collection_ids)
         placeholders = ", ".join(f":c{i}" for i in range(len(coll_list)))
+        # Escape :: after :vec so SQLAlchemy doesn't parse :halfvec as bind param
         sql = text(f"""
-            SELECT d.id, (1 - (e.embedding::{cast_expr} <=> :vec::{cast_expr})) AS score
+            SELECT d.id, (1 - (e.embedding::{cast_expr} <=> :vec\:\:{cast_expr})) AS score
             FROM document d
             JOIN document_embedding e ON e.document_id = d.id
             WHERE d.collection_id IN ({placeholders})
               AND d.is_deleted = FALSE
               AND e.model_id = :model_id
               AND e.status = 'completed'
-            ORDER BY e.embedding::{cast_expr} <=> :vec::{cast_expr}
+            ORDER BY e.embedding::{cast_expr} <=> :vec\:\:{cast_expr}
             LIMIT :limit
         """)
         params = {"vec": vec_str, "model_id": model_config.model_id, "limit": page * size}
