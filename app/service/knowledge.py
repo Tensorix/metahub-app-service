@@ -82,6 +82,11 @@ def serialize_row_data(data: dict) -> str:
     return " | ".join(parts)
 
 
+def _escape_ilike_pattern(s: str) -> str:
+    """Escape % and _ for use in ILIKE pattern."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 # ---------------------------------------------------------------------------
 # Schema validation
 # ---------------------------------------------------------------------------
@@ -215,12 +220,19 @@ class KnowledgeService:
             )
             position = (max_pos or 0) + 1
 
+        content_val = data.content if data.node_type == "document" else None
+        content_plain_val = (
+            extract_text_from_tiptap_json(content_val)
+            if content_val
+            else None
+        )
         node = KnowledgeNode(
             user_id=user_id,
             parent_id=data.parent_id,
             name=data.name,
             node_type=data.node_type,
-            content=data.content if data.node_type == "document" else None,
+            content=content_val,
+            content_plain_text=content_plain_val,
             schema_definition=schema_def,
             description=data.description,
             icon=data.icon,
@@ -245,6 +257,7 @@ class KnowledgeService:
             node.icon = data.icon
         if data.content is not None and node.node_type == "document":
             node.content = data.content
+            node.content_plain_text = extract_text_from_tiptap_json(data.content)
             if self._is_vectorized(db, node):
                 self._re_embed_document(db, node)
         if data.schema_definition is not None and node.node_type == "dataset":
@@ -447,6 +460,7 @@ class KnowledgeService:
         row = DatasetRow(
             dataset_id=dataset_id,
             data=data.data,
+            data_plain_text=serialize_row_data(data.data),
             position=position,
         )
         db.add(row)
@@ -474,6 +488,7 @@ class KnowledgeService:
         if data.data is not None:
             validate_row_data(data.data, dataset.schema_definition)
             row.data = data.data
+            row.data_plain_text = serialize_row_data(data.data)
         if data.position is not None:
             row.position = data.position
 
@@ -532,6 +547,7 @@ class KnowledgeService:
             if "data" in item:
                 validate_row_data(item["data"], dataset.schema_definition)
                 row.data = item["data"]
+                row.data_plain_text = serialize_row_data(item["data"])
                 if self._is_vectorized(db, dataset):
                     db.execute(
                         delete(KnowledgeEmbedding).where(KnowledgeEmbedding.row_id == row.id)
@@ -896,22 +912,22 @@ class KnowledgeService:
         scope_sql, params = self._build_search_scope_sql(all_node_ids, row_ids_in_scope)
 
         if search_mode == "fuzzy":
-            raw_results = self._knowledge_fuzzy_search(
-                db, query, scope_sql, params, top_k * 3
+            raw_results = self._knowledge_fuzzy_search_direct(
+                db, query, all_node_ids, row_ids_in_scope, top_k * 3
             )
         elif search_mode == "vector":
             raw_results = self._knowledge_vector_search(
                 db, query, scope_sql, params, top_k * 3
             )
         else:
-            # hybrid
-            fuzzy_results = self._knowledge_fuzzy_search(
-                db, query, scope_sql, params, top_k * 3
+            # hybrid: fuzzy from direct (node/row), vector from embedding
+            fuzzy_results = self._knowledge_fuzzy_search_direct(
+                db, query, all_node_ids, row_ids_in_scope, top_k * 3
             )
             vector_results = self._knowledge_vector_search(
                 db, query, scope_sql, params, top_k * 3
             )
-            raw_results = self._rrf_fusion(
+            raw_results = self._rrf_fusion_by_node_row(
                 fuzzy_results, vector_results, fuzzy_weight, vector_weight, top_k
             )
 
@@ -974,35 +990,77 @@ class KnowledgeService:
         scope_sql = " OR ".join(scope_parts) if scope_parts else "FALSE"
         return scope_sql, params
 
-    def _knowledge_fuzzy_search(
+    def _knowledge_fuzzy_search_direct(
         self,
         db: Session,
         query: str,
-        scope_sql: str,
-        params: dict[str, Any],
+        all_node_ids: list[UUID],
+        row_ids_in_scope: list[UUID],
         limit: int,
     ) -> list[dict]:
+        """Fuzzy search on knowledge_node and dataset_row (no embedding required)."""
         from sqlalchemy import text as sa_text
 
-        params = {**params, "query": query, "threshold": 0.1, "limit": limit}
-        sql = sa_text(f"""
-            SELECT e.id, e.node_id, e.row_id, e.chunk_text, e.parent_id,
-                   similarity(e.chunk_text, :query) AS fuzzy_score
-            FROM knowledge_embedding e
-            WHERE ({scope_sql})
-              AND e.status = 'completed'
-              AND similarity(e.chunk_text, :query) > :threshold
-            ORDER BY fuzzy_score DESC
-            LIMIT :limit
-        """)
+        ilike_pattern = "%" + _escape_ilike_pattern(query) + "%"
+        params: dict[str, Any] = {
+            "query": query,
+            "ilike_pattern": ilike_pattern,
+            "threshold": 0.1,
+            "limit": limit,
+        }
+        for i, nid in enumerate(all_node_ids):
+            params[f"n{i}"] = nid
+        for i, rid in enumerate(row_ids_in_scope):
+            params[f"r{i}"] = rid
+
+        node_placeholders = ", ".join(f":n{i}" for i in range(len(all_node_ids)))
+        row_placeholders = ", ".join(f":r{i}" for i in range(len(row_ids_in_scope)))
+
+        doc_part = ""
+        if all_node_ids:
+            doc_part = f"""
+                SELECT n.id AS node_id, NULL::uuid AS row_id, n.content_plain_text AS chunk_text,
+                       GREATEST(similarity(n.content_plain_text, :query), 0.5) AS fuzzy_score
+                FROM knowledge_node n
+                WHERE n.node_type = 'document' AND n.id IN ({node_placeholders})
+                  AND n.is_deleted = false
+                  AND n.content_plain_text IS NOT NULL
+                  AND length(n.content_plain_text) >= 2
+                  AND (
+                    similarity(n.content_plain_text, :query) > :threshold
+                    OR n.content_plain_text ILIKE :ilike_pattern
+                  )
+            """
+        row_part = ""
+        if row_ids_in_scope:
+            row_part = f"""
+                SELECT r.dataset_id AS node_id, r.id AS row_id, r.data_plain_text AS chunk_text,
+                       GREATEST(similarity(r.data_plain_text, :query), 0.5) AS fuzzy_score
+                FROM dataset_row r
+                WHERE r.id IN ({row_placeholders})
+                  AND r.is_deleted = false
+                  AND r.data_plain_text IS NOT NULL
+                  AND length(r.data_plain_text) >= 2
+                  AND (
+                    similarity(r.data_plain_text, :query) > :threshold
+                    OR r.data_plain_text ILIKE :ilike_pattern
+                  )
+            """
+
+        if not doc_part and not row_part:
+            return []
+
+        union_parts = [p.strip() for p in [doc_part, row_part] if p.strip()]
+        sql_str = " UNION ALL ".join(union_parts) + " ORDER BY fuzzy_score DESC LIMIT :limit"
+        sql = sa_text(sql_str)
         rows = db.execute(sql, params).fetchall()
         return [
             {
-                "chunk_id": r.id,
+                "chunk_id": None,
                 "node_id": r.node_id,
                 "row_id": r.row_id,
                 "chunk_text": r.chunk_text,
-                "parent_id": r.parent_id,
+                "parent_id": None,
                 "score": float(r.fuzzy_score),
                 "fuzzy_score": float(r.fuzzy_score),
                 "vector_score": 0.0,
@@ -1064,6 +1122,80 @@ class KnowledgeService:
             for r in rows
         ]
 
+    def _fusion_key(self, r: dict) -> str:
+        """Key for (node_id, row_id) - used when fusing fuzzy (direct) with vector."""
+        nid = r.get("node_id")
+        rid = r.get("row_id")
+        return f"{nid}_{rid or 'doc'}"
+
+    def _rrf_fusion_by_node_row(
+        self,
+        list_a: list[dict],
+        list_b: list[dict],
+        weight_a: float,
+        weight_b: float,
+        top_k: int,
+    ) -> list[dict]:
+        """RRF fusion by (node_id, row_id). Aggregates vector chunks to best per node/row."""
+        if not list_b:
+            return list_a[:top_k]
+        # Aggregate vector results: keep best chunk per (node_id, row_id)
+        best_per_key: dict[str, dict] = {}
+        for r in list_b:
+            key = self._fusion_key(r)
+            if key not in best_per_key or (
+                (r.get("vector_score") or 0)
+                > (best_per_key[key].get("vector_score") or 0)
+            ):
+                best_per_key[key] = dict(r)
+        list_b_agg = list(best_per_key.values())
+
+        k = self.RRF_K
+        ranks_a = {self._fusion_key(r): rank for rank, r in enumerate(list_a, start=1)}
+        ranks_b = {
+            self._fusion_key(r): rank for rank, r in enumerate(list_b_agg, start=1)
+        }
+        all_results: dict[str, dict] = {}
+        for r in list_a + list_b_agg:
+            key = self._fusion_key(r)
+            if key not in all_results:
+                all_results[key] = dict(r)
+            else:
+                # Merge: keep chunk info from vector if present, merge scores
+                existing = all_results[key]
+                if r.get("vector_score") is not None and (
+                    existing.get("vector_score") is None
+                    or (r.get("vector_score") or 0) > (existing.get("vector_score") or 0)
+                ):
+                    existing["vector_score"] = r.get("vector_score")
+                    existing["chunk_id"] = r.get("chunk_id")
+                    existing["chunk_text"] = r.get("chunk_text") or existing.get(
+                        "chunk_text"
+                    )
+                    existing["parent_id"] = r.get("parent_id")
+                if r.get("fuzzy_score") is not None and r.get("fuzzy_score", 0) > 0:
+                    existing["fuzzy_score"] = max(
+                        r.get("fuzzy_score") or 0,
+                        existing.get("fuzzy_score") or 0,
+                    )
+        scored = []
+        for key, result in all_results.items():
+            rank_a = ranks_a.get(key)
+            rank_b = ranks_b.get(key)
+            rrf_a = (1.0 / (k + rank_a)) if rank_a else 0.0
+            rrf_b = (1.0 / (k + rank_b)) if rank_b else 0.0
+            result["score"] = weight_a * rrf_a + weight_b * rrf_b
+            result["fuzzy_score"] = (
+                list_a[ranks_a[key] - 1]["fuzzy_score"] if rank_a else 0.0
+            )
+            if rank_b:
+                result["vector_score"] = list_b_agg[ranks_b[key] - 1].get(
+                    "vector_score", 0.0
+                )
+            scored.append(result)
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:top_k]
+
     def _rrf_fusion(
         self,
         list_a: list[dict],
@@ -1102,18 +1234,18 @@ class KnowledgeService:
             node_name = ""
             node_type = ""
             parent_content: Optional[str] = None
-            if r.get("node_id"):
-                n = db.get(KnowledgeNode, r["node_id"])
-                if n:
-                    node_name = n.name
-                    node_type = n.node_type
-            elif r.get("row_id"):
+            if r.get("row_id"):
                 row_obj = db.get(DatasetRow, r["row_id"])
                 if row_obj:
                     ds = db.get(KnowledgeNode, row_obj.dataset_id)
                     if ds:
                         node_name = ds.name
                         node_type = "dataset_row"
+            elif r.get("node_id"):
+                n = db.get(KnowledgeNode, r["node_id"])
+                if n:
+                    node_name = n.name
+                    node_type = n.node_type
             if r.get("parent_id"):
                 parent_emb = db.get(KnowledgeEmbedding, r["parent_id"])
                 if parent_emb and parent_emb.chunk_text:

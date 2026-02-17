@@ -77,6 +77,11 @@ class KnowledgeNode(Base):
         nullable=True,
         comment="Rich text / Markdown content (document only)",
     )
+    content_plain_text: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Plain text extracted from TipTap content for fuzzy search",
+    )
 
     # --- dataset fields ---
     schema_definition: Mapped[Optional[dict]] = mapped_column(

@@ -40,6 +40,11 @@ class DatasetRow(Base):
         server_default="'{}'",
         comment="Row data conforming to dataset schema",
     )
+    data_plain_text: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Serialized row data for fuzzy search",
+    )
     position: Mapped[int] = mapped_column(
         Integer,
         default=0,
