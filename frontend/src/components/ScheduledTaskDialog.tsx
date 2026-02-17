@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { sessionApi, type Session, type Topic } from '@/lib/api';
 import type {
   ScheduledTask,
   ScheduledTaskCreate,
@@ -102,6 +103,53 @@ export function ScheduledTaskDialog({
   const [loading, setLoading] = useState(false);
   const [paramsError, setParamsError] = useState<string | null>(null);
 
+  // send_message task type: dedicated form fields
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [topics, setTopics] = useState<Topic[]>([]);
+  const [topicsLoading, setTopicsLoading] = useState(false);
+  const [sendMessageSessionId, setSendMessageSessionId] = useState('');
+  const [sendMessageContent, setSendMessageContent] = useState('');
+  const [sendMessageTopicId, setSendMessageTopicId] = useState('');
+  const selectedSession = sessions.find((s) => s.id === sendMessageSessionId);
+  const isAiSession = selectedSession?.type === 'ai';
+
+  const fetchSessions = useCallback(async () => {
+    try {
+      const res = await sessionApi.getSessions({ page: 1, size: 200 });
+      setSessions(res.items);
+    } catch {
+      setSessions([]);
+    }
+  }, []);
+
+  const fetchTopics = useCallback(async (sessionId: string) => {
+    if (!sessionId) return;
+    setTopicsLoading(true);
+    try {
+      const list = await sessionApi.getTopics(sessionId);
+      setTopics(list);
+    } catch {
+      setTopics([]);
+    } finally {
+      setTopicsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      fetchSessions();
+    }
+  }, [open, fetchSessions]);
+
+  useEffect(() => {
+    if (sendMessageSessionId && isAiSession) {
+      fetchTopics(sendMessageSessionId);
+    } else {
+      setTopics([]);
+      setSendMessageTopicId('');
+    }
+  }, [sendMessageSessionId, isAiSession, fetchTopics]);
+
   useEffect(() => {
     if (task) {
       setFormData({
@@ -117,6 +165,16 @@ export function ScheduledTaskDialog({
             : '{}',
         max_runs: task.max_runs != null ? String(task.max_runs) : '',
       });
+      if (task.task_type === 'send_message' && task.task_params) {
+        const p = task.task_params as { session_id?: string; content?: string; topic_id?: string };
+        setSendMessageSessionId(p.session_id || '');
+        setSendMessageContent(p.content || '');
+        setSendMessageTopicId(p.topic_id || '');
+      } else {
+        setSendMessageSessionId('');
+        setSendMessageContent('');
+        setSendMessageTopicId('');
+      }
     } else {
       setFormData({
         name: '',
@@ -128,6 +186,9 @@ export function ScheduledTaskDialog({
         task_params_str: '{}',
         max_runs: '',
       });
+      setSendMessageSessionId('');
+      setSendMessageContent('');
+      setSendMessageTopicId('');
     }
     setParamsError(null);
   }, [task, open]);
@@ -147,10 +208,30 @@ export function ScheduledTaskDialog({
     e.preventDefault();
     setParamsError(null);
 
-    const taskParams = parseTaskParams();
-    if (taskParams === null) {
-      setParamsError('任务参数必须是有效的 JSON');
-      return;
+    let taskParams: Record<string, unknown>;
+    if (formData.task_type === 'send_message') {
+      if (!sendMessageSessionId?.trim()) {
+        setParamsError('请选择目标会话');
+        return;
+      }
+      if (!sendMessageContent?.trim()) {
+        setParamsError('请输入消息内容');
+        return;
+      }
+      taskParams = {
+        session_id: sendMessageSessionId,
+        content: sendMessageContent.trim(),
+      };
+      if (isAiSession && sendMessageTopicId?.trim()) {
+        taskParams.topic_id = sendMessageTopicId;
+      }
+    } else {
+      const parsed = parseTaskParams();
+      if (parsed === null) {
+        setParamsError('任务参数必须是有效的 JSON');
+        return;
+      }
+      taskParams = parsed;
     }
 
     const scheduleConfig: Record<string, unknown> = { ...formData.schedule_config };
@@ -438,9 +519,14 @@ export function ScheduledTaskDialog({
               <Label>任务类型</Label>
               <Select
                 value={formData.task_type}
-                onValueChange={(v) =>
-                  setFormData({ ...formData, task_type: v })
-                }
+                onValueChange={(v) => {
+                  setFormData({ ...formData, task_type: v });
+                  if (v !== 'send_message') {
+                    setSendMessageSessionId('');
+                    setSendMessageContent('');
+                    setSendMessageTopicId('');
+                  }
+                }}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -454,25 +540,97 @@ export function ScheduledTaskDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>任务参数（JSON）</Label>
-              <Textarea
-                value={formData.task_params_str}
-                onChange={(e) => {
-                  setFormData({
-                    ...formData,
-                    task_params_str: e.target.value,
-                  });
-                  setParamsError(null);
-                }}
-                placeholder='{"key": "value"}'
-                rows={4}
-                className="font-mono text-sm"
-              />
-              {paramsError && (
-                <p className="text-sm text-destructive">{paramsError}</p>
-              )}
-            </div>
+
+            {formData.task_type === 'send_message' && (
+              <div className="space-y-4 rounded-md border p-4">
+                <h4 className="text-sm font-medium">发送消息配置</h4>
+                <div className="space-y-2">
+                  <Label>目标会话</Label>
+                  <Select
+                    value={sendMessageSessionId}
+                    onValueChange={setSendMessageSessionId}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择会话" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sessions.length === 0 ? (
+                        <SelectItem value="_none" disabled>
+                          加载中...
+                        </SelectItem>
+                      ) : (
+                        sessions.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.name || s.id.slice(0, 8)} ({s.type})
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {isAiSession && (
+                  <div className="space-y-2">
+                    <Label>话题（可选，不选则自动使用最近话题）</Label>
+                    <Select
+                      value={sendMessageTopicId || '_auto'}
+                      onValueChange={(v) =>
+                        setSendMessageTopicId(v === '_auto' ? '' : v)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="自动选择" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_auto">自动选择最近话题</SelectItem>
+                        {topicsLoading ? (
+                          <SelectItem value="_loading" disabled>
+                            加载中...
+                          </SelectItem>
+                        ) : (
+                          topics.map((t) => (
+                            <SelectItem key={t.id} value={t.id}>
+                              {t.name || t.id.slice(0, 8)}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label>消息内容</Label>
+                  <Textarea
+                    value={sendMessageContent}
+                    onChange={(e) => setSendMessageContent(e.target.value)}
+                    placeholder="输入要定时发送的消息文本"
+                    rows={3}
+                    className="resize-none"
+                  />
+                </div>
+              </div>
+            )}
+
+            {formData.task_type !== 'send_message' && (
+              <div className="space-y-2">
+                <Label>任务参数（JSON）</Label>
+                <Textarea
+                  value={formData.task_params_str}
+                  onChange={(e) => {
+                    setFormData({
+                      ...formData,
+                      task_params_str: e.target.value,
+                    });
+                    setParamsError(null);
+                  }}
+                  placeholder='{"key": "value"}'
+                  rows={4}
+                  className="font-mono text-sm"
+                />
+              </div>
+            )}
+            {paramsError && (
+              <p className="text-sm text-destructive">{paramsError}</p>
+            )}
             <div className="space-y-2">
               <Label htmlFor="max_runs">最大执行次数（可选，留空为无限）</Label>
               <Input

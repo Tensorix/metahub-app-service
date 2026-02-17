@@ -25,7 +25,7 @@ from langgraph.store.postgres import AsyncPostgresStore
 from langgraph.types import Command
 
 from app.config import config
-from app.agent.tools.context import agent_user_id
+from app.agent.tools.context import agent_user_id, agent_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -516,7 +516,8 @@ class DeepAgentService:
             Complete AI response text
         """
         # 设置工具运行时上下文
-        token = agent_user_id.set(user_id)
+        token_uid = agent_user_id.set(user_id)
+        token_sid = agent_session_id.set(session_id)
         try:
             agent = await self._get_agent()  # 添加 await
             cfg = {
@@ -547,7 +548,8 @@ class DeepAgentService:
                     return msg.content
             return ""
         finally:
-            agent_user_id.reset(token)
+            agent_user_id.reset(token_uid)
+            agent_session_id.reset(token_sid)
 
     async def chat_stream(
         self,
@@ -574,7 +576,8 @@ class DeepAgentService:
                 - error: Error occurred
         """
         # 设置工具运行时上下文
-        token = agent_user_id.set(user_id)
+        token_uid = agent_user_id.set(user_id)
+        token_sid = agent_session_id.set(session_id)
         try:
             agent = await self._get_agent()  # 添加 await
             cfg = {
@@ -768,7 +771,8 @@ class DeepAgentService:
                 logger.error(f"Error in agent stream: {str(e)}", exc_info=True)
                 yield {"event": "error", "data": {"error": str(e)}}
         finally:
-            agent_user_id.reset(token)
+            agent_user_id.reset(token_uid)
+            agent_session_id.reset(token_sid)
 
     async def get_history(
         self,
