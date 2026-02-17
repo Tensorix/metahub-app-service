@@ -636,6 +636,31 @@ class KnowledgeService:
         db.refresh(dataset)
         return dataset
 
+    def reorder_columns(
+        self,
+        db: Session,
+        dataset_id: UUID,
+        user_id: UUID,
+        field_names: list[str],
+    ) -> Optional[KnowledgeNode]:
+        dataset = self.get_node(db, dataset_id, user_id)
+        if not dataset or dataset.node_type != "dataset":
+            return None
+        schema = dict(dataset.schema_definition or {"fields": []})
+        fields = list(schema.get("fields", []))
+        existing_names = {f["name"] for f in fields}
+        if set(field_names) != existing_names:
+            raise ValueError(
+                "field_names must include exactly all existing column names"
+            )
+        name_to_field = {f["name"]: f for f in fields}
+        reordered = [name_to_field[n] for n in field_names]
+        schema["fields"] = reordered
+        dataset.schema_definition = schema
+        db.commit()
+        db.refresh(dataset)
+        return dataset
+
     # ------------------------------------------------------------------
     # Embedding
     # ------------------------------------------------------------------

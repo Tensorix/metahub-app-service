@@ -303,6 +303,17 @@ export const knowledgeApi = {
     return data;
   },
 
+  reorderColumns: async (
+    datasetId: string,
+    fieldNames: string[]
+  ): Promise<KnowledgeNode> => {
+    const { data } = await api.patch(
+      `/api/v1/knowledge/datasets/${datasetId}/columns/reorder`,
+      { field_names: fieldNames }
+    );
+    return data;
+  },
+
   // Search
   search: async (body: SearchRequest): Promise<SearchResponse> => {
     const { data } = await api.post('/api/v1/knowledge/search', body);

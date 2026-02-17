@@ -267,6 +267,14 @@ class ColumnDelete(BaseModel):
     name: str
 
 
+class ColumnReorder(BaseModel):
+    """Reorder columns in a dataset schema."""
+
+    field_names: list[str] = Field(
+        ..., description="New order of field names (must include all existing)"
+    )
+
+
 # =============================================================================
 # Filter DSL (reusable for dataset rows)
 # =============================================================================

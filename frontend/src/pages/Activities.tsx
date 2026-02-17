@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Calendar, Tag, AlertCircle, LayoutGrid, List } from 'lucide-react';
+import { Plus, Trash2, Calendar, Tag, AlertCircle, LayoutGrid, List, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -49,12 +49,12 @@ const BOARD_COLUMNS = [
 // 可拖拽的活动卡片组件
 interface ActivityCardProps {
   activity: Activity;
-  onEdit: (activity: Activity) => void;
+  onOpen: (activity: Activity) => void;
   onDelete: (id: string) => void;
   getPriorityColor: (priority: number) => string;
 }
 
-const ActivityCard = ({ activity, onEdit, onDelete, getPriorityColor }: ActivityCardProps) => {
+const ActivityCard = ({ activity, onOpen, onDelete, getPriorityColor }: ActivityCardProps) => {
   const {
     attributes,
     listeners,
@@ -74,14 +74,21 @@ const ActivityCard = ({ activity, onEdit, onDelete, getPriorityColor }: Activity
     <Card
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
-      className="p-3 hover:shadow-md transition-all cursor-move group"
+      className="p-3 hover:shadow-md transition-all cursor-pointer group"
+      onClick={() => onOpen(activity)}
     >
-      {/* 优先级指示器 */}
+      {/* 优先级指示器 + 拖拽把手 */}
       <div className="flex items-start gap-2">
+        <span
+          {...attributes}
+          {...listeners}
+          className="cursor-grab active:cursor-grabbing touch-none p-0.5 rounded hover:bg-muted shrink-0 -m-0.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <GripVertical className="w-3.5 h-3.5 text-muted-foreground" />
+        </span>
         <div
-          className={`w-1 h-full rounded-full ${
+          className={`w-1 h-full rounded-full flex-shrink-0 ${
             activity.priority >= 8
               ? 'bg-red-500'
               : activity.priority >= 5
@@ -147,7 +154,7 @@ const ActivityCard = ({ activity, onEdit, onDelete, getPriorityColor }: Activity
               className="h-6 px-2 text-xs"
               onClick={(e) => {
                 e.stopPropagation();
-                onEdit(activity);
+                onOpen(activity);
               }}
             >
               编辑
@@ -174,12 +181,12 @@ const ActivityCard = ({ activity, onEdit, onDelete, getPriorityColor }: Activity
 interface DroppableColumnProps {
   column: typeof BOARD_COLUMNS[0];
   activities: Activity[];
-  onEdit: (activity: Activity) => void;
+  onOpen: (activity: Activity) => void;
   onDelete: (id: string) => void;
   getPriorityColor: (priority: number) => string;
 }
 
-const DroppableColumn = ({ column, activities, onEdit, onDelete, getPriorityColor }: DroppableColumnProps) => {
+const DroppableColumn = ({ column, activities, onOpen, onDelete, getPriorityColor }: DroppableColumnProps) => {
   const { setNodeRef, isOver } = useDroppable({
     id: column.status,
   });
@@ -214,7 +221,7 @@ const DroppableColumn = ({ column, activities, onEdit, onDelete, getPriorityColo
                 <ActivityCard
                   key={activity.id}
                   activity={activity}
-                  onEdit={onEdit}
+                  onOpen={onOpen}
                   onDelete={onDelete}
                   getPriorityColor={getPriorityColor}
                 />
@@ -292,7 +299,7 @@ const Activities = () => {
     setDialogOpen(true);
   };
 
-  const handleEdit = (activity: Activity) => {
+  const handleOpenActivity = (activity: Activity) => {
     setEditingActivity(activity);
     setDialogOpen(true);
   };
@@ -530,7 +537,7 @@ const Activities = () => {
                 <Card
                   key={activity.id}
                   className="p-4 hover:shadow-md transition-shadow cursor-pointer"
-                  onClick={() => handleEdit(activity)}
+                  onClick={() => handleOpenActivity(activity)}
                 >
                   <div className="flex items-start gap-3">
                     {/* 优先级指示器 */}
@@ -596,18 +603,31 @@ const Activities = () => {
                       )}
                     </div>
 
-                    {/* 删除按钮 */}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="flex-shrink-0"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(activity.id);
-                      }}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    {/* 操作按钮 */}
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 text-xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenActivity(activity);
+                        }}
+                      >
+                        编辑
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(activity.id);
+                        }}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
                 </Card>
               ))}
@@ -628,7 +648,7 @@ const Activities = () => {
                   key={column.status}
                   column={column}
                   activities={groupedActivities[column.status] || []}
-                  onEdit={handleEdit}
+                  onOpen={handleOpenActivity}
                   onDelete={handleDelete}
                   getPriorityColor={getPriorityColor}
                 />

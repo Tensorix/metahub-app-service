@@ -27,6 +27,7 @@ from app.schema.knowledge import (
     RowListResponse,
     ColumnAdd,
     ColumnUpdate,
+    ColumnReorder,
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
     FilterCondition,
@@ -406,6 +407,29 @@ def add_column(
 ):
     try:
         node = svc.add_column(db, dataset_id, current_user.id, data)
+        if not node:
+            raise HTTPException(404, "Dataset not found")
+        return NodeResponse.model_validate(node)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.patch(
+    "/datasets/{dataset_id}/columns/reorder",
+    response_model=NodeResponse,
+    summary="Reorder columns",
+)
+def reorder_columns(
+    dataset_id: UUID,
+    data: ColumnReorder,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Reorder dataset columns by providing new field order."""
+    try:
+        node = svc.reorder_columns(
+            db, dataset_id, current_user.id, data.field_names
+        )
         if not node:
             raise HTTPException(404, "Dataset not found")
         return NodeResponse.model_validate(node)

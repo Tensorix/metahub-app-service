@@ -32,26 +32,29 @@ const ActivityDialog = ({ open, onOpenChange, activity, onSuccess }: ActivityDia
   const [tagInput, setTagInput] = useState('');
 
   useEffect(() => {
-    if (activity) {
-      setFormData({
-        type: activity.type,
-        name: activity.name,
-        priority: activity.priority,
-        status: activity.status,
-        comments: activity.comments || '',
-        tags: activity.tags || [],
-        remind_at: activity.remind_at,
-        due_date: activity.due_date,
-      });
-    } else {
-      setFormData({
-        type: 'task',
-        name: '',
-        priority: 5,
-        status: 'pending',
-        comments: '',
-        tags: [],
-      });
+    if (open) {
+      if (activity) {
+        setFormData({
+          type: activity.type,
+          name: activity.name,
+          priority: activity.priority,
+          status: activity.status,
+          comments: activity.comments || '',
+          tags: activity.tags || [],
+          remind_at: activity.remind_at,
+          due_date: activity.due_date,
+        });
+      } else {
+        setFormData({
+          type: 'task',
+          name: '',
+          priority: 5,
+          status: 'pending',
+          comments: '',
+          tags: [],
+        });
+      }
+      setTagInput('');
     }
   }, [activity, open]);
 
@@ -116,7 +119,7 @@ const ActivityDialog = ({ open, onOpenChange, activity, onSuccess }: ActivityDia
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{activity ? '编辑活动' : '新建活动'}</DialogTitle>
+          <DialogTitle>{activity ? '活动详情' : '新建活动'}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -257,7 +260,7 @@ const ActivityDialog = ({ open, onOpenChange, activity, onSuccess }: ActivityDia
               取消
             </Button>
             <Button type="submit" disabled={loading}>
-              {loading ? '保存中...' : activity ? '更新' : '创建'}
+              {loading ? '保存中...' : activity ? '保存' : '创建'}
             </Button>
           </DialogFooter>
         </form>
