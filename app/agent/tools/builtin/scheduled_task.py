@@ -11,7 +11,7 @@ import json
 from typing import Optional
 from uuid import UUID
 
-from app.agent.tools.context import agent_user_id
+from app.agent.tools.context import agent_user_id, agent_session_id, agent_topic_id
 from app.agent.tools.registry import ToolRegistry
 from app.db.session import SessionLocal
 from app.schema.scheduled_task import ScheduledTaskCreate, ScheduledTaskUpdate
@@ -106,6 +106,15 @@ def create_scheduled_task(
     except json.JSONDecodeError as e:
         return f"Error: Invalid task_params JSON: {e}"
 
+    # For send_message: inject session_id/topic_id from context when missing
+    if task_type.strip() == "send_message":
+        if not params.get("session_id") and agent_session_id.get():
+            params = dict(params)
+            params["session_id"] = str(agent_session_id.get())
+        if not params.get("topic_id") and agent_topic_id.get():
+            params = dict(params)
+            params["topic_id"] = str(agent_topic_id.get())
+
     try:
         data = ScheduledTaskCreate(
             name=name[:100],
@@ -115,6 +124,115 @@ def create_scheduled_task(
             timezone=timezone,
             task_type=task_type.strip(),
             task_params=params,
+            max_runs=max_runs,
+        )
+    except Exception as e:
+        return f"Error: {e}"
+
+    try:
+        with SessionLocal() as db:
+            task = ScheduledTaskService.create_task(db, user_id, data)
+            return f"Created: {_task_to_str(task)}"
+    except Exception as e:
+        return f"Error creating scheduled task: {e}"
+
+
+@ToolRegistry.register(
+    name="create_schedule_send_message",
+    description=(
+        "Create a scheduled task to send a message to a session. Use this when the user wants to "
+        "'schedule a message' or 'send a message at X time'. "
+        "session_id and topic_id are optional: when omitted, uses the CURRENT conversation (only works when called from Agent Chat). "
+        "For other sessions, use list_sessions first to get session_id. "
+        "PM/group sessions: omit topic_id. AI sessions: omit topic_id to use current/last topic."
+    ),
+    category="scheduled_task",
+)
+def create_schedule_send_message(
+    name: str,
+    content: str,
+    schedule_type: str,
+    schedule_config: str,
+    session_id: Optional[str] = None,
+    topic_id: Optional[str] = None,
+    description: Optional[str] = None,
+    timezone: str = "Asia/Shanghai",
+    max_runs: Optional[int] = None,
+) -> str:
+    """
+    Create a scheduled task to send a message.
+
+    Args:
+        name: Task name (required).
+        content: Message content (required).
+        schedule_type: "one_shot" | "cron" | "interval".
+        schedule_config: JSON string. one_shot: {"run_at": "ISO datetime"}, cron: {"hour": 0-23, "minute": 0-59}, interval: {"minutes"/"hours"/"days": N}.
+        session_id: Target session UUID. Omit to use current conversation (Agent Chat only).
+        topic_id: For AI sessions only. Omit to use current/last topic.
+        description: Optional description.
+        timezone: e.g. "Asia/Shanghai", "UTC".
+        max_runs: Optional max executions; omit for unlimited.
+
+    Returns:
+        Success message with task details or error string.
+    """
+    user_id = _get_user_id()
+    if user_id is None:
+        return "Error: No user context available."
+
+    name = (name or "").strip()
+    if not name:
+        return "Error: name is required and cannot be empty."
+    content = (content or "").strip()
+    if not content:
+        return "Error: content is required and cannot be empty."
+
+    # Resolve session_id: param or context
+    sid_val = None
+    if session_id and str(session_id).strip():
+        try:
+            sid_val = UUID(str(session_id).strip())
+        except (TypeError, ValueError):
+            return f"Error: Invalid session_id: {session_id}"
+    else:
+        sid_val = agent_session_id.get()
+        if sid_val is None:
+            return "Error: No current session context. Please specify session_id (use list_sessions to find one)."
+
+    # Resolve topic_id: param or context (only when session from context - likely AI)
+    tid_val = None
+    if topic_id and str(topic_id).strip():
+        try:
+            tid_val = UUID(str(topic_id).strip())
+        except (TypeError, ValueError):
+            pass  # invalid topic_id, leave None - handler will use last topic
+    elif sid_val == agent_session_id.get():
+        # session from context - may be AI, include agent_topic_id if available
+        tid_val = agent_topic_id.get()
+
+    task_params: dict = {"session_id": str(sid_val), "content": content}
+    if tid_val is not None:
+        task_params["topic_id"] = str(tid_val)
+
+    if schedule_type not in ("one_shot", "cron", "interval"):
+        return f"Error: schedule_type must be one_shot, cron, or interval, got {schedule_type}"
+
+    try:
+        cfg = json.loads(schedule_config) if isinstance(schedule_config, str) else schedule_config
+        if not isinstance(cfg, dict):
+            raise ValueError("schedule_config must be a JSON object")
+    except json.JSONDecodeError as e:
+        return f"Error: Invalid schedule_config JSON: {e}"
+
+    try:
+        data = ScheduledTaskCreate(
+            name=name[:100],
+            description=(description or "").strip() or None,
+            schedule_type=schedule_type,
+            schedule_config=cfg,
+            timezone=timezone,
+            task_type="send_message",
+            task_params=task_params,
             max_runs=max_runs,
         )
     except Exception as e:

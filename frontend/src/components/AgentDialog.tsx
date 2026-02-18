@@ -15,6 +15,7 @@ import type { Agent, AgentCreate, AgentUpdate, MountedSubagentSummary } from '@/
 import type { McpServerResponse } from '@/types/mcpServer';
 import { X, Plus, ChevronDown, ChevronRight, ShieldCheck } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useTools } from '@/hooks/useTools';
 import { MCPServerConfig } from './MCPServerConfig';
 import { SubAgentSection } from './SubAgentSection';
@@ -151,14 +152,14 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
     }
   };
 
-  /** 组级开关：启用则添加该组全部工具，禁用则移除全部 */
+  /** 组级开关：全选则添加该组全部工具，取消全选则移除全部。部分启用时不显示勾选 */
   const toggleCategory = (categoryName: string) => {
     const cat = categories.find(c => c.category === categoryName);
     if (!cat) return;
     const tools = formData.tools || [];
     const catToolNames = new Set(cat.tools.map(t => t.name));
-    const hasAny = cat.tools.some(t => tools.includes(t.name));
-    if (hasAny) {
+    const hasAll = cat.tools.every(t => tools.includes(t.name));
+    if (hasAll) {
       const nextInterrupt = { ...(formData.interrupt_on || {}) };
       cat.tools.forEach(t => delete nextInterrupt[t.name]);
       setFormData({
@@ -186,9 +187,15 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
     }
   };
 
-  const isCategoryEnabled = (categoryName: string) => {
+  /** 全选时勾选，部分启用时横线(indeterminate)，未启用时不勾选 */
+  const getCategoryCheckedState = (categoryName: string): boolean | 'indeterminate' => {
     const cat = categories.find(c => c.category === categoryName);
-    return cat ? cat.tools.some(t => (formData.tools || []).includes(t.name)) : false;
+    if (!cat) return false;
+    const toolNames = formData.tools || [];
+    const count = cat.tools.filter(t => toolNames.includes(t.name)).length;
+    if (count === 0) return false;
+    if (count === cat.tools.length) return true;
+    return 'indeterminate';
   };
 
   const isToolEnabled = (toolName: string) => (formData.tools || []).includes(toolName);
@@ -411,8 +418,9 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                       {categories.length > 0 ? (
                         <div className="space-y-2 border rounded-lg divide-y">
                           {categories.map((category) => {
-                            const enabled = isCategoryEnabled(category.category);
+                            const checkedState = getCategoryCheckedState(category.category);
                             const expanded = expandedCategories.has(category.category);
+                            const fullyEnabled = checkedState === true;
                             return (
                               <div key={category.category}>
                                 <div className="flex items-center gap-2 px-3 py-2 hover:bg-muted/50">
@@ -425,11 +433,9 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                                     {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                                   </button>
                                   <label className="flex items-center gap-2 flex-1 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={enabled}
-                                      onChange={() => toggleCategory(category.category)}
-                                      className="rounded border-input"
+                                    <Checkbox
+                                      checked={checkedState}
+                                      onCheckedChange={() => toggleCategory(category.category)}
                                     />
                                     <span className="text-sm font-medium">{category.category}</span>
                                     <span className="text-xs text-muted-foreground">({category.tools.length} 个工具)</span>
@@ -437,31 +443,30 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                                 </div>
                                 {expanded && (
                                   <div className="px-6 py-2 space-y-2 bg-muted/20">
-                                    {enabled ? (
-                                      category.tools.map((tool) => (
-                                        <div key={tool.name} className="flex items-center gap-3 py-1.5">
-                                          <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
-                                            <input
-                                              type="checkbox"
-                                              checked={isToolEnabled(tool.name)}
-                                              onChange={() => toggleTool(tool.name)}
-                                              className="rounded border-input shrink-0"
-                                            />
-                                            <span className="text-sm truncate" title={tool.description}>{tool.name}</span>
-                                          </label>
-                                          <div className="flex items-center gap-2 shrink-0">
-                                            <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-                                            <span className="text-xs text-muted-foreground whitespace-nowrap">需人工批准</span>
-                                            <Switch
-                                              checked={isInterruptOn(tool.name)}
-                                              onCheckedChange={() => toggleInterruptOn(tool.name)}
-                                              disabled={!isToolEnabled(tool.name)}
-                                            />
-                                          </div>
+                                    {category.tools.map((tool) => (
+                                      <div key={tool.name} className="flex items-center gap-3 py-1.5">
+                                        <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
+                                          <input
+                                            type="checkbox"
+                                            checked={isToolEnabled(tool.name)}
+                                            onChange={() => toggleTool(tool.name)}
+                                            className="rounded border-input shrink-0"
+                                          />
+                                          <span className="text-sm truncate" title={tool.description}>{tool.name}</span>
+                                        </label>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                                          <span className="text-xs text-muted-foreground whitespace-nowrap">需人工批准</span>
+                                          <Switch
+                                            checked={isInterruptOn(tool.name)}
+                                            onCheckedChange={() => toggleInterruptOn(tool.name)}
+                                            disabled={!isToolEnabled(tool.name)}
+                                          />
                                         </div>
-                                      ))
-                                    ) : (
-                                      <p className="text-xs text-muted-foreground py-2">启用上方组后可在组内配置工具权限</p>
+                                      </div>
+                                    ))}
+                                    {!fullyEnabled && (
+                                      <p className="text-xs text-muted-foreground py-2">可勾选上方工具以部分启用该组；或启用组以一键启用全部</p>
                                     )}
                                   </div>
                                 )}

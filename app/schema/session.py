@@ -44,6 +44,7 @@ class SessionListQuery(BaseModel):
     size: int = Field(20, ge=1, le=200, description="每页数量")
     type: Optional[str] = Field(None, description="按类型筛选")
     source: Optional[str] = Field(None, description="按来源筛选")
+    name_contains: Optional[str] = Field(None, description="按会话名称模糊搜索")
     is_deleted: bool = Field(False, description="是否包含已删除")
 
 

@@ -10,6 +10,27 @@ from pydantic import BaseModel, Field, field_validator
 
 
 # ------------------------------------------------------------------ #
+# Task-specific params (for validation)
+# ------------------------------------------------------------------ #
+
+
+class SendMessageTaskParams(BaseModel):
+    """task_params schema for send_message task_type."""
+
+    session_id: UUID = Field(..., description="Target session UUID")
+    content: str = Field(..., min_length=1, description="Message content")
+    topic_id: Optional[UUID] = Field(None, description="For AI sessions only; omit for PM/group")
+
+    @field_validator("content")
+    @classmethod
+    def strip_content(cls, v: str) -> str:
+        s = (v or "").strip()
+        if not s:
+            raise ValueError("content cannot be empty or whitespace-only")
+        return s
+
+
+# ------------------------------------------------------------------ #
 # Request schemas
 # ------------------------------------------------------------------ #
 

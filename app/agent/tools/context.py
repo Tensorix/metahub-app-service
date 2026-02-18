@@ -17,3 +17,6 @@ agent_user_id: ContextVar[Optional[UUID]] = ContextVar(
 agent_session_id: ContextVar[Optional[UUID]] = ContextVar(
     "agent_session_id", default=None
 )
+agent_topic_id: ContextVar[Optional[UUID]] = ContextVar(
+    "agent_topic_id", default=None
+)

@@ -9,8 +9,13 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.db.model.scheduled_task import ScheduledTask
+from app.db.model.session import Session as SessionModel
 from app.scheduler.core import SchedulerService
-from app.schema.scheduled_task import ScheduledTaskCreate, ScheduledTaskUpdate
+from app.schema.scheduled_task import (
+    ScheduledTaskCreate,
+    ScheduledTaskUpdate,
+    SendMessageTaskParams,
+)
 
 
 class ScheduledTaskService:
@@ -65,6 +70,24 @@ class ScheduledTaskService:
         data: ScheduledTaskCreate,
     ) -> ScheduledTask:
         """Create a scheduled task and register it with the scheduler."""
+        if data.task_type == "send_message":
+            try:
+                params = SendMessageTaskParams(**data.task_params)
+                # Fail-fast: verify session exists and belongs to user
+                session = db.query(SessionModel).filter(
+                    SessionModel.id == params.session_id,
+                    SessionModel.user_id == user_id,
+                    SessionModel.is_deleted == False,
+                ).first()
+                if not session:
+                    raise ValueError(
+                        f"Session {params.session_id} not found or does not belong to user"
+                    )
+            except ValueError as e:
+                raise e
+            except Exception as e:
+                raise ValueError(f"Invalid send_message task_params: {e}") from e
+
         task = ScheduledTask(
             user_id=user_id,
             name=data.name,

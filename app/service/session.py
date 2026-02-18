@@ -57,6 +57,9 @@ class SessionService:
             q = q.filter(SessionModel.type == query.type)
         if query.source:
             q = q.filter(SessionModel.source == query.source)
+        if query.name_contains and query.name_contains.strip():
+            pattern = f"%{query.name_contains.strip()}%"
+            q = q.filter(SessionModel.name.ilike(pattern))
         
         total = q.count()
         offset = (query.page - 1) * query.size

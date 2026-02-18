@@ -17,6 +17,7 @@ from . import datetime_tool
 from . import message_search
 from . import knowledge_base
 from . import scheduled_task
+from . import session_context
 
 __all__ = [
     "search",
@@ -25,4 +26,5 @@ __all__ = [
     "message_search",
     "knowledge_base",
     "scheduled_task",
+    "session_context",
 ]

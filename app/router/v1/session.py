@@ -55,11 +55,15 @@ def get_sessions(
     size: int = Query(20, ge=1, le=200),
     type: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
+    name_contains: Optional[str] = Query(None),
     is_deleted: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    query = SessionListQuery(page=page, size=size, type=type, source=source, is_deleted=is_deleted)
+    query = SessionListQuery(
+        page=page, size=size, type=type, source=source,
+        name_contains=name_contains, is_deleted=is_deleted
+    )
     sessions, total = SessionService.get_sessions(db, query, current_user.id)
     pages = ceil(total / size) if total > 0 else 0
     
