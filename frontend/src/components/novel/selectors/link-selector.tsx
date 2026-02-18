@@ -41,7 +41,7 @@ export function LinkSelector({ open, onOpenChange }: LinkSelectorProps) {
           链接
         </p>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-60 p-0">
+      <PopoverContent portal align="start" className="w-60 p-0">
         <form
           onSubmit={(e) => {
             e.preventDefault();

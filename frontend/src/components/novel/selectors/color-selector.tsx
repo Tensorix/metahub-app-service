@@ -64,6 +64,7 @@ export function ColorSelector({ open, onOpenChange }: ColorSelectorProps) {
         <ChevronDown className="h-4 w-4" />
       </PopoverTrigger>
       <PopoverContent
+        portal
         className="my-1 flex max-h-80 w-48 flex-col overflow-hidden overflow-y-auto rounded border p-1 shadow-xl"
         align="start"
       >

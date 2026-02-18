@@ -113,6 +113,7 @@ export function NodeSelector({ open, onOpenChange }: NodeSelectorProps) {
         <ChevronDown className="h-4 w-4" />
       </PopoverTrigger>
       <PopoverContent
+        portal
         align="start"
         className="w-48 p-1"
       >

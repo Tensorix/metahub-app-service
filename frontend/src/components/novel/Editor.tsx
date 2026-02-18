@@ -126,9 +126,8 @@ export function NovelEditor({
           tippyOptions={{
             placement: 'top',
           }}
-          className="flex w-fit max-w-[90vw] overflow-hidden rounded-md border border-border bg-popover shadow-md"
+          className="flex w-fit max-w-[90vw] overflow-visible rounded-md border border-border bg-popover shadow-md"
         >
-          <Separator orientation="vertical" />
           <NodeSelector open={openNode} onOpenChange={setOpenNode} />
           <Separator orientation="vertical" />
           <LinkSelector open={openLink} onOpenChange={setOpenLink} />

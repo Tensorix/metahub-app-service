@@ -7,6 +7,7 @@ import {
   Code,
 } from 'lucide-react';
 import type { Editor } from '@tiptap/core';
+import { cn } from '@/lib/utils';
 
 interface TextButtonItem {
   name: string;
@@ -58,11 +59,10 @@ export function TextButtons() {
         <EditorBubbleItem
           key={item.name}
           onSelect={() => item.command(editor)}
-          className={
-            item.isActive(editor)
-              ? 'bg-accent text-accent-foreground'
-              : undefined
-          }
+          className={cn(
+            'px-2 py-1',
+            item.isActive(editor) && 'bg-accent text-accent-foreground'
+          )}
         >
           <item.icon className="w-4 h-4" />
         </EditorBubbleItem>
