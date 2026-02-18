@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Save, Loader2 } from 'lucide-react';
+import { Save, Loader2, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
@@ -16,6 +16,9 @@ const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
 interface DocumentEditorProps {
   node: KnowledgeNode;
   onUpdate: () => void;
+  /** 移动端：在标题左侧显示返回按钮 */
+  showBackButton?: boolean;
+  onBack?: () => void;
 }
 
 function parseInitialContent(content: string | null): JSONContent | undefined {
@@ -46,7 +49,7 @@ function parseInitialContent(content: string | null): JSONContent | undefined {
   };
 }
 
-export function DocumentEditor({ node, onUpdate }: DocumentEditorProps) {
+export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: DocumentEditorProps) {
   const { toast } = useToast();
   const [title, setTitle] = useState(node.name);
   const [contentJson, setContentJson] = useState<string>('');
@@ -150,15 +153,26 @@ export function DocumentEditor({ node, onUpdate }: DocumentEditorProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Toolbar */}
+      {/* Toolbar - [返回] [文档标题] [保存] 同一行 */}
       <div className="flex items-center gap-2 px-4 py-2 border-b shrink-0">
+        {showBackButton && onBack && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onBack}
+            className="shrink-0 h-9 w-9"
+            aria-label="返回"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+        )}
         <Input
           value={title}
           onChange={(e) => {
             setTitle(e.target.value);
             setDirty(true);
           }}
-          className="text-lg font-semibold border-none shadow-none px-0 focus-visible:ring-0 h-auto"
+          className="text-lg font-semibold border-none shadow-none px-0 focus-visible:ring-0 h-auto flex-1 min-w-0"
           placeholder="文档标题"
         />
         <Button

@@ -5,9 +5,11 @@ import { Sidebar, SIDEBAR_DEFAULT_WIDTH } from './Sidebar';
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
+import { PageTitleProvider, usePageTitle } from '@/contexts/PageTitleContext';
 
-export function Layout() {
+function LayoutContent() {
   const { isMobile } = useBreakpoints();
+  const { title } = usePageTitle();
   const location = useLocation();
   const isKnowledge = location.pathname.includes('/knowledge');
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
@@ -36,7 +38,9 @@ export function Layout() {
             >
               <Menu className="h-5 w-5" />
             </Button>
-            <h1 className="text-lg font-semibold">MetaHub</h1>
+            <h1 className="text-lg font-semibold truncate flex-1 min-w-0">
+              {title || 'MetaHub'}
+            </h1>
           </div>
         )}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -53,5 +57,13 @@ export function Layout() {
         </div>
       </main>
     </div>
+  );
+}
+
+export function Layout() {
+  return (
+    <PageTitleProvider>
+      <LayoutContent />
+    </PageTitleProvider>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Search, FileText, Table2, ChevronDown, X } from 'lucide-react';
+import { Search, FileText, Table2, ChevronDown, X, ChevronUp } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -13,6 +13,8 @@ import {
 import { knowledgeApi } from '@/lib/knowledgeApi';
 import type { SearchHit, SearchMode } from '@/lib/knowledgeApi';
 import { useToast } from '@/hooks/use-toast';
+import { useBreakpoints } from '@/hooks/useMediaQuery';
+import { cn } from '@/lib/utils';
 
 interface KnowledgeSearchPanelProps {
   folderIds?: string[];
@@ -24,6 +26,7 @@ export function KnowledgeSearchPanel({
   onSelectNode,
 }: KnowledgeSearchPanelProps) {
   const { toast } = useToast();
+  const { isMobile } = useBreakpoints();
   const [query, setQuery] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('fuzzy');
   const [fuzzyWeight, setFuzzyWeight] = useState(0.4);
@@ -33,6 +36,7 @@ export function KnowledgeSearchPanel({
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return;
@@ -83,19 +87,42 @@ export function KnowledgeSearchPanel({
     v != null ? `${(v * 100).toFixed(1)}%` : '-';
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
+    <>
+      {isMobile && expanded && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40"
+          onClick={() => setExpanded(false)}
+          aria-hidden="true"
+        />
+      )}
+      <div
+        className={cn(
+          'fixed z-50 flex flex-col gap-2',
+          isMobile ? 'inset-x-0 bottom-0 items-stretch pb-[env(safe-area-inset-bottom,0)]' : 'bottom-4 right-4 items-end'
+        )}
+      >
       {!expanded ? (
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="flex items-center gap-2 px-4 py-3 rounded-full shadow-lg bg-card border hover:bg-accent/50 transition-colors"
+          className={cn(
+            'flex items-center gap-2 shadow-lg bg-card border hover:bg-accent/50 transition-colors',
+            isMobile ? 'mx-4 mb-4 px-4 py-3 rounded-xl' : 'px-4 py-3 rounded-full'
+          )}
           title="搜索知识库"
         >
           <Search className="w-5 h-5 text-muted-foreground" />
           <span className="text-sm text-muted-foreground">搜索</span>
         </button>
       ) : (
-        <div className="w-[420px] max-w-[calc(100vw-2rem)] rounded-xl border shadow-xl bg-card p-4 space-y-4">
+        <div
+          className={cn(
+            'rounded-xl border shadow-xl bg-card p-4 space-y-4 flex flex-col',
+            isMobile
+              ? 'mx-4 mb-4 w-[calc(100%-2rem)] max-h-[80vh] overflow-hidden flex flex-col'
+              : 'w-full sm:w-[420px] max-w-[calc(100vw-2rem)]'
+          )}
+        >
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium">知识库搜索</span>
             <button
@@ -123,14 +150,14 @@ export function KnowledgeSearchPanel({
         </Button>
       </div>
 
-      <div className="flex flex-wrap gap-4">
+      <div className={cn(isMobile ? 'space-y-3' : 'flex flex-wrap gap-4')}>
         <div className="flex items-center gap-2">
           <Label className="text-sm whitespace-nowrap">检索模式</Label>
           <Select
             value={searchMode}
             onValueChange={(v: SearchMode) => setSearchMode(v)}
           >
-            <SelectTrigger className="w-[130px]">
+            <SelectTrigger className={cn(isMobile ? 'flex-1' : 'w-[130px]')}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -141,32 +168,70 @@ export function KnowledgeSearchPanel({
           </Select>
         </div>
 
-        {searchMode === 'hybrid' && (
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 min-w-[180px]">
-              <Label className="text-xs">模糊权重: {(fuzzyWeight * 100).toFixed(0)}%</Label>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={fuzzyWeight * 100}
-                onChange={(e) => setFuzzyWeight(Number(e.target.value) / 100)}
-                className="w-full"
-              />
+        {searchMode === 'hybrid' &&
+          (isMobile ? (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                权重设置
+              </button>
+              {showAdvanced && (
+                <div className="space-y-3 pt-1">
+                  <div className="space-y-1">
+                    <Label className="text-xs">模糊权重: {(fuzzyWeight * 100).toFixed(0)}%</Label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={fuzzyWeight * 100}
+                      onChange={(e) => setFuzzyWeight(Number(e.target.value) / 100)}
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">向量权重: {(vectorWeight * 100).toFixed(0)}%</Label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={vectorWeight * 100}
+                      onChange={(e) => setVectorWeight(Number(e.target.value) / 100)}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-2 min-w-[180px]">
-              <Label className="text-xs">向量权重: {(vectorWeight * 100).toFixed(0)}%</Label>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={vectorWeight * 100}
-                onChange={(e) => setVectorWeight(Number(e.target.value) / 100)}
-                className="w-full"
-              />
+          ) : (
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 min-w-[180px]">
+                <Label className="text-xs">模糊权重: {(fuzzyWeight * 100).toFixed(0)}%</Label>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={fuzzyWeight * 100}
+                  onChange={(e) => setFuzzyWeight(Number(e.target.value) / 100)}
+                  className="w-full"
+                />
+              </div>
+              <div className="flex items-center gap-2 min-w-[180px]">
+                <Label className="text-xs">向量权重: {(vectorWeight * 100).toFixed(0)}%</Label>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={vectorWeight * 100}
+                  onChange={(e) => setVectorWeight(Number(e.target.value) / 100)}
+                  className="w-full"
+                />
+              </div>
             </div>
-          </div>
-        )}
+          ))}
       </div>
 
       {hits.length > 0 ? (
@@ -174,7 +239,7 @@ export function KnowledgeSearchPanel({
           <p className="text-sm text-muted-foreground">
             共 {total} 条结果
           </p>
-          <div className="max-h-[320px] overflow-y-auto space-y-2">
+          <div className={cn('overflow-y-auto space-y-2', isMobile ? 'max-h-[50vh]' : 'max-h-[320px]')}>
             {hits.map((hit, idx) => {
               const isExpanded = expandedId === String(idx);
               return (
@@ -264,5 +329,6 @@ export function KnowledgeSearchPanel({
         </div>
       )}
     </div>
+    </>
   );
 }

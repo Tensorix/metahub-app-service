@@ -19,6 +19,8 @@ import type {
   EmbeddingModelInfo,
 } from '@/lib/knowledgeApi';
 import { useToast } from '@/hooks/use-toast';
+import { useBreakpoints } from '@/hooks/useMediaQuery';
+import { cn } from '@/lib/utils';
 
 interface FolderDetailProps {
   node: KnowledgeNode;
@@ -44,6 +46,7 @@ export function FolderDetail({
   onConfigUpdate,
 }: FolderDetailProps) {
   const { toast } = useToast();
+  const { isMobile } = useBreakpoints();
   const [showConfig, setShowConfig] = useState(false);
   const [models, setModels] = useState<EmbeddingModelInfo[]>([]);
   const [config, setConfig] = useState<VectorizationConfig>(DEFAULT_CONFIG);
@@ -115,7 +118,12 @@ export function FolderDetail({
   };
 
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-6 px-8 overflow-y-auto">
+    <div
+      className={cn(
+        'flex flex-col items-center justify-center h-full gap-6 overflow-y-auto',
+        isMobile ? 'px-4' : 'px-8'
+      )}
+    >
       <div className="flex flex-col items-center gap-3 text-center">
         <div className="w-16 h-16 rounded-2xl bg-accent flex items-center justify-center">
           <Folder className="w-8 h-8 text-muted-foreground" />
@@ -141,19 +149,24 @@ export function FolderDetail({
         />
       </div>
 
-      {/* Vectorization config */}
+      {/* Vectorization config - 移动端：大触控区 + 展开后可滚动 */}
       <div className="w-full max-w-md space-y-3">
         <Button
           variant="outline"
-          size="sm"
-          className="w-full"
+          size={isMobile ? 'default' : 'sm'}
+          className={cn('w-full', isMobile && 'min-h-11')}
           onClick={() => setShowConfig(!showConfig)}
         >
           <Settings2 className="w-4 h-4 mr-2" />
           {showConfig ? '收起' : '展开'}向量化高级配置
         </Button>
         {showConfig && (
-          <div className="p-4 rounded-lg border bg-card space-y-4">
+          <div
+            className={cn(
+              'rounded-lg border bg-card space-y-4',
+              isMobile ? 'p-4 max-h-[70vh] overflow-y-auto' : 'p-4'
+            )}
+          >
             <p className="text-xs text-muted-foreground">
               修改后需重新执行向量化才能生效
             </p>
@@ -310,7 +323,7 @@ export function FolderDetail({
       </div>
 
       {/* Quick create */}
-      <div className="flex gap-2 flex-wrap justify-center">
+      <div className={cn('flex justify-center', isMobile ? 'flex-col gap-2 w-full max-w-md' : 'gap-2 flex-wrap')}>
         <Button variant="outline" onClick={() => onCreate('folder')}>
           <Folder className="w-4 h-4 mr-2" /> 新建子文件夹
         </Button>

@@ -24,13 +24,14 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Plus, Loader2, GripVertical, GripHorizontal, Trash2 } from 'lucide-react';
+import { Plus, Loader2, GripVertical, GripHorizontal, Trash2, ArrowLeft } from 'lucide-react';
 import { useDebouncedCallback } from 'use-debounce';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { knowledgeApi } from '@/lib/knowledgeApi';
 import type { KnowledgeNode, DatasetRow, FieldDefinition } from '@/lib/knowledgeApi';
 import { CellRenderer } from './cells';
+import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { AddColumnDialog } from './AddColumnDialog';
 import { ColumnHeaderMenu } from './ColumnHeaderMenu';
 import { RowContextMenu } from './RowContextMenu';
@@ -38,6 +39,9 @@ import { RowContextMenu } from './RowContextMenu';
 interface DatasetViewProps {
   node: KnowledgeNode;
   onUpdate: () => void;
+  /** 移动端：在标题左侧显示返回按钮 */
+  showBackButton?: boolean;
+  onBack?: () => void;
 }
 
 function SortableHeader({
@@ -127,8 +131,9 @@ function SortableRow({
   );
 }
 
-export function DatasetView({ node, onUpdate }: DatasetViewProps) {
+export function DatasetView({ node, onUpdate, showBackButton, onBack }: DatasetViewProps) {
   const { toast } = useToast();
+  const { isMobile } = useBreakpoints();
   const toastRef = useRef(toast);
   toastRef.current = toast;
 
@@ -395,24 +400,28 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
         ),
       })
     ),
-    {
-      id: '_actions',
-      header: '',
-      size: 40,
-      minSize: 40,
-      maxSize: 60,
-      enableResizing: false,
-      cell: ({ row }) => (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 opacity-0 group-hover:opacity-100"
-          onClick={() => handleDeleteRow(row.original.id)}
-        >
-          <Trash2 className="w-3 h-3 text-destructive" />
-        </Button>
-      ),
-    },
+    ...(!isMobile
+      ? [
+          {
+            id: '_actions',
+            header: '',
+            size: 40,
+            minSize: 40,
+            maxSize: 60,
+            enableResizing: false,
+            cell: ({ row }: { row: Row<DatasetRow> }) => (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                onClick={() => handleDeleteRow(row.original.id)}
+              >
+                <Trash2 className="w-3 h-3 text-destructive" />
+              </Button>
+            ),
+          } as ColumnDef<DatasetRow>,
+        ]
+      : []),
     {
       id: '_add_col',
       header: () => (
@@ -459,10 +468,21 @@ export function DatasetView({ node, onUpdate }: DatasetViewProps) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-2 border-b shrink-0">
-        <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">{node.name}</h2>
-          <span className="text-xs text-muted-foreground">
+      <div className="flex items-center gap-2 px-4 py-2 border-b shrink-0">
+        {showBackButton && onBack && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onBack}
+            className="shrink-0 h-9 w-9"
+            aria-label="返回"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+        )}
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <h2 className="text-lg font-semibold truncate">{node.name}</h2>
+          <span className="text-xs text-muted-foreground shrink-0">
             {rows.length} 行 · {fields.length} 列
           </span>
         </div>

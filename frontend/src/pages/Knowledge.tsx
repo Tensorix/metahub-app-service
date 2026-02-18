@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, ArrowLeft } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useBreakpoints } from '@/hooks/useMediaQuery';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +19,7 @@ import { KnowledgeTree, DocumentEditor, DatasetView, FolderDetail, KnowledgeSear
 
 export default function Knowledge() {
   const { toast } = useToast();
+  const { isMobile } = useBreakpoints();
   const toastRef = useRef(toast);
   toastRef.current = toast;
 
@@ -25,6 +28,9 @@ export default function Knowledge() {
   const [selectedNode, setSelectedNode] = useState<KnowledgeNode | null>(null);
   const [loading, setLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<NodeTreeItem | null>(null);
+
+  // 移动端视图：'tree' 树形列表 | 'content' 内容详情
+  const [mobileView, setMobileView] = useState<'tree' | 'content'>('tree');
 
   const loadTree = useCallback(async () => {
     try {
@@ -64,6 +70,17 @@ export default function Knowledge() {
 
   const handleSelect = (node: NodeTreeItem) => {
     setSelectedId(node.id);
+    // 移动端：文件夹点击仅展开，不进内容区；文档/表格进入内容区
+    if (isMobile && node.node_type !== 'folder') setMobileView('content');
+  };
+
+  const handleOpenFolderSettings = (node: NodeTreeItem) => {
+    setSelectedId(node.id);
+    if (isMobile) setMobileView('content');
+  };
+
+  const handleBackToTree = () => {
+    setMobileView('tree');
   };
 
   const handleCreate = async (parentId: string | null, type: NodeType) => {
@@ -81,6 +98,7 @@ export default function Knowledge() {
       });
       await loadTree();
       setSelectedId(node.id);
+      if (isMobile) setMobileView('content');
       toast({ title: `${nameMap[type]}已创建` });
     } catch (err) {
       toast({
@@ -111,6 +129,7 @@ export default function Knowledge() {
       if (selectedId === deleteTarget.id) {
         setSelectedId(null);
         setSelectedNode(null);
+        if (isMobile) setMobileView('tree');
       }
       await loadTree();
     } catch {
@@ -171,26 +190,111 @@ export default function Knowledge() {
           />
         );
       case 'document':
-        return <DocumentEditor node={selectedNode} onUpdate={handleNodeUpdate} />;
+        return (
+          <DocumentEditor
+            node={selectedNode}
+            onUpdate={handleNodeUpdate}
+            showBackButton={isMobile}
+            onBack={isMobile ? handleBackToTree : undefined}
+          />
+        );
       case 'dataset':
-        return <DatasetView node={selectedNode} onUpdate={handleNodeUpdate} />;
+        return (
+          <DatasetView
+            node={selectedNode}
+            onUpdate={handleNodeUpdate}
+            showBackButton={isMobile}
+            onBack={isMobile ? handleBackToTree : undefined}
+          />
+        );
       default:
         return null;
     }
   };
 
+  // 移动端：树 / 内容切换显示
+  if (isMobile) {
+    return (
+      <div className="relative flex h-full overflow-hidden">
+        <KnowledgeSearchPanel
+          folderIds={selectedId && findTreeNode(tree, selectedId)?.node_type === 'folder'
+            ? [selectedId]
+            : undefined}
+          onSelectNode={(id) => {
+            setSelectedId(id);
+            setMobileView('content');
+          }}
+        />
+        {mobileView === 'tree' ? (
+          <div className="flex-1 min-w-0 border rounded-lg bg-card flex flex-col overflow-hidden">
+            <KnowledgeTree
+              items={tree}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+              onCreate={handleCreate}
+              onRename={handleRename}
+              onDelete={setDeleteTarget}
+              onToggleVector={handleToggleVector}
+              onOpenFolderSettings={isMobile ? handleOpenFolderSettings : undefined}
+            />
+          </div>
+        ) : (
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+            {/* 文档和表格的返回按钮已集成到各自组件工具栏，文件夹显示通用返回栏 */}
+            {!['document', 'dataset'].includes(findTreeNode(tree, selectedId ?? '')?.node_type ?? '') && (
+              <div className="shrink-0 border-b px-4 py-2 flex items-center gap-2 bg-background">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={handleBackToTree}
+                  className="shrink-0"
+                  aria-label="返回"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </Button>
+                <span className="text-sm text-muted-foreground">返回列表</span>
+              </div>
+            )}
+            <div className="flex-1 min-w-0 overflow-hidden">
+              {renderContent()}
+            </div>
+          </div>
+        )}
+        <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>确认删除</AlertDialogTitle>
+              <AlertDialogDescription>
+                确定要删除「{deleteTarget?.name}」吗？
+                {deleteTarget?.node_type === 'folder' && '文件夹下的所有内容也将被删除。'}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>取消</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDelete}
+                className="bg-destructive text-destructive-foreground"
+              >
+                删除
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    );
+  }
+
+  // 桌面端：左右分栏
   return (
     <div className="relative flex h-full overflow-hidden">
-      {/* Floating search */}
       <KnowledgeSearchPanel
         folderIds={selectedId && findTreeNode(tree, selectedId)?.node_type === 'folder'
           ? [selectedId]
           : undefined}
         onSelectNode={setSelectedId}
       />
-      {/* Left: Tree */}
       <div className="w-64 shrink-0 border-r bg-card flex flex-col overflow-hidden">
-          <KnowledgeTree
+        <KnowledgeTree
           items={tree}
           selectedId={selectedId}
           onSelect={handleSelect}
@@ -200,8 +304,6 @@ export default function Knowledge() {
           onToggleVector={handleToggleVector}
         />
       </div>
-
-      {/* Right: Content */}
       <div className="flex-1 min-w-0 overflow-hidden">
         {renderContent()}
       </div>
