@@ -7,6 +7,7 @@ Responsibilities:
   2. Resolve the handler via the registry.
   3. Execute the handler (sync or async).
   4. Update execution tracking fields (run_count, last_run_*, status).
+  5. Update next_run_at from APScheduler after each execution.
 """
 
 import asyncio
@@ -46,6 +47,10 @@ async def dispatch_task(task_id: UUID) -> None:
             task.last_run_status = "failed"
             task.last_run_error = f"No handler for task_type={task.task_type!r}"
             task.run_count += 1
+            from app.scheduler.core import SchedulerService
+
+            next_run = SchedulerService.get_next_run_time(task_id)
+            task.next_run_at = next_run
             db.commit()
             return
 
@@ -73,8 +78,21 @@ async def dispatch_task(task_id: UUID) -> None:
         # Auto-complete when max_runs is reached
         if task.max_runs is not None and task.run_count >= task.max_runs:
             task.status = "completed"
+            task.next_run_at = None
+            try:
+                from app.scheduler.core import SchedulerService
+
+                SchedulerService.remove_task(task_id)
+            except Exception as e:
+                logger.warning(f"Failed to remove completed task {task_id} from scheduler: {e}")
             logger.info(
                 f"Task {task_id} reached max_runs={task.max_runs}, marked completed"
             )
+        else:
+            # Update next_run_at from APScheduler (cron/interval recalc after each run)
+            from app.scheduler.core import SchedulerService
+
+            next_run = SchedulerService.get_next_run_time(task_id)
+            task.next_run_at = next_run
 
         db.commit()
