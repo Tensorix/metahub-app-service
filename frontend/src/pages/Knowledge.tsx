@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { BookOpen, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
@@ -20,17 +21,40 @@ import { KnowledgeTree, DocumentEditor, DatasetView, FolderDetail, KnowledgeSear
 export default function Knowledge() {
   const { toast } = useToast();
   const { isMobile } = useBreakpoints();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const toastRef = useRef(toast);
   toastRef.current = toast;
 
   const [tree, setTree] = useState<NodeTreeItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedIdInternal] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<KnowledgeNode | null>(null);
   const [loading, setLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<NodeTreeItem | null>(null);
 
   // 移动端视图：'tree' 树形列表 | 'content' 内容详情
   const [mobileView, setMobileView] = useState<'tree' | 'content'>('tree');
+
+  // URL 深度链接：?node=xxx
+  const nodeFromUrl = searchParams.get('node');
+  useEffect(() => {
+    if (nodeFromUrl) {
+      setSelectedIdInternal(nodeFromUrl);
+      if (isMobile) {
+        const node = findTreeNode(tree, nodeFromUrl);
+        if (node && node.node_type !== 'folder') setMobileView('content');
+      }
+    }
+  }, [nodeFromUrl, tree, isMobile]);
+
+  const setSelectedId = useCallback(
+    (id: string | null) => {
+      setSelectedIdInternal(id);
+      const path = id ? `/knowledge?node=${id}` : '/knowledge';
+      navigate(path, { replace: true });
+    },
+    [navigate]
+  );
 
   const loadTree = useCallback(async () => {
     try {

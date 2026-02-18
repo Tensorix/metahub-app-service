@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Calendar, Tag, AlertCircle, LayoutGrid, List, GripVertical, Search, Link2 } from 'lucide-react';
+import { Plus, Trash2, Calendar, Tag, AlertCircle, LayoutGrid, List, GripVertical, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 import { activityApi } from '@/lib/activityApi';
 import type { Activity, ActivityListQuery } from '@/lib/activityApi';
 import ActivityDialog from '@/components/ActivityDialog';
+import { RelationLink } from '@/components/RelationLink';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   DndContext,
@@ -129,13 +130,22 @@ const ActivityCard = ({ activity, onOpen, onDelete, getPriorityColor }: Activity
 
           {/* 关联 */}
           {activity.relations && activity.relations.length > 0 && (
-            <div className="flex items-center gap-1 mb-2 text-xs text-muted-foreground">
-              <Link2 className="w-3 h-3 shrink-0" />
-              <span className="truncate">
-                {activity.relations.length === 1
-                  ? activity.relations[0].name
-                  : `${activity.relations.length} 个关联`}
-              </span>
+            <div
+              className="flex flex-wrap items-center gap-1 mb-2 text-xs"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {activity.relations.slice(0, 3).map((r) => (
+                <RelationLink
+                  key={`${r.type}-${r.id}`}
+                  relation={r}
+                  variant="compact"
+                />
+              ))}
+              {activity.relations.length > 3 && (
+                <span className="text-xs px-2 py-0.5">
+                  +{activity.relations.length - 3}
+                </span>
+              )}
             </div>
           )}
 
@@ -646,6 +656,27 @@ const Activities = () => {
                         <p className="text-sm text-muted-foreground mb-2 line-clamp-2">
                           {activity.comments}
                         </p>
+                      )}
+
+                      {/* 关联 */}
+                      {activity.relations && activity.relations.length > 0 && (
+                        <div
+                          className="flex flex-wrap items-center gap-1 mb-2 text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {activity.relations.slice(0, 3).map((r) => (
+                            <RelationLink
+                              key={`${r.type}-${r.id}`}
+                              relation={r}
+                              variant="compact"
+                            />
+                          ))}
+                          {activity.relations.length > 3 && (
+                            <span className="text-xs px-2 py-0.5">
+                              +{activity.relations.length - 3}
+                            </span>
+                          )}
+                        </div>
                       )}
 
                       {/* 元信息 */}

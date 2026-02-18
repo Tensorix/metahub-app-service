@@ -5,7 +5,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
@@ -15,6 +14,7 @@ import { sessionApi } from '@/lib/api';
 import { knowledgeApi } from '@/lib/knowledgeApi';
 import type { NodeTreeItem } from '@/lib/knowledgeApi';
 import { Badge } from '@/components/ui/badge';
+import { RelationLink } from '@/components/RelationLink';
 import { X, Link2, MessageSquare, FileText, Database } from 'lucide-react';
 
 interface ActivityDialogProps {
@@ -37,7 +37,7 @@ const ActivityDialog = ({ open, onOpenChange, activity, onSuccess }: ActivityDia
   });
   const [tagInput, setTagInput] = useState('');
   const [relations, setRelations] = useState<RelationRef[]>([]);
-  const [relationPopoverOpen, setRelationPopoverOpen] = useState(false);
+  const [relationDialogOpen, setRelationDialogOpen] = useState(false);
   const [sessions, setSessions] = useState<{ id: string; name?: string }[]>([]);
   const [sessionsTopics, setSessionsTopics] = useState<{ id: string; name: string; session_id: string; session_name: string }[]>([]);
   const [knowledgeNodes, setKnowledgeNodes] = useState<NodeTreeItem[]>([]);
@@ -153,20 +153,27 @@ const ActivityDialog = ({ open, onOpenChange, activity, onSuccess }: ActivityDia
     setRelations(relations.filter((r) => !(r.type === type && r.id === id)));
   };
 
-  const getRelationLabel = (r: RelationRef): string => {
+  const toRelationInfo = (r: RelationRef): RelationInfo => {
+    const fromApi = activity?.relations?.find((x) => x.type === r.type && x.id === r.id);
+    if (fromApi) return fromApi;
     if (r.type === 'session') {
       const s = sessions.find((x) => x.id === r.id);
-      return s ? (s.name || `会话 ${r.id.slice(0, 8)}`) : r.id.slice(0, 8);
+      return { type: 'session', id: r.id, name: s ? (s.name || `会话 ${r.id.slice(0, 8)}`) : r.id.slice(0, 8) };
     }
     if (r.type === 'topic') {
       const t = sessionsTopics.find((x) => x.id === r.id);
-      return t ? `${t.name} (${t.session_name})` : r.id.slice(0, 8);
+      return { type: 'topic', id: r.id, name: t?.name ?? r.id.slice(0, 8), session_id: t?.session_id, session_name: t?.session_name };
     }
     const n = knowledgeNodes.find((x) => x.id === r.id);
-    return n ? `${n.name} (${n.node_type})` : r.id.slice(0, 8);
+    return { type: 'node', id: r.id, name: n?.name ?? r.id.slice(0, 8), node_type: n?.node_type };
   };
 
+  const sessionRelations = relations.filter((r) => r.type === 'session');
+  const topicRelations = relations.filter((r) => r.type === 'topic');
+  const nodeRelations = relations.filter((r) => r.type === 'node');
+
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -307,94 +314,48 @@ const ActivityDialog = ({ open, onOpenChange, activity, onSuccess }: ActivityDia
           </div>
 
           <div className="space-y-2">
-            <Label>关联的会话、话题和文档</Label>
-            <div className="flex flex-wrap gap-2 items-center">
-              {relations.map((r) => (
-                <Badge key={`${r.type}-${r.id}`} variant="outline" className="flex items-center gap-1">
-                  {r.type === 'session' && <MessageSquare className="w-3 h-3" />}
-                  {r.type === 'topic' && <Link2 className="w-3 h-3" />}
-                  {r.type === 'node' && <Database className="w-3 h-3" />}
-                  <span className="max-w-[120px] truncate">{getRelationLabel(r)}</span>
-                  <X
-                    className="w-3 h-3 cursor-pointer shrink-0"
-                    onClick={() => removeRelation(r.type, r.id)}
-                  />
-                </Badge>
-              ))}
-              <Popover open={relationPopoverOpen} onOpenChange={setRelationPopoverOpen}>
-                <PopoverTrigger className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3">
-                  添加关联
-                </PopoverTrigger>
-                <PopoverContent className="w-80 p-0" align="start">
-                  <Tabs defaultValue="session" className="w-full">
-                    <TabsList className="w-full grid grid-cols-3">
-                      <TabsTrigger value="session">会话</TabsTrigger>
-                      <TabsTrigger value="topic">话题</TabsTrigger>
-                      <TabsTrigger value="node">文档</TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="session" className="m-0 p-0">
-                      <ScrollArea className="h-48">
-                        {sessions.map((s) => (
-                          <button
-                            key={s.id}
-                            type="button"
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2"
-                            onClick={() => {
-                              addRelation({ type: 'session', id: s.id });
-                              setRelationPopoverOpen(false);
-                            }}
-                          >
-                            <MessageSquare className="w-4 h-4 shrink-0" />
-                            {s.name || `会话 ${s.id.slice(0, 8)}`}
-                          </button>
-                        ))}
-                        {sessions.length === 0 && <p className="p-3 text-sm text-muted-foreground">暂无会话</p>}
-                      </ScrollArea>
-                    </TabsContent>
-                    <TabsContent value="topic" className="m-0 p-0">
-                      <ScrollArea className="h-48">
-                        {sessionsTopics.map((t) => (
-                          <button
-                            key={t.id}
-                            type="button"
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2"
-                            onClick={() => {
-                              addRelation({ type: 'topic', id: t.id });
-                              setRelationPopoverOpen(false);
-                            }}
-                          >
-                            <Link2 className="w-4 h-4 shrink-0" />
-                            <span className="truncate">{t.name}</span>
-                            <span className="text-muted-foreground text-xs truncate">({t.session_name})</span>
-                          </button>
-                        ))}
-                        {sessionsTopics.length === 0 && <p className="p-3 text-sm text-muted-foreground">暂无话题</p>}
-                      </ScrollArea>
-                    </TabsContent>
-                    <TabsContent value="node" className="m-0 p-0">
-                      <ScrollArea className="h-48">
-                        {knowledgeNodes.map((n) => (
-                          <button
-                            key={n.id}
-                            type="button"
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2"
-                            onClick={() => {
-                              addRelation({ type: 'node', id: n.id });
-                              setRelationPopoverOpen(false);
-                            }}
-                          >
-                            {n.node_type === 'dataset' ? <Database className="w-4 h-4 shrink-0" /> : <FileText className="w-4 h-4 shrink-0" />}
-                            <span className="truncate">{n.name}</span>
-                            <span className="text-muted-foreground text-xs">({n.node_type})</span>
-                          </button>
-                        ))}
-                        {knowledgeNodes.length === 0 && <p className="p-3 text-sm text-muted-foreground">暂无文档或表格</p>}
-                      </ScrollArea>
-                    </TabsContent>
-                  </Tabs>
-                </PopoverContent>
-              </Popover>
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-sm">关联的会话、话题和文档</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setRelationDialogOpen(true)}
+              >
+                + 添加
+              </Button>
             </div>
+            {(sessionRelations.length > 0 || topicRelations.length > 0 || nodeRelations.length > 0) ? (
+              <div className="flex flex-wrap gap-1.5">
+                {sessionRelations.map((r) => (
+                  <RelationLink
+                    key={`session-${r.id}`}
+                    relation={toRelationInfo(r)}
+                    variant="card"
+                    onRemove={removeRelation}
+                  />
+                ))}
+                {topicRelations.map((r) => (
+                  <RelationLink
+                    key={`topic-${r.id}`}
+                    relation={toRelationInfo(r)}
+                    variant="card"
+                    onRemove={removeRelation}
+                  />
+                ))}
+                {nodeRelations.map((r) => (
+                  <RelationLink
+                    key={`node-${r.id}`}
+                    relation={toRelationInfo(r)}
+                    variant="card"
+                    onRemove={removeRelation}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">暂无关联</p>
+            )}
           </div>
 
           <DialogFooter>
@@ -408,6 +369,83 @@ const ActivityDialog = ({ open, onOpenChange, activity, onSuccess }: ActivityDia
         </form>
       </DialogContent>
     </Dialog>
+
+    <Dialog open={relationDialogOpen} onOpenChange={setRelationDialogOpen}>
+      <DialogContent className="max-w-md max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>添加关联</DialogTitle>
+        </DialogHeader>
+        <Tabs defaultValue="session" className="flex-1 min-h-0 flex flex-col">
+          <TabsList className="w-full grid grid-cols-3">
+            <TabsTrigger value="session">会话</TabsTrigger>
+            <TabsTrigger value="topic">话题</TabsTrigger>
+            <TabsTrigger value="node">文档</TabsTrigger>
+          </TabsList>
+          <TabsContent value="session" className="m-0 mt-3 flex-1 min-h-0">
+            <ScrollArea className="h-64">
+              {sessions.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2 rounded-md"
+                  onClick={() => {
+                    addRelation({ type: 'session', id: s.id });
+                  }}
+                >
+                  <MessageSquare className="w-4 h-4 shrink-0" />
+                  {s.name || `会话 ${s.id.slice(0, 8)}`}
+                </button>
+              ))}
+              {sessions.length === 0 && <p className="p-3 text-sm text-muted-foreground">暂无会话</p>}
+            </ScrollArea>
+          </TabsContent>
+          <TabsContent value="topic" className="m-0 mt-3 flex-1 min-h-0">
+            <ScrollArea className="h-64">
+              {sessionsTopics.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2 rounded-md"
+                  onClick={() => {
+                    addRelation({ type: 'topic', id: t.id });
+                  }}
+                >
+                  <Link2 className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{t.name}</span>
+                  <span className="text-muted-foreground text-xs truncate">({t.session_name})</span>
+                </button>
+              ))}
+              {sessionsTopics.length === 0 && <p className="p-3 text-sm text-muted-foreground">暂无话题</p>}
+            </ScrollArea>
+          </TabsContent>
+          <TabsContent value="node" className="m-0 mt-3 flex-1 min-h-0">
+            <ScrollArea className="h-64">
+              {knowledgeNodes.map((n) => (
+                <button
+                  key={n.id}
+                  type="button"
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2 rounded-md"
+                  onClick={() => {
+                    addRelation({ type: 'node', id: n.id });
+                  }}
+                >
+                  {n.node_type === 'dataset' ? <Database className="w-4 h-4 shrink-0" /> : <FileText className="w-4 h-4 shrink-0" />}
+                  <span className="truncate">{n.name}</span>
+                  <span className="text-muted-foreground text-xs">({n.node_type})</span>
+                </button>
+              ))}
+              {knowledgeNodes.length === 0 && <p className="p-3 text-sm text-muted-foreground">暂无文档或表格</p>}
+            </ScrollArea>
+          </TabsContent>
+        </Tabs>
+        <DialogFooter className="mt-4">
+          <Button type="button" variant="outline" onClick={() => setRelationDialogOpen(false)}>
+            关闭
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 };
 

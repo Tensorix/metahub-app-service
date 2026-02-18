@@ -1,9 +1,11 @@
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 
 interface PopoverContextValue {
   open: boolean;
   setOpen: (open: boolean) => void;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
 }
 
 const PopoverContext = React.createContext<PopoverContextValue | null>(null);
@@ -22,6 +24,7 @@ const Popover = ({
   className,
 }: PopoverProps) => {
   const [internalOpen, setInternalOpen] = React.useState(false);
+  const triggerRef = React.useRef<HTMLButtonElement | null>(null);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : internalOpen;
   const setOpen = React.useCallback(
@@ -35,7 +38,7 @@ const Popover = ({
     [isControlled, onOpenChange]
   );
   return (
-    <PopoverContext.Provider value={{ open, setOpen }}>
+    <PopoverContext.Provider value={{ open, setOpen, triggerRef }}>
       <div className={cn('relative inline-block', className)}>{children}</div>
     </PopoverContext.Provider>
   );
@@ -46,9 +49,17 @@ const PopoverTrigger = React.forwardRef<
   React.ButtonHTMLAttributes<HTMLButtonElement>
 >(({ children, onClick, ...props }, ref) => {
   const ctx = React.useContext(PopoverContext);
+  const setRefs = React.useCallback(
+    (el: HTMLButtonElement | null) => {
+      (ctx?.triggerRef as React.MutableRefObject<HTMLButtonElement | null>).current = el;
+      if (typeof ref === 'function') ref(el);
+      else if (ref) (ref as React.MutableRefObject<HTMLButtonElement | null>).current = el;
+    },
+    [ctx?.triggerRef, ref]
+  );
   return (
     <button
-      ref={ref}
+      ref={setRefs}
       type="button"
       onClick={(e) => {
         ctx?.setOpen(!ctx.open);
@@ -64,8 +75,8 @@ PopoverTrigger.displayName = 'PopoverTrigger';
 
 const PopoverContent = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement> & { align?: 'start' | 'end' }
->(({ className, align = 'end', children, ...props }, _forwardedRef) => {
+  React.HTMLAttributes<HTMLDivElement> & { align?: 'start' | 'end'; portal?: boolean }
+>(({ className, align = 'end', portal = false, children, ...props }, _forwardedRef) => {
   const ctx = React.useContext(PopoverContext);
   const contentRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -87,22 +98,42 @@ const PopoverContent = React.forwardRef<
 
   if (!ctx?.open) return null;
 
-  return (
+  const content = (
     <div
       ref={(el) => {
         (contentRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
       }}
       className={cn(
-        'absolute z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md',
+        portal ? 'z-[10000]' : 'absolute z-50',
+        'min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md',
         align === 'end' ? 'right-0' : 'left-0',
-        'mt-1',
+        portal ? '' : 'mt-1',
         className
       )}
+      style={
+        portal && ctx.triggerRef?.current
+          ? (() => {
+              const rect = ctx.triggerRef.current!.getBoundingClientRect();
+              return {
+                position: 'fixed' as const,
+                top: rect.bottom + 4,
+                left: align === 'start' ? rect.left : undefined,
+                right: align === 'end' ? window.innerWidth - rect.right : undefined,
+              };
+            })()
+          : undefined
+      }
       {...props}
     >
       {children}
     </div>
   );
+
+  if (portal) {
+    return createPortal(content, document.body);
+  }
+
+  return content;
 });
 PopoverContent.displayName = 'PopoverContent';
 
