@@ -2,7 +2,7 @@ import hashlib
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import bcrypt
 from jose import jwt, JWTError
@@ -81,13 +81,18 @@ class TokenService:
 
     @staticmethod
     def create_refresh_token(user_id: UUID) -> tuple[str, datetime]:
-        """创建 refresh_token，返回 (token, 过期时间)"""
-        expire = datetime.now(timezone.utc) + timedelta(days=config.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
+        """创建 refresh_token，返回 (token, 过期时间)
+
+        使用 jti (JWT ID) 确保每个 token 唯一，避免并发刷新时因 iat 相同导致 hash 冲突。
+        """
+        now = datetime.now(timezone.utc)
+        expire = now + timedelta(days=config.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
         payload = {
             "sub": str(user_id),
             "type": "refresh",
+            "jti": str(uuid4()),  # 唯一标识，防止并发刷新生成相同 token
             "exp": expire,
-            "iat": datetime.now(timezone.utc),
+            "iat": now,
         }
         token = jwt.encode(payload, config.JWT_SECRET_KEY, algorithm=config.JWT_ALGORITHM)
         return token, expire
@@ -193,12 +198,12 @@ class AuthService:
             logger.warning("Refresh token payload 中缺少 sub 字段")
             return None
 
-        # 查找 token 记录
+        # 查找 token 记录（加行锁防止并发刷新同一 token）
         token_hash = TokenService.hash_refresh_token(refresh_token)
         token_record = db.query(UserToken).filter(
             UserToken.refresh_token_hash == token_hash,
             UserToken.is_revoked == False,
-        ).first()
+        ).with_for_update().first()
 
         if not token_record:
             # 检查是否是已撤销的 token（竞态条件或重复使用）
