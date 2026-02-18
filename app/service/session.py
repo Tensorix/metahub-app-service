@@ -167,6 +167,27 @@ class TopicService:
         ).order_by(Topic.created_at.desc()).all()
 
     @staticmethod
+    def get_topics_by_user(db: Session, user_id: UUID, limit: Optional[int] = 500) -> list[tuple[Topic, Optional[str]]]:
+        """返回用户所有话题，附带 session 名称。返回 [(Topic, session_name?), ...]"""
+        topics = (
+            db.query(Topic)
+            .filter(Topic.user_id == user_id, Topic.is_deleted == False)
+            .order_by(Topic.created_at.desc())
+            .limit(limit or 500)
+            .all()
+        )
+        if not topics:
+            return []
+        session_ids = list({t.session_id for t in topics})
+        sessions = {
+            s.id: (s.name or "(未命名)")
+            for s in db.query(SessionModel)
+            .filter(SessionModel.id.in_(session_ids), SessionModel.user_id == user_id)
+            .all()
+        }
+        return [(t, sessions.get(t.session_id)) for t in topics]
+
+    @staticmethod
     def update_topic(db: Session, topic_id: UUID, data: TopicUpdate, user_id: UUID) -> Optional[Topic]:
         topic = TopicService.get_topic(db, topic_id, user_id)
         if not topic:

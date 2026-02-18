@@ -38,6 +38,27 @@ async def create_session(data: SessionCreate, db: Session = Depends(get_db), cur
         raise HTTPException(status_code=500, detail=f"创建失败: {str(e)}")
 
 
+@router.get("/sessions/topics", summary="获取当前用户全部话题")
+def get_sessions_topics(
+    limit: Optional[int] = Query(500, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """返回当前用户的所有话题，带 session_id、session_name"""
+    items = TopicService.get_topics_by_user(db, current_user.id, limit=limit)
+    return [
+        {
+            "id": str(t.id),
+            "name": t.name or "(未命名)",
+            "session_id": str(t.session_id),
+            "session_name": session_name or "(未命名会话)",
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+        }
+        for t, session_name in items
+    ]
+
+
 @router.get("/sessions/{session_id}", response_model=SessionResponse, summary="获取会话详情")
 def get_session(session_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     session = SessionService.get_session(db, session_id, current_user.id)

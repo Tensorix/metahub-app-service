@@ -225,6 +225,15 @@ export interface Topic {
   is_deleted: boolean;
 }
 
+export interface SessionsTopicItem {
+  id: string;
+  name: string;
+  session_id: string;
+  session_name: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export interface TopicCreate {
   name?: string;
   session_id: string;
@@ -446,6 +455,12 @@ export const sessionApi = {
 
   async getTopics(sessionId: string): Promise<Topic[]> {
     const response = await api.get(`/api/v1/sessions/${sessionId}/topics`);
+    return response.data;
+  },
+
+  /** 获取当前用户全部话题（带 session 信息） */
+  async getSessionsTopics(limit = 500): Promise<SessionsTopicItem[]> {
+    const response = await api.get('/api/v1/sessions/topics', { params: { limit } });
     return response.data;
   },
 

@@ -1,6 +1,6 @@
 from app.db.model import Base
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid7
 
 from sqlalchemy import (
@@ -14,7 +14,10 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+if TYPE_CHECKING:
+    from app.db.model.activity_relation import ActivityRelation
 
 
 class Activity(Base):
@@ -81,4 +84,12 @@ class Activity(Base):
     )
     is_deleted: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, comment="是否删除"
+    )
+
+    # Relationships
+    relations: Mapped[list["ActivityRelation"]] = relationship(
+        "ActivityRelation",
+        back_populates="activity",
+        foreign_keys="ActivityRelation.activity_id",
+        lazy="selectin",
     )

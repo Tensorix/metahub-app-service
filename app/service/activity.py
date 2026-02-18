@@ -6,6 +6,7 @@ from math import ceil
 
 from app.db.model.activity import Activity
 from app.schema.activity import ActivityCreate, ActivityUpdate, ActivityListQuery
+from app.service.activity_relation_service import ActivityRelationService
 
 
 class ActivityService:
@@ -14,8 +15,15 @@ class ActivityService:
     @staticmethod
     def create_activity(db: Session, activity_data: ActivityCreate, user_id: UUID) -> Activity:
         """创建活动（带用户隔离）"""
-        db_activity = Activity(user_id=user_id, **activity_data.model_dump())
+        data = activity_data.model_dump(exclude={"relations"})
+        db_activity = Activity(user_id=user_id, **data)
         db.add(db_activity)
+        db.flush()
+        if activity_data.relations:
+            ActivityRelationService.set_relations(
+                db, db_activity.id, user_id,
+                [{"type": r.type, "id": r.id} for r in activity_data.relations],
+            )
         db.commit()
         db.refresh(db_activity)
         return db_activity
@@ -76,15 +84,22 @@ class ActivityService:
         db_activity = ActivityService.get_activity(db, activity_id, user_id)
         if not db_activity:
             return None
-        
-        # 只更新提供的字段
+
         update_data = activity_data.model_dump(exclude_unset=True)
+        relations = update_data.pop("relations", None)
         for field, value in update_data.items():
             setattr(db_activity, field, value)
-        
-        # 版本号递增
+
+        if relations is not None:
+            refs = [
+                {"type": r["type"], "id": r["id"]}
+                if isinstance(r, dict)
+                else {"type": r.type, "id": r.id}
+                for r in relations
+            ]
+            ActivityRelationService.set_relations(db, activity_id, user_id, refs)
+
         db_activity.version += 1
-        
         db.commit()
         db.refresh(db_activity)
         return db_activity

@@ -1,5 +1,21 @@
 import { apiClient } from './api';
 
+export type RelationType = 'session' | 'topic' | 'node';
+
+export interface RelationRef {
+  type: RelationType;
+  id: string;
+}
+
+export interface RelationInfo {
+  type: RelationType;
+  id: string;
+  name: string;
+  session_id?: string;
+  session_name?: string;
+  node_type?: string;
+}
+
 export interface Activity {
   id: string;
   type: string;
@@ -10,6 +26,7 @@ export interface Activity {
   source_type?: string;
   source_id?: string;
   relation_ids?: string[];
+  relations?: RelationInfo[];
   status: 'pending' | 'active' | 'done' | 'dismissed';
   remind_at?: string;
   due_date?: string;
@@ -27,12 +44,14 @@ export interface ActivityCreate {
   source_type?: string;
   source_id?: string;
   relation_ids?: string[];
+  relations?: RelationRef[];
   status?: 'pending' | 'active' | 'done' | 'dismissed';
   remind_at?: string;
   due_date?: string;
 }
 
 export interface ActivityUpdate {
+  relations?: RelationRef[];
   type?: string;
   name?: string;
   priority?: number;

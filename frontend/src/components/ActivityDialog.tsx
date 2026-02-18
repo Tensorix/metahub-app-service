@@ -5,11 +5,17 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { activityApi } from '@/lib/activityApi';
-import type { Activity, ActivityCreate, ActivityUpdate } from '@/lib/activityApi';
+import type { Activity, ActivityCreate, ActivityUpdate, RelationRef, RelationInfo } from '@/lib/activityApi';
+import { sessionApi } from '@/lib/api';
+import { knowledgeApi } from '@/lib/knowledgeApi';
+import type { NodeTreeItem } from '@/lib/knowledgeApi';
 import { Badge } from '@/components/ui/badge';
-import { X } from 'lucide-react';
+import { X, Link2, MessageSquare, FileText, Database } from 'lucide-react';
 
 interface ActivityDialogProps {
   open: boolean;
@@ -30,6 +36,11 @@ const ActivityDialog = ({ open, onOpenChange, activity, onSuccess }: ActivityDia
     tags: [],
   });
   const [tagInput, setTagInput] = useState('');
+  const [relations, setRelations] = useState<RelationRef[]>([]);
+  const [relationPopoverOpen, setRelationPopoverOpen] = useState(false);
+  const [sessions, setSessions] = useState<{ id: string; name?: string }[]>([]);
+  const [sessionsTopics, setSessionsTopics] = useState<{ id: string; name: string; session_id: string; session_name: string }[]>([]);
+  const [knowledgeNodes, setKnowledgeNodes] = useState<NodeTreeItem[]>([]);
 
   useEffect(() => {
     if (open) {
@@ -44,6 +55,9 @@ const ActivityDialog = ({ open, onOpenChange, activity, onSuccess }: ActivityDia
           remind_at: activity.remind_at,
           due_date: activity.due_date,
         });
+        setRelations(
+          (activity.relations || []).map((r: RelationInfo) => ({ type: r.type, id: r.id }))
+        );
       } else {
         setFormData({
           type: 'task',
@@ -53,8 +67,22 @@ const ActivityDialog = ({ open, onOpenChange, activity, onSuccess }: ActivityDia
           comments: '',
           tags: [],
         });
+        setRelations([]);
       }
       setTagInput('');
+      sessionApi.getSessions({ page: 1, size: 200 }).then((res) => setSessions(res.items));
+      sessionApi.getSessionsTopics(500).then(setSessionsTopics);
+      knowledgeApi.getTree().then((res) => {
+        const flatten = (items: NodeTreeItem[]): NodeTreeItem[] =>
+          items.flatMap((n) =>
+            (n.node_type === 'document' || n.node_type === 'dataset')
+              ? [n]
+              : n.children
+                ? [n, ...flatten(n.children)]
+                : [n]
+          );
+        setKnowledgeNodes(flatten(res.items || []).filter((n) => n.node_type === 'document' || n.node_type === 'dataset'));
+      });
     }
   }, [activity, open]);
 
@@ -72,14 +100,15 @@ const ActivityDialog = ({ open, onOpenChange, activity, onSuccess }: ActivityDia
 
     setLoading(true);
     try {
+      const payload = { ...formData, relations };
       if (activity) {
-        await activityApi.updateActivity(activity.id, formData as ActivityUpdate);
+        await activityApi.updateActivity(activity.id, payload as ActivityUpdate);
         toast({
           title: '更新成功',
           description: '活动已更新',
         });
       } else {
-        await activityApi.createActivity(formData);
+        await activityApi.createActivity(payload);
         toast({
           title: '创建成功',
           description: '活动已创建',
@@ -113,6 +142,28 @@ const ActivityDialog = ({ open, onOpenChange, activity, onSuccess }: ActivityDia
       ...formData,
       tags: formData.tags?.filter((t) => t !== tag) || [],
     });
+  };
+
+  const addRelation = (ref: RelationRef) => {
+    if (relations.some((r) => r.type === ref.type && r.id === ref.id)) return;
+    setRelations([...relations, ref]);
+  };
+
+  const removeRelation = (type: RelationRef['type'], id: string) => {
+    setRelations(relations.filter((r) => !(r.type === type && r.id === id)));
+  };
+
+  const getRelationLabel = (r: RelationRef): string => {
+    if (r.type === 'session') {
+      const s = sessions.find((x) => x.id === r.id);
+      return s ? (s.name || `会话 ${r.id.slice(0, 8)}`) : r.id.slice(0, 8);
+    }
+    if (r.type === 'topic') {
+      const t = sessionsTopics.find((x) => x.id === r.id);
+      return t ? `${t.name} (${t.session_name})` : r.id.slice(0, 8);
+    }
+    const n = knowledgeNodes.find((x) => x.id === r.id);
+    return n ? `${n.name} (${n.node_type})` : r.id.slice(0, 8);
   };
 
   return (
@@ -253,6 +304,97 @@ const ActivityDialog = ({ open, onOpenChange, activity, onSuccess }: ActivityDia
                 ))}
               </div>
             )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>关联的会话、话题和文档</Label>
+            <div className="flex flex-wrap gap-2 items-center">
+              {relations.map((r) => (
+                <Badge key={`${r.type}-${r.id}`} variant="outline" className="flex items-center gap-1">
+                  {r.type === 'session' && <MessageSquare className="w-3 h-3" />}
+                  {r.type === 'topic' && <Link2 className="w-3 h-3" />}
+                  {r.type === 'node' && <Database className="w-3 h-3" />}
+                  <span className="max-w-[120px] truncate">{getRelationLabel(r)}</span>
+                  <X
+                    className="w-3 h-3 cursor-pointer shrink-0"
+                    onClick={() => removeRelation(r.type, r.id)}
+                  />
+                </Badge>
+              ))}
+              <Popover open={relationPopoverOpen} onOpenChange={setRelationPopoverOpen}>
+                <PopoverTrigger className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3">
+                  添加关联
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-0" align="start">
+                  <Tabs defaultValue="session" className="w-full">
+                    <TabsList className="w-full grid grid-cols-3">
+                      <TabsTrigger value="session">会话</TabsTrigger>
+                      <TabsTrigger value="topic">话题</TabsTrigger>
+                      <TabsTrigger value="node">文档</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="session" className="m-0 p-0">
+                      <ScrollArea className="h-48">
+                        {sessions.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2"
+                            onClick={() => {
+                              addRelation({ type: 'session', id: s.id });
+                              setRelationPopoverOpen(false);
+                            }}
+                          >
+                            <MessageSquare className="w-4 h-4 shrink-0" />
+                            {s.name || `会话 ${s.id.slice(0, 8)}`}
+                          </button>
+                        ))}
+                        {sessions.length === 0 && <p className="p-3 text-sm text-muted-foreground">暂无会话</p>}
+                      </ScrollArea>
+                    </TabsContent>
+                    <TabsContent value="topic" className="m-0 p-0">
+                      <ScrollArea className="h-48">
+                        {sessionsTopics.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2"
+                            onClick={() => {
+                              addRelation({ type: 'topic', id: t.id });
+                              setRelationPopoverOpen(false);
+                            }}
+                          >
+                            <Link2 className="w-4 h-4 shrink-0" />
+                            <span className="truncate">{t.name}</span>
+                            <span className="text-muted-foreground text-xs truncate">({t.session_name})</span>
+                          </button>
+                        ))}
+                        {sessionsTopics.length === 0 && <p className="p-3 text-sm text-muted-foreground">暂无话题</p>}
+                      </ScrollArea>
+                    </TabsContent>
+                    <TabsContent value="node" className="m-0 p-0">
+                      <ScrollArea className="h-48">
+                        {knowledgeNodes.map((n) => (
+                          <button
+                            key={n.id}
+                            type="button"
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2"
+                            onClick={() => {
+                              addRelation({ type: 'node', id: n.id });
+                              setRelationPopoverOpen(false);
+                            }}
+                          >
+                            {n.node_type === 'dataset' ? <Database className="w-4 h-4 shrink-0" /> : <FileText className="w-4 h-4 shrink-0" />}
+                            <span className="truncate">{n.name}</span>
+                            <span className="text-muted-foreground text-xs">({n.node_type})</span>
+                          </button>
+                        ))}
+                        {knowledgeNodes.length === 0 && <p className="p-3 text-sm text-muted-foreground">暂无文档或表格</p>}
+                      </ScrollArea>
+                    </TabsContent>
+                  </Tabs>
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
 
           <DialogFooter>

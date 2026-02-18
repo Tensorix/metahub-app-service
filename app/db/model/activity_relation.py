@@ -9,7 +9,7 @@ from sqlalchemy import (
     String,
     func,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 
 class ActivityRelation(Base):
@@ -41,4 +41,11 @@ class ActivityRelation(Base):
     )
     is_deleted: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, comment="是否删除"
+    )
+
+    # Relationships
+    activity: Mapped["Activity"] = relationship(
+        "Activity",
+        back_populates="relations",
+        foreign_keys=[activity_id],
     )

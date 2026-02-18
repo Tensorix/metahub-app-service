@@ -1,7 +1,23 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 from pydantic import BaseModel, Field, ConfigDict
+
+
+class RelationRef(BaseModel):
+    """关联引用：创建/更新时提交"""
+    type: Literal["session", "topic", "node"] = Field(..., description="目标类型")
+    id: str = Field(..., description="目标 ID")
+
+
+class RelationInfo(BaseModel):
+    """关联信息：响应中返回（已解析名称等）"""
+    type: Literal["session", "topic", "node"] = Field(..., description="目标类型")
+    id: str = Field(..., description="目标 ID")
+    name: str = Field(..., description="显示名称")
+    session_id: Optional[str] = Field(None, description="所属会话 ID（topic 时）")
+    session_name: Optional[str] = Field(None, description="所属会话名称（topic 时）")
+    node_type: Optional[str] = Field(None, description="知识库节点类型（document/dataset）")
 
 
 class ActivityBase(BaseModel):
@@ -21,11 +37,12 @@ class ActivityBase(BaseModel):
 
 class ActivityCreate(ActivityBase):
     """创建 Activity 的请求模型"""
-    pass
+    relations: Optional[list[RelationRef]] = Field(None, description="关联的会话、话题、文档")
 
 
 class ActivityUpdate(BaseModel):
     """更新 Activity 的请求模型"""
+    relations: Optional[list[RelationRef]] = Field(None, description="关联的会话、话题、文档")
     type: Optional[str] = Field(None, description="活动类型", max_length=100)
     name: Optional[str] = Field(None, description="活动名称", max_length=255)
     priority: Optional[int] = Field(None, description="优先级，数字越大优先级越高")
@@ -42,11 +59,19 @@ class ActivityUpdate(BaseModel):
 class ActivityResponse(ActivityBase):
     """Activity 响应模型"""
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID = Field(..., description="活动ID")
     created_at: datetime = Field(..., description="创建时间")
     updated_at: datetime = Field(..., description="更新时间")
     is_deleted: bool = Field(..., description="是否删除")
+    relations: list[RelationInfo] = Field(default_factory=list, description="关联的会话、话题、文档（已解析）")
+
+    @classmethod
+    def from_activity(cls, activity, relations: list[RelationInfo]) -> "ActivityResponse":
+        """从 Activity 构建响应，relations 由外部解析后传入"""
+        data = {f: getattr(activity, f) for f in cls.model_fields if f != "relations" and hasattr(activity, f)}
+        data["relations"] = relations
+        return cls(**data)
 
 
 class ActivityListQuery(BaseModel):

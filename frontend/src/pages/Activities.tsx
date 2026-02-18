@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Calendar, Tag, AlertCircle, LayoutGrid, List, GripVertical, Search } from 'lucide-react';
+import { Plus, Trash2, Calendar, Tag, AlertCircle, LayoutGrid, List, GripVertical, Search, Link2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -124,6 +124,18 @@ const ActivityCard = ({ activity, onOpen, onDelete, getPriorityColor }: Activity
                   +{activity.tags.length - 3}
                 </Badge>
               )}
+            </div>
+          )}
+
+          {/* 关联 */}
+          {activity.relations && activity.relations.length > 0 && (
+            <div className="flex items-center gap-1 mb-2 text-xs text-muted-foreground">
+              <Link2 className="w-3 h-3 shrink-0" />
+              <span className="truncate">
+                {activity.relations.length === 1
+                  ? activity.relations[0].name
+                  : `${activity.relations.length} 个关联`}
+              </span>
             </div>
           )}
 
