@@ -43,7 +43,7 @@ function LayoutContent() {
             </h1>
           </div>
         )}
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
           <div
             className={cn(
               'flex-1 flex flex-col min-h-0',

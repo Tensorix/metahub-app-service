@@ -52,6 +52,7 @@ def create_task(
 def list_tasks(
     status: Optional[str] = Query(None, description="按状态过滤: active/paused/completed/expired"),
     task_type: Optional[str] = Query(None, description="按任务类型过滤"),
+    search: Optional[str] = Query(None, description="搜索任务名称或描述"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -62,6 +63,7 @@ def list_tasks(
         db, current_user.id,
         status=status,
         task_type=task_type,
+        search=search,
         limit=limit,
         offset=offset,
     )

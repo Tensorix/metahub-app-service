@@ -138,6 +138,7 @@ export const scheduledTaskApi = {
   async listTasks(params?: {
     status?: string;
     task_type?: string;
+    search?: string;
     limit?: number;
     offset?: number;
   }): Promise<ScheduledTaskListResponse> {

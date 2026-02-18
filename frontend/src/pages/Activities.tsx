@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Calendar, Tag, AlertCircle, LayoutGrid, List, GripVertical } from 'lucide-react';
+import { Plus, Trash2, Calendar, Tag, AlertCircle, LayoutGrid, List, GripVertical, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -263,6 +263,9 @@ const Activities = () => {
     size: 100,
   });
 
+  // 客户端搜索（按名称）
+  const [searchQuery, setSearchQuery] = useState('');
+
   // 配置拖拽传感器
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -368,9 +371,16 @@ const Activities = () => {
     }
   };
 
+  // 按名称过滤（客户端）+ 排除已删除
+  const filteredActivities = activities.filter(
+    (a) =>
+      !a.is_deleted &&
+      (!searchQuery || a.name.toLowerCase().includes(searchQuery.toLowerCase().trim()))
+  );
+
   // 按状态分组活动
   const groupedActivities = BOARD_COLUMNS.reduce((acc, column) => {
-    acc[column.status] = activities.filter(a => a.status === column.status && !a.is_deleted);
+    acc[column.status] = filteredActivities.filter((a) => a.status === column.status);
     return acc;
   }, {} as Record<Activity['status'], Activity[]>);
 
@@ -459,59 +469,116 @@ const Activities = () => {
         </div>
       </div>
 
-      {/* 筛选栏 */}
-      <div className="flex-shrink-0 px-6 pb-4">
-        <Card className="p-4">
-          <div className="flex flex-wrap gap-4">
-            <div className="flex-1 min-w-[200px]">
-              <Input
-                placeholder="搜索活动名称..."
-                onChange={() => {
-                  // 这里可以添加搜索逻辑
-                }}
-              />
+      {/* 筛选栏：移动端紧凑单行，桌面端保持原布局 */}
+      <div className="flex-shrink-0 px-4 sm:px-6 pb-3 sm:pb-4">
+        <Card className="p-3 sm:p-4">
+          {isMobile ? (
+            /* 移动端：紧凑布局，类型+优先级同一行，减少垂直占用 */
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground shrink-0" />
+                <Input
+                  placeholder="搜索活动名称..."
+                  className="pl-8 h-9 text-sm"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Select
+                  value={filters.type || 'all'}
+                  onValueChange={(value) => {
+                    setFilters({ ...filters, type: value === 'all' ? undefined : value });
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="类型" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部类型</SelectItem>
+                    <SelectItem value="meeting">会议</SelectItem>
+                    <SelectItem value="task">任务</SelectItem>
+                    <SelectItem value="reminder">提醒</SelectItem>
+                    <SelectItem value="ping">Ping</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={filters.priority_min?.toString() || 'all'}
+                  onValueChange={(value) => {
+                    setFilters({
+                      ...filters,
+                      priority_min: value === 'all' ? undefined : parseInt(value),
+                    });
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="优先级" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部优先级</SelectItem>
+                    <SelectItem value="8">高优先级 (≥8)</SelectItem>
+                    <SelectItem value="5">中优先级 (≥5)</SelectItem>
+                    <SelectItem value="3">低优先级 (≥3)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            
-            <Select
-              value={filters.type || 'all'}
-              onValueChange={(value) => {
-                setFilters({ ...filters, type: value === 'all' ? undefined : value });
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="类型" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部类型</SelectItem>
-                <SelectItem value="meeting">会议</SelectItem>
-                <SelectItem value="task">任务</SelectItem>
-                <SelectItem value="reminder">提醒</SelectItem>
-                <SelectItem value="ping">Ping</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={filters.priority_min?.toString() || 'all'}
-              onValueChange={(value) => {
-                setFilters({ 
-                  ...filters, 
-                  priority_min: value === 'all' ? undefined : parseInt(value) 
-                });
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="优先级" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部优先级</SelectItem>
-                <SelectItem value="8">高优先级 (≥8)</SelectItem>
-                <SelectItem value="5">中优先级 (≥5)</SelectItem>
-                <SelectItem value="3">低优先级 (≥3)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          ) : (
+            /* 桌面端：保持原有横排布局 */
+            <div className="flex flex-wrap gap-4">
+              <div className="flex-1 min-w-[200px]">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="搜索活动名称..."
+                    className="pl-9"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+              <Select
+                value={filters.type || 'all'}
+                onValueChange={(value) => {
+                  setFilters({ ...filters, type: value === 'all' ? undefined : value });
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="类型" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部类型</SelectItem>
+                  <SelectItem value="meeting">会议</SelectItem>
+                  <SelectItem value="task">任务</SelectItem>
+                  <SelectItem value="reminder">提醒</SelectItem>
+                  <SelectItem value="ping">Ping</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={filters.priority_min?.toString() || 'all'}
+                onValueChange={(value) => {
+                  setFilters({
+                    ...filters,
+                    priority_min: value === 'all' ? undefined : parseInt(value),
+                  });
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="优先级" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部优先级</SelectItem>
+                  <SelectItem value="8">高优先级 (≥8)</SelectItem>
+                  <SelectItem value="5">中优先级 (≥5)</SelectItem>
+                  <SelectItem value="3">低优先级 (≥3)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </Card>
       </div>
 
@@ -533,7 +600,7 @@ const Activities = () => {
           // 列表视图（移动端或用户选择）
           <ScrollArea className="h-full">
             <div className="space-y-3 pb-4">
-              {activities.filter(a => !a.is_deleted).map((activity) => (
+              {filteredActivities.map((activity) => (
                 <Card
                   key={activity.id}
                   className="p-4 hover:shadow-md transition-shadow cursor-pointer"

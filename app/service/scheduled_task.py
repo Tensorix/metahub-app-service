@@ -6,6 +6,7 @@ from typing import Optional
 from uuid import UUID
 
 from loguru import logger
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db.model.scheduled_task import ScheduledTask
@@ -39,6 +40,7 @@ class ScheduledTaskService:
         user_id: UUID,
         status: Optional[str] = None,
         task_type: Optional[str] = None,
+        search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[ScheduledTask], int]:
@@ -48,6 +50,15 @@ class ScheduledTaskService:
             query = query.filter(ScheduledTask.status == status)
         if task_type:
             query = query.filter(ScheduledTask.task_type == task_type)
+        if search and search.strip():
+            term = search.strip().replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{term}%"
+            query = query.filter(
+                or_(
+                    ScheduledTask.name.ilike(pattern),
+                    ScheduledTask.description.ilike(pattern),
+                )
+            )
 
         total = query.count()
         tasks = (

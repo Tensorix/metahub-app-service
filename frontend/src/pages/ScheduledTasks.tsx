@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Plus,
   Pencil,
@@ -7,6 +7,7 @@ import {
   Pause,
   RotateCw,
   Zap,
+  Search,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { DeleteScheduledTaskDialog } from '@/components/DeleteScheduledTaskDialog';
 import {
@@ -30,6 +32,7 @@ import type {
   ScheduledTaskUpdate,
 } from '@/lib/scheduledTaskApi';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 
 const PAGE_SIZE = 20;
 const STATUS_OPTIONS = [
@@ -91,12 +94,30 @@ export default function ScheduledTasks() {
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [taskTypeFilter, setTaskTypeFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [offset, setOffset] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ScheduledTask | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ScheduledTask | null>(null);
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
   const { toast } = useToast();
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  useEffect(() => {
+    debounceRef.current = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [searchQuery]);
 
   const loadTasks = useCallback(async () => {
     try {
@@ -104,6 +125,7 @@ export default function ScheduledTasks() {
       const res = await scheduledTaskApi.listTasks({
         status: statusFilter !== 'all' ? statusFilter : undefined,
         task_type: taskTypeFilter !== 'all' ? taskTypeFilter : undefined,
+        search: debouncedSearch.trim() || undefined,
         limit: PAGE_SIZE,
         offset,
       });
@@ -121,7 +143,7 @@ export default function ScheduledTasks() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, taskTypeFilter, offset, toast]);
+  }, [statusFilter, taskTypeFilter, debouncedSearch, offset, toast]);
 
   useEffect(() => {
     loadTasks();
@@ -229,32 +251,57 @@ export default function ScheduledTasks() {
         </Button>
       </div>
 
-      <div className="flex items-center gap-4 flex-wrap">
-        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setOffset(0); }}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="状态" />
-          </SelectTrigger>
-          <SelectContent>
-            {STATUS_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={taskTypeFilter} onValueChange={(v) => { setTaskTypeFilter(v); setOffset(0); }}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="任务类型" />
-          </SelectTrigger>
-          <SelectContent>
-            {TASK_TYPE_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {/* 筛选栏：搜索 + 状态 + 类型 */}
+      <Card className="p-3 sm:p-4">
+        <div
+          className={
+            isMobile
+              ? 'flex flex-col gap-2'
+              : 'flex items-center gap-4 flex-wrap'
+          }
+        >
+          <div className={isMobile ? 'w-full' : 'flex-1 min-w-[200px]'}>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="搜索任务名称或描述..."
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setOffset(0);
+                }}
+                className={cn('pl-9', isMobile ? 'h-9' : '')}
+              />
+            </div>
+          </div>
+          <div className={cn(isMobile ? 'grid grid-cols-2 gap-2' : 'flex items-center gap-4')}>
+          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setOffset(0); }}>
+            <SelectTrigger className={isMobile ? 'h-9 text-sm' : 'w-[140px]'}>
+              <SelectValue placeholder="状态" />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={taskTypeFilter} onValueChange={(v) => { setTaskTypeFilter(v); setOffset(0); }}>
+            <SelectTrigger className={isMobile ? 'h-9 text-sm' : 'w-[160px]'}>
+              <SelectValue placeholder="任务类型" />
+            </SelectTrigger>
+            <SelectContent>
+              {TASK_TYPE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          </div>
+        </div>
+      </Card>
 
       {loading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
