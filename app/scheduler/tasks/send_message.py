@@ -13,6 +13,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.constants.message import MessagePartType, MessageRole
+from app.db.model.agent import Agent
 from app.db.model.message import Message
 from app.db.model.message_part import MessagePart
 from app.db.model.message_sender import MessageSender
@@ -76,7 +77,7 @@ async def handle_send_message(task, db: Session) -> None:
     session_type = session.type or ""
 
     if session_type == "ai":
-        await _send_ai_message(db, user_id, session_id, topic_id, content)
+        await _send_ai_message(db, user_id, session_id, session.agent_id, topic_id, content)
     elif session_type in ("pm", "group"):
         await _send_im_message(db, user_id, session, content)
     else:
@@ -92,10 +93,11 @@ async def _send_ai_message(
     db: Session,
     user_id: UUID,
     session_id: UUID,
+    agent_id: Optional[UUID],
     topic_id: Optional[UUID],
     content: str,
 ) -> None:
-    """Create assistant message for AI session."""
+    """Create assistant message for AI session and sync to LLM checkpointer."""
     topic = _get_or_create_topic_for_scheduled(db, user_id, session_id, topic_id, content)
 
     parts_data = [
@@ -128,6 +130,30 @@ async def _send_ai_message(
 
     db.commit()
     logger.debug(f"Created assistant message {message.id} in topic {topic.id}")
+
+    # Sync to LangGraph checkpointer so message appears in LLM context
+    if agent_id:
+        try:
+            from app.agent import AgentFactory
+
+            agent = (
+                db.query(Agent)
+                .filter(Agent.id == agent_id, Agent.is_deleted == False)
+                .first()
+            )
+            if agent:
+                agent_config = AgentFactory.build_agent_config(agent)
+                agent_service = await AgentFactory.get_agent(agent_id, agent_config)
+                thread_id = f"topic_{topic.id}"
+                await agent_service.append_assistant_message(
+                    thread_id=thread_id,
+                    content=content,
+                    user_id=user_id,
+                )
+        except Exception as e:
+            logger.warning(
+                f"Failed to sync scheduled message to checkpointer for topic {topic.id}: {e}"
+            )
 
 
 def _get_or_create_topic_for_scheduled(

@@ -52,7 +52,7 @@ def get_session(session_id: UUID, db: Session = Depends(get_db), current_user: U
 @router.get("/sessions", response_model=SessionListResponse, summary="获取会话列表")
 def get_sessions(
     page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    size: int = Query(20, ge=1, le=200),
     type: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
     is_deleted: bool = Query(False),

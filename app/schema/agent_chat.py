@@ -38,8 +38,18 @@ class ChatResponse(BaseModel):
 class StreamEvent(BaseModel):
     """SSE event model."""
 
-    event: Literal["message", "thinking", "operation_start", "operation_end", "done", "error"]
+    event: Literal["message", "thinking", "operation_start", "operation_end", "done", "error", "interrupt"]
     data: dict
+
+
+class ChatResumeRequest(BaseModel):
+    """Resume chat after human-in-the-loop approval."""
+
+    topic_id: UUID = Field(..., description="Topic ID")
+    decisions: list[dict] = Field(
+        ...,
+        description="User decisions: [{type: 'approve'|'edit'|'reject'}, edited_action?: {name, args}}]",
+    )
 
 
 class StopRequest(BaseModel):

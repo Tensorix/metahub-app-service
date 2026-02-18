@@ -9,7 +9,16 @@ export type ChatEventType =
   | 'operation_start'
   | 'operation_end'
   | 'done'
-  | 'error';
+  | 'error'
+  | 'interrupt';
+
+export interface ChatEventInterrupt {
+  event: 'interrupt';
+  data: {
+    action_requests: Array<{ name: string; args: Record<string, unknown>; id?: string }>;
+    review_configs: Array<{ action_name: string; allowed_decisions?: string[] }>;
+  };
+}
 
 export interface ChatEventMessage {
   event: 'message';
@@ -54,7 +63,7 @@ export interface ChatEventOperationEnd {
 export interface ChatEventDone {
   event: 'done';
   data: {
-    status: 'complete' | 'cancelled';
+    status: 'complete' | 'cancelled' | 'interrupt';
   };
 }
 
@@ -72,7 +81,8 @@ export type ChatEvent =
   | ChatEventOperationStart
   | ChatEventOperationEnd
   | ChatEventDone
-  | ChatEventError;
+  | ChatEventError
+  | ChatEventInterrupt;
 
 // Request/Response types
 export interface ChatRequest {

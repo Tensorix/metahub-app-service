@@ -11,6 +11,7 @@ import { MessageInput } from '@/components/MessageInput';
 import { MessageList as SimpleMessageList } from '@/components/MessageList';
 import { AIMessageList } from './AIMessageList';
 import { TopicDivider } from './TopicDivider';
+import { ToolApprovalCard } from './ToolApprovalCard';
 import { TopicSelector } from './TopicSelector';
 import { TopicSidebar } from './TopicSidebar';
 import { FileExplorer } from './FileExplorer';
@@ -56,7 +57,14 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   const updateSession = useChatStore((state) => state.updateSession);
   
   // AI 聊天 hook
-  const { send: sendAIMessage, stop: stopAIGeneration, isStreaming } = useAIChat();
+  const {
+    send: sendAIMessage,
+    stop: stopAIGeneration,
+    isStreaming,
+    pendingInterrupt,
+    resumeApprove,
+    resumeReject,
+  } = useAIChat();
 
   // 直接调用函数，因为这些函数内部会从 store 获取最新状态
   const currentSession = getCurrentSession();
@@ -476,13 +484,20 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
 
         {/* 输入框 - 文件系统模式时隐藏 */}
         {!fileExplorerOpen && (
-        <div className="border-t px-4 py-3">
+        <div className="border-t px-4 py-3 space-y-3">
+          {currentSession?.type === 'ai' && pendingInterrupt && (
+            <ToolApprovalCard
+              actionRequests={pendingInterrupt.action_requests}
+              onApprove={resumeApprove}
+              onReject={resumeReject}
+            />
+          )}
           {currentSession?.type === 'ai' ? (
             <MessageInput
               onSend={sendAIMessage}
               onStop={stopAIGeneration}
               isStreaming={isStreaming}
-              disabled={!currentSession}
+              disabled={!currentSession || !!pendingInterrupt}
             />
           ) : (
             <MessageInput

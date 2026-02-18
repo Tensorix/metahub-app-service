@@ -475,6 +475,11 @@ class DeepAgentService:
                 "name": self.config.get("name"),
             }
 
+            # 人机协作：需人工批准的工具 (interrupt_on)
+            interrupt_on = self.config.get("interrupt_on") or {}
+            if interrupt_on:
+                agent_kwargs["interrupt_on"] = interrupt_on
+
             # Mounted files: AGENTS.md + skills for thread store
             skills_paths, self._mounted_files = self._build_mounted_files()
             if skills_paths:
@@ -765,6 +770,32 @@ class DeepAgentService:
                         )
 
                 logger.info(f"Agent stream completed, total events: {event_count}")
+
+                # 检查是否有人机协作中断：astream_events 遇 interrupt 会结束流，通过 get_state 判断
+                if self.config.get("interrupt_on"):
+                    try:
+                        state = await agent.aget_state(cfg)
+                        if state and hasattr(state, "tasks") and state.tasks:
+                            for task in state.tasks:
+                                interrupts = getattr(task, "interrupts", None) or []
+                                for intr in interrupts:
+                                    val = getattr(intr, "value", None)
+                                    if isinstance(val, dict):
+                                        ar = val.get("action_requests", [])
+                                        rc = val.get("review_configs", [])
+                                        if ar:
+                                            yield {
+                                                "event": "interrupt",
+                                                "data": {
+                                                    "action_requests": ar,
+                                                    "review_configs": rc,
+                                                },
+                                            }
+                                            yield {"event": "done", "data": {"status": "interrupt"}}
+                                            return
+                    except Exception as e:
+                        logger.debug(f"Interrupt check: {e}")
+
                 yield {"event": "done", "data": {"status": "complete"}}
 
             except Exception as e:
@@ -773,6 +804,164 @@ class DeepAgentService:
         finally:
             agent_user_id.reset(token_uid)
             agent_session_id.reset(token_sid)
+
+    async def chat_resume(
+        self,
+        thread_id: str,
+        decisions: list[dict],
+        user_id: Optional[UUID] = None,
+        session_id: Optional[UUID] = None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """
+        Resume agent execution after human-in-the-loop approval.
+
+        Args:
+            thread_id: Conversation thread ID (must match the interrupted chat)
+            decisions: User decisions per action_request, e.g. [{"type": "approve"}, {"type": "reject"}]
+            user_id: Optional user ID for context
+            session_id: Optional session ID for StorageBackend
+
+        Yields:
+            Same event format as chat_stream
+        """
+        token_uid = agent_user_id.set(user_id)
+        token_sid = agent_session_id.set(session_id)
+        try:
+            agent = await self._get_agent()
+            cfg = {
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": config.AGENT_RECURSION_LIMIT,
+            }
+            if user_id:
+                cfg["configurable"]["user_id"] = str(user_id)
+            if session_id:
+                cfg.setdefault("metadata", {})["assistant_id"] = str(session_id)
+
+            await self._write_mounted_files_to_store(thread_id)
+
+            resume_input = Command(resume={"decisions": decisions})
+            _active_subagent_op_ids: set = set()
+
+            async for event in agent.astream_events(resume_input, config=cfg, version="v2"):
+                event_type = event.get("event")
+                event_data = event.get("data", {})
+                op_id = event.get("run_id") or str(id(event))
+                now_iso = datetime.now(timezone.utc).isoformat()
+
+                if event_type == "on_tool_start" and event.get("name") == "task":
+                    tool_input = event_data.get("input", {})
+                    subagent_name = tool_input.get("subagent_type", "unknown")
+                    _active_subagent_op_ids.add(op_id)
+                    yield {
+                        "event": "operation_start",
+                        "data": {
+                            "op_id": op_id,
+                            "op_type": "subagent",
+                            "name": subagent_name,
+                            "description": tool_input.get("description", ""),
+                            "started_at": now_iso,
+                        },
+                    }
+                    continue
+                if event_type == "on_tool_end" and event.get("name") == "task":
+                    result_str = _safe_serialize(event_data.get("output", ""))
+                    _active_subagent_op_ids.discard(op_id)
+                    yield {
+                        "event": "operation_end",
+                        "data": {
+                            "op_id": op_id,
+                            "op_type": "subagent",
+                            "name": "task",
+                            "result": result_str,
+                            "success": True,
+                            "ended_at": now_iso,
+                        },
+                    }
+                    continue
+                if _active_subagent_op_ids and event.get("parent_ids"):
+                    if any(pid in _active_subagent_op_ids for pid in event.get("parent_ids", [])):
+                        continue
+                if op_id in _active_subagent_op_ids:
+                    continue
+
+                if event_type == "on_chat_model_stream":
+                    chunk = event_data.get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        yield {"event": "message", "data": {"content": chunk.content}}
+                elif event_type == "on_tool_start":
+                    tool_input = event_data.get("input", {})
+                    if isinstance(tool_input, dict):
+                        safe_input = {}
+                        for k, v in tool_input.items():
+                            try:
+                                json.dumps(v)
+                                safe_input[k] = v
+                            except (TypeError, ValueError):
+                                safe_input[k] = str(v)
+                        tool_input = safe_input
+                    else:
+                        tool_input = {}
+                    yield {
+                        "event": "operation_start",
+                        "data": {
+                            "op_id": op_id,
+                            "op_type": "tool",
+                            "name": event.get("name", "unknown"),
+                            "args": tool_input,
+                            "started_at": now_iso,
+                        },
+                    }
+                elif event_type == "on_tool_end":
+                    result_str = _safe_serialize(event_data.get("output", ""))
+                    yield {
+                        "event": "operation_end",
+                        "data": {
+                            "op_id": op_id,
+                            "op_type": "tool",
+                            "name": event.get("name", "unknown"),
+                            "result": result_str,
+                            "success": True,
+                            "ended_at": now_iso,
+                        },
+                    }
+
+            yield {"event": "done", "data": {"status": "complete"}}
+        except Exception as e:
+            logger.error(f"Error in chat_resume: {str(e)}", exc_info=True)
+            yield {"event": "error", "data": {"error": str(e)}}
+        finally:
+            agent_user_id.reset(token_uid)
+            agent_session_id.reset(token_sid)
+
+    async def append_assistant_message(
+        self,
+        thread_id: str,
+        content: str,
+        user_id: Optional[UUID] = None,
+    ) -> None:
+        """
+        Append an assistant message to the checkpointer for a thread.
+        Used by scheduled tasks so their messages appear in LLM context.
+
+        Args:
+            thread_id: Conversation thread ID (e.g. topic_{topic_id})
+            content: Assistant message content
+            user_id: Optional user ID for config
+        """
+        if not self.checkpointer:
+            logger.debug("No checkpointer, skip append_assistant_message")
+            return
+
+        try:
+            agent = await self._get_agent()
+            cfg = {"configurable": {"thread_id": thread_id}}
+            if user_id:
+                cfg["configurable"]["user_id"] = str(user_id)
+
+            await agent.aupdate_state(cfg, {"messages": [AIMessage(content=content)]})
+            logger.debug(f"Appended assistant message to checkpointer for thread {thread_id}")
+        except Exception as e:
+            logger.warning(f"Failed to append assistant message to checkpointer: {e}")
 
     async def get_history(
         self,

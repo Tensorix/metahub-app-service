@@ -75,6 +75,7 @@ def _agent_to_response(agent: Agent) -> dict:
         "temperature": agent.temperature,
         "max_tokens": agent.max_tokens,
         "tools": agent.tools or [],
+        "interrupt_on": agent.interrupt_on or {},
         "skills": agent.skills,
         "memory_files": agent.memory_files,
         "metadata": agent.metadata_,

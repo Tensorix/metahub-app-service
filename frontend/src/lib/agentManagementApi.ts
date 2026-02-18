@@ -103,6 +103,8 @@ export interface Agent {
   temperature?: number;
   max_tokens?: number;
   tools?: string[];
+  /** 工具需人工批准配置 {tool_name: true | {allowed_decisions}} */
+  interrupt_on?: Record<string, boolean | { allowed_decisions?: string[] }>;
   skills?: SkillContent[];
   memory_files?: MemoryContent[];
   subagents?: MountedSubagentSummary[];
@@ -127,6 +129,8 @@ export interface AgentCreate {
   temperature?: number;
   max_tokens?: number;
   tools?: string[];
+  /** 工具需人工批准配置 {tool_name: true | {allowed_decisions}} */
+  interrupt_on?: Record<string, boolean | { allowed_decisions?: string[] }>;
   skills?: SkillContent[];
   memory_files?: MemoryContent[];
   mount_subagents?: MountSubagentRequest[];
@@ -146,6 +150,8 @@ export interface AgentUpdate {
   temperature?: number;
   max_tokens?: number;
   tools?: string[];
+  /** 工具需人工批准配置 {tool_name: true | {allowed_decisions}} */
+  interrupt_on?: Record<string, boolean | { allowed_decisions?: string[] }>;
   skills?: SkillContent[];
   memory_files?: MemoryContent[];
   summarization?: SummarizationConfig;

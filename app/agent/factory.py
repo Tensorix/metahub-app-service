@@ -208,6 +208,7 @@ class AgentFactory:
             "temperature": agent.temperature,
             "max_tokens": agent.max_tokens,
             "tools": agent.tools or [],
+            "interrupt_on": agent.interrupt_on or {},
         }
 
         # --- SubAgent 配置：从关联表读取完整 Agent 信息 ---

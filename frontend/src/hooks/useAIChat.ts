@@ -14,10 +14,12 @@ export function useAIChat() {
     activeOperations,
     pendingParts,
     streamError,
+    pendingInterrupt,
     sendAIMessage,
     stopGeneration,
     regenerateMessage,
     clearStreamState,
+    sendResumeDecisions,
   } = useChatStore();
 
   const send = useCallback(
@@ -46,6 +48,15 @@ export function useAIChat() {
     [isStreaming, regenerateMessage]
   );
 
+  const resumeApprove = useCallback(
+    () => pendingInterrupt && sendResumeDecisions(pendingInterrupt.action_requests.map(() => ({ type: 'approve' }))),
+    [pendingInterrupt, sendResumeDecisions]
+  );
+  const resumeReject = useCallback(
+    () => pendingInterrupt && sendResumeDecisions(pendingInterrupt.action_requests.map(() => ({ type: 'reject' }))),
+    [pendingInterrupt, sendResumeDecisions]
+  );
+
   return {
     // State
     isStreaming,
@@ -56,11 +67,14 @@ export function useAIChat() {
     activeOperations,
     pendingParts,
     error: streamError,
+    pendingInterrupt,
 
     // Actions
     send,
     stop,
     regenerate,
     clearError: clearStreamState,
+    resumeApprove,
+    resumeReject,
   };
 }

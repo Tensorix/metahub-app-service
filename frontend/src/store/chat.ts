@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { sessionApi, type Session, type Topic, type Message, type MessageCreate } from '@/lib/api';
 import { computeVirtualTopics, type VirtualTopic } from '@/lib/virtualTopic';
-import { chatWithAgentStream, stopGeneration as apiStopGeneration } from '@/lib/agentApi';
+import { chatWithAgentStream, chatResumeStream, stopGeneration as apiStopGeneration } from '@/lib/agentApi';
 
 interface ChatState {
   // ===== 会话列表 =====
@@ -61,6 +61,12 @@ interface ChatState {
   }>;
   streamError: string | null;
 
+  /** 人机协作：待批准的工具调用 */
+  pendingInterrupt: {
+    action_requests: Array<{ name: string; args: Record<string, unknown>; id?: string }>;
+    review_configs: Array<{ action_name: string; allowed_decisions?: string[] }>;
+  } | null;
+
   // ===== 计算属性（改为方法，避免无限循环） =====
   getCurrentSession: () => Session | null;
   getCurrentTopic: () => Topic | VirtualTopic | null;
@@ -94,6 +100,7 @@ interface ChatState {
   stopGeneration: () => void;
   regenerateMessage: (messageId: string) => Promise<void>;
   clearStreamState: () => void;
+  sendResumeDecisions: (decisions: Array<{ type: string; edited_action?: { name: string; args: Record<string, unknown> } }>) => Promise<void>;
 
   // UI
   setTopicSidebarCollapsed: (collapsed: boolean) => void;
@@ -135,6 +142,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeOperations: new Map(),
   pendingParts: [],
   streamError: null,
+  pendingInterrupt: null,
 
   // ===== 计算属性（改为方法，避免无限循环） =====
   getCurrentSession: () => {
@@ -879,6 +887,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
             break;
 
+          case 'interrupt':
+            set({
+              pendingInterrupt: {
+                action_requests: event.data.action_requests || [],
+                review_configs: event.data.review_configs || [],
+              },
+              isStreaming: false,
+              abortController: null,
+            });
+            break;
+
           case 'error':
             set((state) => {
               const errorPart = {
@@ -931,6 +950,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             break;
 
           case 'done':
+            if (event.data?.status === 'interrupt') {
+              // 已由 interrupt 事件设置 pendingInterrupt，不做额外处理
+              break;
+            }
             // 流式完成
             set(() => ({
               isStreaming: false,
@@ -938,6 +961,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               abortController: null,
               activeOperations: new Map(),
               pendingParts: [],
+              pendingInterrupt: null,
             }));
 
             // 刷新消息列表获取真实 ID
@@ -1084,6 +1108,84 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeOperations: new Map(),
       pendingParts: [],
       streamError: null,
+      pendingInterrupt: null,
     });
+  },
+
+  sendResumeDecisions: async (decisions) => {
+    const { currentSessionId, currentTopicId } = get();
+    if (!currentSessionId || !currentTopicId) {
+      set({ streamError: 'No session or topic', pendingInterrupt: null });
+      return;
+    }
+
+    set({ pendingInterrupt: null, isStreaming: true });
+
+    const controller = new AbortController();
+    const aiMessageId = get().streamingMessageId || `temp-ai-${Date.now()}`;
+    set({ streamingMessageId: aiMessageId, abortController: controller });
+
+    try {
+      for await (const event of chatResumeStream(
+        currentSessionId,
+        currentTopicId,
+        decisions,
+        { signal: controller.signal }
+      )) {
+        // 复用 sendAIMessage 中的事件处理逻辑（简化版）
+        if (event.event === 'message') {
+          set((s) => ({ streamingContent: s.streamingContent + (event.data?.content || '') }));
+        } else if (event.event === 'operation_start') {
+          const opId = event.data?.op_id;
+          if (!opId) break;
+          set((s) => {
+            const m = new Map(s.activeOperations);
+            m.set(opId, {
+              op_id: opId,
+              op_type: (event.data?.op_type ?? 'tool') as 'tool' | 'subagent',
+              name: event.data?.name || 'unknown',
+              args: event.data?.args || {},
+              description: event.data?.description,
+              started_at: event.data?.started_at || new Date().toISOString(),
+              status: 'running',
+            });
+            return { activeOperations: m };
+          });
+        } else if (event.event === 'operation_end') {
+          const opId = event.data?.op_id;
+          if (!opId) break;
+          set((s) => {
+            const m = new Map(s.activeOperations);
+            m.delete(opId);
+            return { activeOperations: m };
+          });
+        } else if (event.event === 'done') {
+          set({
+            isStreaming: false,
+            streamingMessageId: null,
+            abortController: null,
+            activeOperations: new Map(),
+            pendingParts: [],
+          });
+          await get().loadMessages(currentSessionId, currentTopicId);
+        } else if (event.event === 'error') {
+          set({
+            isStreaming: false,
+            streamError: event.data?.error || 'Unknown',
+            abortController: null,
+            pendingInterrupt: null,
+          });
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        set({
+          isStreaming: false,
+          streamError: (err as Error).message,
+          abortController: null,
+          pendingInterrupt: null,
+        });
+      }
+    }
   },
 }));

@@ -13,7 +13,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import type { Agent, AgentCreate, AgentUpdate, MountedSubagentSummary } from '@/lib/agentManagementApi';
 import type { McpServerResponse } from '@/types/mcpServer';
-import { X, Plus } from 'lucide-react';
+import { X, Plus, ChevronDown, ChevronRight, ShieldCheck } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 import { useTools } from '@/hooks/useTools';
 import { MCPServerConfig } from './MCPServerConfig';
 import { SubAgentSection } from './SubAgentSection';
@@ -49,6 +50,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
     temperature: 0.7,
     max_tokens: 4096,
     tools: [],
+    interrupt_on: {},
     skills: [],
     memory_files: [],
     summarization: {
@@ -64,6 +66,8 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
 
   // Skill editing state
   const [editingSkill, setEditingSkill] = useState<{ name: string; content: string } | null>(null);
+  // 工具组展开状态
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (agent) {
@@ -76,6 +80,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
         temperature: agent.temperature ?? 0.7,
         max_tokens: agent.max_tokens ?? 4096,
         tools: agent.tools || [],
+        interrupt_on: agent.interrupt_on || {},
         skills: agent.skills || [],
         memory_files: agent.memory_files || [],
         summarization: agent.summarization || {
@@ -96,6 +101,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
         temperature: 0.7,
         max_tokens: 4096,
         tools: [],
+        interrupt_on: {},
         skills: [],
         memory_files: [],
         summarization: {
@@ -143,6 +149,58 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
     } else {
       setFormData({ ...formData, tools: [...tools, tool] });
     }
+  };
+
+  /** 组级开关：启用则添加该组全部工具，禁用则移除全部 */
+  const toggleCategory = (categoryName: string) => {
+    const cat = categories.find(c => c.category === categoryName);
+    if (!cat) return;
+    const tools = formData.tools || [];
+    const catToolNames = new Set(cat.tools.map(t => t.name));
+    const hasAny = cat.tools.some(t => tools.includes(t.name));
+    if (hasAny) {
+      const nextInterrupt = { ...(formData.interrupt_on || {}) };
+      cat.tools.forEach(t => delete nextInterrupt[t.name]);
+      setFormData({
+        ...formData,
+        tools: tools.filter(t => !catToolNames.has(t)),
+        interrupt_on: nextInterrupt,
+      });
+    } else {
+      setFormData({
+        ...formData,
+        tools: [...tools, ...cat.tools.map(t => t.name)],
+      });
+    }
+  };
+
+  const toggleInterruptOn = (toolName: string) => {
+    const io = formData.interrupt_on || {};
+    const current = io[toolName];
+    if (current) {
+      const next = { ...io };
+      delete next[toolName];
+      setFormData({ ...formData, interrupt_on: next });
+    } else {
+      setFormData({ ...formData, interrupt_on: { ...io, [toolName]: true } });
+    }
+  };
+
+  const isCategoryEnabled = (categoryName: string) => {
+    const cat = categories.find(c => c.category === categoryName);
+    return cat ? cat.tools.some(t => (formData.tools || []).includes(t.name)) : false;
+  };
+
+  const isToolEnabled = (toolName: string) => (formData.tools || []).includes(toolName);
+  const isInterruptOn = (toolName: string) => !!(formData.interrupt_on || {})[toolName];
+
+  const toggleCategoryExpanded = (categoryName: string) => {
+    setExpandedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(categoryName)) next.delete(categoryName);
+      else next.add(categoryName);
+      return next;
+    });
   };
 
   const addSkill = () => {
@@ -325,6 +383,9 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
 
                 <div className="grid gap-2">
                   <Label>工具</Label>
+                  <p className="text-xs text-muted-foreground">
+                    按组启用/禁用工具；组内可细粒度配置权限及是否需人工批准执行。
+                  </p>
                   {toolsLoading ? (
                     <div className="text-sm text-muted-foreground">加载工具列表...</div>
                   ) : toolsError ? (
@@ -333,82 +394,101 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                     </div>
                   ) : (
                     <>
-                      {/* 显示失效的工具（如果有） */}
+                      {/* 失效工具提示 */}
                       {getInvalidTools(formData.tools || []).length > 0 && (
                         <div className="border border-destructive/50 rounded-lg p-3 space-y-2 bg-destructive/5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-destructive">⚠️ 失效的工具</span>
-                          </div>
+                          <span className="text-sm font-medium text-destructive">⚠️ 失效的工具</span>
                           <div className="flex flex-wrap gap-2">
                             {getInvalidTools(formData.tools || []).map((tool) => (
-                              <Badge
-                                key={tool}
-                                variant="destructive"
-                                className="cursor-pointer"
-                                onClick={() => toggleTool(tool)}
-                              >
-                                {tool}
-                                <X className="ml-1 h-3 w-3" />
+                              <Badge key={tool} variant="destructive" className="cursor-pointer" onClick={() => toggleTool(tool)}>
+                                {tool} <X className="ml-1 h-3 w-3 inline" />
                               </Badge>
                             ))}
                           </div>
-                          <p className="text-xs text-destructive">
-                            这些工具在系统中不存在，点击删除它们
-                          </p>
                         </div>
                       )}
-                      
-                      {/* 按分类显示有效工具 */}
+                      {/* 按组显示：组级开关 + 组内工具权限 */}
                       {categories.length > 0 ? (
-                        <div className="space-y-3">
-                          {categories.map((category) => (
-                            <div key={category.category} className="space-y-1">
-                              <div className="text-xs font-medium text-muted-foreground uppercase">
-                                {category.category}
+                        <div className="space-y-2 border rounded-lg divide-y">
+                          {categories.map((category) => {
+                            const enabled = isCategoryEnabled(category.category);
+                            const expanded = expandedCategories.has(category.category);
+                            return (
+                              <div key={category.category}>
+                                <div className="flex items-center gap-2 px-3 py-2 hover:bg-muted/50">
+                                  <button
+                                    type="button"
+                                    className="p-0.5 rounded hover:bg-muted"
+                                    onClick={() => toggleCategoryExpanded(category.category)}
+                                    aria-label={expanded ? '收起' : '展开'}
+                                  >
+                                    {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                  </button>
+                                  <label className="flex items-center gap-2 flex-1 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={enabled}
+                                      onChange={() => toggleCategory(category.category)}
+                                      className="rounded border-input"
+                                    />
+                                    <span className="text-sm font-medium">{category.category}</span>
+                                    <span className="text-xs text-muted-foreground">({category.tools.length} 个工具)</span>
+                                  </label>
+                                </div>
+                                {expanded && (
+                                  <div className="px-6 py-2 space-y-2 bg-muted/20">
+                                    {enabled ? (
+                                      category.tools.map((tool) => (
+                                        <div key={tool.name} className="flex items-center gap-3 py-1.5">
+                                          <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
+                                            <input
+                                              type="checkbox"
+                                              checked={isToolEnabled(tool.name)}
+                                              onChange={() => toggleTool(tool.name)}
+                                              className="rounded border-input shrink-0"
+                                            />
+                                            <span className="text-sm truncate" title={tool.description}>{tool.name}</span>
+                                          </label>
+                                          <div className="flex items-center gap-2 shrink-0">
+                                            <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                                            <span className="text-xs text-muted-foreground whitespace-nowrap">需人工批准</span>
+                                            <Switch
+                                              checked={isInterruptOn(tool.name)}
+                                              onCheckedChange={() => toggleInterruptOn(tool.name)}
+                                              disabled={!isToolEnabled(tool.name)}
+                                            />
+                                          </div>
+                                        </div>
+                                      ))
+                                    ) : (
+                                      <p className="text-xs text-muted-foreground py-2">启用上方组后可在组内配置工具权限</p>
+                                    )}
+                                  </div>
+                                )}
                               </div>
-                              <div className="flex flex-wrap gap-2">
-                                {category.tools.map((tool) => {
-                                  const isSelected = (formData.tools || []).includes(tool.name);
-                                  return (
-                                    <Badge
-                                      key={tool.name}
-                                      variant={isSelected ? 'default' : 'outline'}
-                                      className="cursor-pointer hover:bg-primary/90"
-                                      onClick={() => toggleTool(tool.name)}
-                                      title={tool.description}
-                                    >
-                                      {tool.name}
-                                      {isSelected && <X className="ml-1 h-3 w-3" />}
-                                    </Badge>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : (
                         <div className="flex flex-wrap gap-2">
-                          {tools.map((tool) => {
-                            const isSelected = (formData.tools || []).includes(tool.name);
-                            return (
-                              <Badge
-                                key={tool.name}
-                                variant={isSelected ? 'default' : 'outline'}
-                                className="cursor-pointer hover:bg-primary/90"
-                                onClick={() => toggleTool(tool.name)}
-                                title={tool.description}
-                              >
-                                {tool.name}
-                                {isSelected && <X className="ml-1 h-3 w-3" />}
-                              </Badge>
-                            );
-                          })}
+                          {tools.map((tool) => (
+                            <Badge
+                              key={tool.name}
+                              variant={(formData.tools || []).includes(tool.name) ? 'default' : 'outline'}
+                              className="cursor-pointer hover:bg-primary/90"
+                              onClick={() => toggleTool(tool.name)}
+                              title={tool.description}
+                            >
+                              {tool.name}
+                              {(formData.tools || []).includes(tool.name) && <X className="ml-1 h-3 w-3" />}
+                            </Badge>
+                          ))}
                         </div>
                       )}
                     </>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    点击选择工具。内置工具（文件系统、计划）会自动启用。
+                    内置工具（文件系统、计划）会自动启用。
                   </p>
                 </div>
               </>

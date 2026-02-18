@@ -109,6 +109,10 @@ class AgentBase(BaseModel):
     temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0, description="温度参数")
     max_tokens: Optional[int] = Field(4096, gt=0, description="最大 token 数")
     tools: Optional[list[str]] = Field(default_factory=list, description="工具列表")
+    interrupt_on: Optional[dict] = Field(
+        None,
+        description="工具需人工批准配置 {tool_name: True|False|{allowed_decisions}}"
+    )
     skills: Optional[list[SkillContent]] = Field(None, description="技能列表（内容存数据库）")
     memory_files: Optional[list[MemoryContent]] = Field(None, description="记忆列表（内容存数据库）")
     summarization: Optional[SummarizationConfig] = Field(None, description="对话摘要配置")
@@ -135,6 +139,10 @@ class AgentUpdate(BaseModel):
     temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="温度参数")
     max_tokens: Optional[int] = Field(None, gt=0, description="最大 token 数")
     tools: Optional[list[str]] = Field(None, description="工具列表")
+    interrupt_on: Optional[dict] = Field(
+        None,
+        description="工具需人工批准配置 {tool_name: True|False|{allowed_decisions}}"
+    )
     skills: Optional[list[SkillContent]] = Field(None, description="技能列表")
     memory_files: Optional[list[MemoryContent]] = Field(None, description="记忆列表")
     summarization: Optional[SummarizationConfig] = Field(None, description="对话摘要配置")

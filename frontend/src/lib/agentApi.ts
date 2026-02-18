@@ -184,6 +184,79 @@ export async function chatWithAgent(
 }
 
 /**
+ * Resume chat after human-in-the-loop approval
+ *
+ * @param sessionId - Session ID
+ * @param topicId - Topic ID
+ * @param decisions - User decisions per action_request: [{type: 'approve'|'edit'|'reject'}, edited_action?: {name, args}}]
+ */
+export async function* chatResumeStream(
+  sessionId: string,
+  topicId: string,
+  decisions: Array<{ type: string; edited_action?: { name: string; args: Record<string, unknown> } }>,
+  options?: { signal?: AbortSignal }
+): AsyncGenerator<import('@/types/agent').ChatEvent> {
+  const token = getToken();
+  if (!token) throw new Error('Not authenticated');
+
+  const response = await fetch(
+    `${API_BASE}/api/v1/sessions/${sessionId}/chat/resume`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({ topic_id: topicId, decisions }),
+      signal: options?.signal,
+    }
+  );
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${response.status}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('No response body');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const separator = buffer.includes('\r\n') ? '\r\n\r\n' : '\n\n';
+      const lineSep = buffer.includes('\r\n') ? '\r\n' : '\n';
+
+      while (buffer.includes(separator)) {
+        const idx = buffer.indexOf(separator);
+        const block = buffer.substring(0, idx);
+        buffer = buffer.substring(idx + separator.length);
+        let ev = '';
+        let data = '';
+        for (const line of block.split(lineSep)) {
+          if (line.startsWith('event:')) ev = line.slice(6).trim();
+          else if (line.startsWith('data:')) data = line.slice(5).trim();
+        }
+        if (ev && data) {
+          try {
+            yield { event: ev, data: JSON.parse(data) } as import('@/types/agent').ChatEvent;
+          } catch {
+            console.warn('Failed to parse resume SSE:', data);
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
  * Stop ongoing generation
  *
  * @param sessionId - Session ID

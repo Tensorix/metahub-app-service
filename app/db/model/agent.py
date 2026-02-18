@@ -61,6 +61,9 @@ class Agent(Base):
     summarization_config: Mapped[Optional[dict]] = mapped_column(
         JSONB, nullable=True, comment="对话摘要配置"
     )
+    interrupt_on: Mapped[Optional[dict]] = mapped_column(
+        JSONB, nullable=True, comment="工具需人工批准配置 {tool_name: true|false|{allowed_decisions}}"
+    )
 
     metadata_: Mapped[Optional[dict]] = mapped_column(
         "metadata", JSONB, nullable=True, comment="扩展元数据"

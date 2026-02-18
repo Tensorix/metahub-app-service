@@ -26,6 +26,7 @@ from app.db.model.user import User
 from app.schema.agent_chat import (
     ChatRequest,
     ChatResponse,
+    ChatResumeRequest,
     StopRequest,
     StopResponse,
     WSIncomingMessage,
@@ -619,6 +620,8 @@ async def chat_with_agent(
                         f"op_type={event_data.get('op_type')} name={event_data.get('name')} "
                         f"event_loop_ms={int(time.perf_counter() * 1000)}"
                     )
+                if event_type == "interrupt":
+                    collector.flush_current_text()
                 yield {
                     "event": event_type,
                     "data": json.dumps(event_data),
@@ -712,6 +715,92 @@ async def chat_with_agent(
 
     logger.info("Returning EventSourceResponse")
     return EventSourceResponse(generate_events())
+
+
+@router.post("/sessions/{session_id}/chat/resume")
+async def chat_resume(
+    session_id: UUID,
+    request: ChatResumeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Resume chat after human-in-the-loop tool approval.
+
+    Call this when the chat stream emitted an "interrupt" event with action_requests.
+    Provide the user's decisions to continue execution.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    session, agent = await _validate_session_for_agent(session_id, db, current_user.id)
+    topic = db.query(Topic).filter(
+        Topic.id == request.topic_id,
+        Topic.session_id == session_id,
+    ).first()
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    agent_config = AgentFactory.build_agent_config(agent)
+    agent_service = await AgentFactory.get_agent(agent.id, agent_config)
+    thread_id = f"topic_{topic.id}"
+
+    async def generate_resume_events():
+        db_stream = SessionLocal()
+        collector = StreamingCollector()
+        task_key = f"{session_id}:{request.topic_id}"
+
+        try:
+            async for event in agent_service.chat_resume(
+                thread_id=thread_id,
+                decisions=request.decisions,
+                user_id=current_user.id,
+                session_id=session_id,
+            ):
+                event_type = event.get("event")
+                event_data = event.get("data", {})
+
+                if event_type == "message":
+                    collector.add_text(event_data.get("content", ""))
+                elif event_type == "operation_start":
+                    collector.add_operation_start(
+                        op_id=event_data.get("op_id", ""),
+                        op_type=event_data.get("op_type", "tool"),
+                        name=event_data.get("name", "unknown"),
+                        args=event_data.get("args", {}),
+                        description=event_data.get("description", ""),
+                        started_at=event_data.get("started_at"),
+                    )
+                elif event_type == "operation_end":
+                    collector.add_operation_end(
+                        op_id=event_data.get("op_id", ""),
+                        op_type=event_data.get("op_type"),
+                        name=event_data.get("name"),
+                        result=event_data.get("result", ""),
+                        success=event_data.get("success", True),
+                        ended_at=event_data.get("ended_at"),
+                    )
+
+                yield {"event": event_type, "data": json.dumps(event_data)}
+
+            if collector.has_content():
+                parts_data = collector.to_parts_data()
+                await _save_message_with_parts(
+                    db_stream,
+                    current_user.id,
+                    topic.id,
+                    "assistant",
+                    parts_data,
+                )
+
+            yield {"event": "done", "data": json.dumps({"status": "complete"})}
+        except Exception as e:
+            logger.error(f"Resume stream error for {task_key}: {e}", exc_info=True)
+            yield {"event": "error", "data": json.dumps({"error": str(e)})}
+        finally:
+            db_stream.close()
+
+    return EventSourceResponse(generate_resume_events())
 
 
 @router.post("/sessions/{session_id}/chat/stop")

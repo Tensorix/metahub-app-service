@@ -41,7 +41,7 @@ class SessionResponse(SessionBase):
 
 class SessionListQuery(BaseModel):
     page: int = Field(1, ge=1, description="页码")
-    size: int = Field(20, ge=1, le=100, description="每页数量")
+    size: int = Field(20, ge=1, le=200, description="每页数量")
     type: Optional[str] = Field(None, description="按类型筛选")
     source: Optional[str] = Field(None, description="按来源筛选")
     is_deleted: bool = Field(False, description="是否包含已删除")
