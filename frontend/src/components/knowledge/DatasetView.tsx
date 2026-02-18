@@ -24,7 +24,19 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Plus, Loader2, GripVertical, GripHorizontal, Trash2, ArrowLeft } from 'lucide-react';
+import {
+  Plus,
+  Loader2,
+  GripVertical,
+  GripHorizontal,
+  Trash2,
+  ArrowLeft,
+  MoreHorizontal,
+  ArrowUpToLine,
+  ArrowDownToLine,
+  ChevronUp,
+  ChevronDown,
+} from 'lucide-react';
 import { useDebouncedCallback } from 'use-debounce';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
@@ -32,6 +44,14 @@ import { knowledgeApi } from '@/lib/knowledgeApi';
 import type { KnowledgeNode, DatasetRow, FieldDefinition } from '@/lib/knowledgeApi';
 import { CellRenderer } from './cells';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
+import { cn } from '@/lib/utils';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { AddColumnDialog } from './AddColumnDialog';
 import { ColumnHeaderMenu } from './ColumnHeaderMenu';
 import { RowContextMenu } from './RowContextMenu';
@@ -400,8 +420,77 @@ export function DatasetView({ node, onUpdate, showBackButton, onBack }: DatasetV
         ),
       })
     ),
-    ...(!isMobile
+    ...(isMobile
       ? [
+          {
+            id: '_row_menu',
+            header: '',
+            size: 40,
+            minSize: 40,
+            maxSize: 40,
+            enableResizing: false,
+            cell: ({ row }: { row: Row<DatasetRow> }) => (
+              <div onClick={(e) => e.stopPropagation()}>
+                <DropdownMenu>
+                  <DropdownMenuTrigger className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground">
+                    <MoreHorizontal className="w-4 h-4" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => handleInsertRow(row.index, true)}
+                    >
+                      <Plus className="w-3.5 h-3.5 mr-2" /> 在上方插入行
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => handleInsertRow(row.index, false)}
+                    >
+                      <Plus className="w-3.5 h-3.5 mr-2" /> 在下方插入行
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => handleMoveRow(row.index, 0)}
+                      className={cn(row.index === 0 && 'pointer-events-none opacity-50')}
+                    >
+                      <ArrowUpToLine className="w-3.5 h-3.5 mr-2" /> 移到顶部
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => handleMoveRow(row.index, row.index - 1)}
+                      className={cn(row.index === 0 && 'pointer-events-none opacity-50')}
+                    >
+                      <ChevronUp className="w-3.5 h-3.5 mr-2" /> 上移一行
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => handleMoveRow(row.index, row.index + 1)}
+                      className={cn(
+                        row.index >= rows.length - 1 && 'pointer-events-none opacity-50'
+                      )}
+                    >
+                      <ChevronDown className="w-3.5 h-3.5 mr-2" /> 下移一行
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() =>
+                        handleMoveRow(row.index, rows.length - 1)
+                      }
+                      className={cn(
+                        row.index >= rows.length - 1 && 'pointer-events-none opacity-50'
+                      )}
+                    >
+                      <ArrowDownToLine className="w-3.5 h-3.5 mr-2" /> 移到底部
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => handleDeleteRow(row.original.id)}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 mr-2" /> 删除行
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            ),
+          } as ColumnDef<DatasetRow>,
+        ]
+      : [
           {
             id: '_actions',
             header: '',
@@ -420,8 +509,7 @@ export function DatasetView({ node, onUpdate, showBackButton, onBack }: DatasetV
               </Button>
             ),
           } as ColumnDef<DatasetRow>,
-        ]
-      : []),
+        ]),
     {
       id: '_add_col',
       header: () => (
