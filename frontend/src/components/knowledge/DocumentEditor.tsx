@@ -1,13 +1,11 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Save, Loader2, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { knowledgeApi } from '@/lib/knowledgeApi';
 import type { KnowledgeNode } from '@/lib/knowledgeApi';
-import { NovelEditor } from '@/components/novel';
-import type { JSONContent } from 'novel';
-import { createImageUpload } from 'novel';
+import { LexicalEditor } from '@/components/lexical-editor';
 import { api } from '@/lib/api';
 
 const MAX_SIZE_MB = 10;
@@ -21,34 +19,6 @@ interface DocumentEditorProps {
   onBack?: () => void;
 }
 
-function parseInitialContent(content: string | null): JSONContent | undefined {
-  if (!content || !content.trim()) {
-    return undefined;
-  }
-  const trimmed = content.trim();
-  if (trimmed.startsWith('{')) {
-    try {
-      const parsed = JSON.parse(content!) as JSONContent;
-      if (parsed && typeof parsed === 'object' && parsed.type === 'doc') {
-        return parsed;
-      }
-    } catch {
-      // Fall through to legacy Markdown handling
-    }
-  }
-  return {
-    type: 'doc',
-    content: [
-      {
-        type: 'paragraph',
-        content: trimmed
-          ? [{ type: 'text', text: trimmed }]
-          : undefined,
-      },
-    ],
-  };
-}
-
 export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: DocumentEditorProps) {
   const { toast } = useToast();
   const [title, setTitle] = useState(node.name);
@@ -56,50 +26,6 @@ export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: Docum
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const initialMount = useRef(true);
-
-  const initialContent = parseInitialContent(node.content);
-
-  const uploadFn = useMemo(() => createImageUpload({
-    validateFn: (file) => {
-      if (!file.type.startsWith('image/')) {
-        toast({
-          title: '不支持的文件类型',
-          description: '请上传图片文件（jpg、png、gif、webp 等）',
-          variant: 'destructive',
-        });
-        return false;
-      }
-      if (file.size > MAX_SIZE_BYTES) {
-        toast({
-          title: '文件过大',
-          description: `图片大小不能超过 ${MAX_SIZE_MB}MB`,
-          variant: 'destructive',
-        });
-        return false;
-      }
-      return true;
-    },
-    onUpload: async (file: File) => {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const { data } = await api.post<{ url: string }>(
-        '/api/v1/knowledge/upload-image',
-        formData,
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        }
-      );
-
-      if (!data?.url) {
-        throw new Error('上传失败：未返回图片 URL');
-      }
-
-      return data.url;
-    },
-  }), [toast]);
 
   useEffect(() => {
     setTitle(node.name);
@@ -142,14 +68,47 @@ export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: Docum
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSave]);
 
-  const handleEditorChange = useCallback((json: JSONContent) => {
-    const str = JSON.stringify(json);
-    setContentJson(str);
+  const handleEditorChange = useCallback((jsonString: string) => {
+    setContentJson(jsonString);
     if (!initialMount.current) {
       setDirty(true);
     }
     initialMount.current = false;
   }, []);
+
+  const handleUploadImage = useCallback(async (file: File): Promise<string> => {
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: '不支持的文件类型',
+        description: '请上传图片文件（jpg、png、gif、webp 等）',
+        variant: 'destructive',
+      });
+      throw new Error('不支持的文件类型');
+    }
+    if (file.size > MAX_SIZE_BYTES) {
+      toast({
+        title: '文件过大',
+        description: `图片大小不能超过 ${MAX_SIZE_MB}MB`,
+        variant: 'destructive',
+      });
+      throw new Error('文件过大');
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const { data } = await api.post<{ url: string }>(
+      '/api/v1/knowledge/upload-image',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+
+    if (!data?.url) {
+      throw new Error('上传失败：未返回图片 URL');
+    }
+
+    return data.url;
+  }, [toast]);
 
   return (
     <div className="flex flex-col h-full">
@@ -191,13 +150,13 @@ export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: Docum
         </Button>
       </div>
 
-      {/* Novel editor */}
+      {/* Lexical editor */}
       <div className="flex-1 overflow-y-auto">
-        <NovelEditor
+        <LexicalEditor
           key={node.id}
-          initialContent={initialContent}
+          initialContent={node.content || undefined}
           onChange={handleEditorChange}
-          uploadFn={uploadFn}
+          onUploadImage={handleUploadImage}
         />
       </div>
     </div>

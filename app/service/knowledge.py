@@ -39,8 +39,14 @@ from app.service.chunking import chunk_text_with_config
 # ---------------------------------------------------------------------------
 
 
-def extract_text_from_tiptap_json(content: str) -> str:
-    """Extract plain text from TipTap/Novel JSON content for vectorization."""
+def extract_text_from_editor_json(content: str) -> str:
+    """Extract plain text from Lexical or TipTap JSON content for vectorization.
+
+    Supports:
+    - Lexical EditorState JSON: { root: { children: [...] } }
+    - Legacy TipTap/Novel JSON: { type: "doc", content: [...] }
+    - Plain text / Markdown fallback
+    """
     if not content or not content.strip():
         return ""
     text = content.strip()
@@ -48,7 +54,7 @@ def extract_text_from_tiptap_json(content: str) -> str:
         return text  # Legacy Markdown or plain text
     try:
         doc = json.loads(content)
-        if not isinstance(doc, dict) or doc.get("type") != "doc":
+        if not isinstance(doc, dict):
             return text
         texts: list[str] = []
 
@@ -60,13 +66,29 @@ def extract_text_from_tiptap_json(content: str) -> str:
                     t = node.get("text")
                     if isinstance(t, str):
                         texts.append(t)
-                if "content" in node and isinstance(node["content"], list):
-                    walk(node["content"])
+                if node.get("type") == "linebreak":
+                    texts.append("\n")
+                # Recurse: Lexical uses "children", TipTap uses "content"
+                for key in ("children", "content"):
+                    if key in node and isinstance(node[key], list):
+                        walk(node[key])
 
-        walk(doc.get("content") or [])
+        # Lexical format: { root: { children: [...] } }
+        if "root" in doc and isinstance(doc["root"], dict):
+            walk(doc["root"].get("children") or [])
+        # Legacy TipTap format: { type: "doc", content: [...] }
+        elif doc.get("type") == "doc":
+            walk(doc.get("content") or [])
+        else:
+            return text
+
         return "\n".join(texts) if texts else text
     except (json.JSONDecodeError, TypeError):
         return text
+
+
+# Backward-compatible alias
+extract_text_from_tiptap_json = extract_text_from_editor_json
 
 
 def _default_vectorization_config() -> VectorizationConfig:
