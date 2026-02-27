@@ -55,7 +55,30 @@ export function LexicalEditor({
       onError: (error: Error) => {
         console.error('[LexicalEditor]', error);
       },
-      editorState: initialContent || undefined,
+      editorState: (editor: any) => {
+        if (!initialContent) {
+          return;
+        }
+
+        try {
+          const editorState = editor.parseEditorState(initialContent);
+          const json = editorState.toJSON?.();
+
+          // 基本结构校验，避免无效 JSON 结构造成解析异常
+          if (!json?.root || json.root.type !== 'root') {
+            throw new Error('Invalid Lexical editorState shape');
+          }
+
+          editor.setEditorState(editorState);
+        } catch (e) {
+          console.error(
+            '[LexicalEditor] Failed to parse initialContent, fallback to empty editor state.',
+            e,
+            initialContent,
+          );
+          // 解析失败时直接使用默认空状态，避免报错中断
+        }
+      },
     }),
     // Only use initialContent on first mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
