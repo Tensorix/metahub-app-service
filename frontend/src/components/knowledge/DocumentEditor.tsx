@@ -1,11 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Save, Loader2, ArrowLeft } from 'lucide-react';
+import { Save, Loader2, ArrowLeft, Download, FileJson, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { knowledgeApi } from '@/lib/knowledgeApi';
 import type { KnowledgeNode } from '@/lib/knowledgeApi';
 import { LobeEditorWrapper } from '@/components/lobe-editor';
+import type { LobeEditorWrapperHandle } from '@/components/lobe-editor';
 import { api } from '@/lib/api';
 
 const MAX_SIZE_MB = 10;
@@ -26,6 +33,7 @@ export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: Docum
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const initialMount = useRef(true);
+  const editorRef = useRef<LobeEditorWrapperHandle>(null);
 
   useEffect(() => {
     setTitle(node.name);
@@ -110,6 +118,28 @@ export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: Docum
     return data.url;
   }, [toast]);
 
+  const downloadFile = useCallback((content: string, filename: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const handleExportJson = useCallback(() => {
+    const json = editorRef.current?.exportJson() ?? contentJson;
+    const filename = `${title || 'document'}.json`;
+    downloadFile(json, filename, 'application/json');
+  }, [contentJson, title, downloadFile]);
+
+  const handleExportMarkdown = useCallback(() => {
+    const md = editorRef.current?.exportMarkdown() ?? '';
+    const filename = `${title || 'document'}.md`;
+    downloadFile(md, filename, 'text/markdown');
+  }, [title, downloadFile]);
+
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar - [返回] [文档标题] [保存] 同一行 */}
@@ -148,11 +178,28 @@ export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: Docum
           )}
           {saving ? '保存中' : '保存'}
         </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger className="inline-flex items-center justify-center gap-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground shrink-0 h-8">
+            <Download className="w-4 h-4" />
+            导出
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={handleExportMarkdown}>
+              <FileText className="w-4 h-4 mr-2" />
+              导出为 Markdown
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleExportJson}>
+              <FileJson className="w-4 h-4 mr-2" />
+              导出为 Lexical JSON
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Lexical editor */}
       <div className="flex-1 overflow-y-auto">
         <LobeEditorWrapper
+          ref={editorRef}
           key={node.id}
           initialContent={node.content || undefined}
           onChange={handleEditorChange}

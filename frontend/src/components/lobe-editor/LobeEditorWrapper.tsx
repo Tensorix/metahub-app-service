@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useImperativeHandle, useMemo, forwardRef, type Ref } from 'react';
 import {
   Editor,
   useEditor,
@@ -14,6 +14,7 @@ import {
   ReactHRPlugin,
   ReactImagePlugin,
   ReactVirtualBlockPlugin,
+  ReactMarkdownPlugin,
   INSERT_HEADING_COMMAND,
   INSERT_QUOTE_COMMAND,
   INSERT_HORIZONTAL_RULE_COMMAND,
@@ -63,6 +64,11 @@ const EMPTY_EDITOR_STATE = {
   },
 };
 
+export interface LobeEditorWrapperHandle {
+  exportJson: () => string;
+  exportMarkdown: () => string;
+}
+
 export interface LobeEditorWrapperProps {
   initialContent?: string;
   onChange?: (jsonString: string) => void;
@@ -72,16 +78,31 @@ export interface LobeEditorWrapperProps {
   placeholder?: string;
 }
 
-export function LobeEditorWrapper({
+export const LobeEditorWrapper = forwardRef<LobeEditorWrapperHandle, LobeEditorWrapperProps>(function LobeEditorWrapper({
   initialContent,
   onChange,
   onUploadImage,
   editable = true,
   autoFocus = true,
   placeholder = '输入 / 唤起命令…',
-}: LobeEditorWrapperProps) {
+}: LobeEditorWrapperProps, ref: Ref<LobeEditorWrapperHandle>) {
   const editor = useEditor();
   const editorState = useEditorState(editor);
+
+  useImperativeHandle(ref, () => ({
+    exportJson: () => {
+      const doc = editor.getDocument('json');
+      return doc ? JSON.stringify(doc) : '{}';
+    },
+    exportMarkdown: () => {
+      try {
+        const md = editor.getDocument('markdown');
+        return (md as unknown as string) ?? '';
+      } catch {
+        return '';
+      }
+    },
+  }), [editor]);
 
   const parsedContent = useMemo(() => {
     if (!initialContent) return EMPTY_EDITOR_STATE;
@@ -240,6 +261,7 @@ export function LobeEditorWrapper({
       ReactTablePlugin,
       ReactHRPlugin,
       ReactVirtualBlockPlugin,
+      ReactMarkdownPlugin,
       ImagePluginWithUpload,
     ],
     [ImagePluginWithUpload],
@@ -259,4 +281,4 @@ export function LobeEditorWrapper({
       style={{ minHeight: 300 }}
     />
   );
-}
+});
