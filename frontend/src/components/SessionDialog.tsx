@@ -24,7 +24,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { SearchIndexManager } from './SearchIndexManager';
-import { Settings, Search, Download, Loader2, Calendar } from 'lucide-react';
+import { Settings, Search, Download, Loader2, Calendar, ChevronDown, ChevronRight } from 'lucide-react';
 import { useSessionTransfer } from '@/hooks/useSessionTransfer';
 import { useToast } from '@/hooks/use-toast';
 import { formatDateForInput } from '@/lib/utils';
@@ -38,13 +38,14 @@ interface SessionDialogProps {
 
 export function SessionDialog({ open, onOpenChange, session, onSubmit }: SessionDialogProps) {
   const [name, setName] = useState('');
-  const [type, setType] = useState('pm');
+  const [type, setType] = useState('ai');
   const [source, setSource] = useState('');
   const [agentId, setAgentId] = useState<string>('');
   const [autoSendIM, setAutoSendIM] = useState(true);
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const { toast } = useToast();
 
   // 导出选项状态
@@ -79,11 +80,12 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
       setAutoReplyEnabled(session.auto_reply_enabled ?? false);
     } else {
       setName('');
-      setType('pm');
+      setType('ai');
       setSource('');
       setAgentId('');
       setAutoSendIM(true);
       setAutoReplyEnabled(false);
+      setShowAdvanced(false);
     }
   }, [session, open]);
 
@@ -430,6 +432,7 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
         ) : (
           <form onSubmit={handleSubmit}>
             <div className="space-y-4 py-4">
+              {/* 会话名称 */}
               <div className="space-y-2">
                 <Label htmlFor="name">会话名称</Label>
                 <Input
@@ -440,100 +443,137 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
                 />
               </div>
 
+              {/* 关联 Agent */}
               <div className="space-y-2">
-                <Label htmlFor="type">会话类型</Label>
-                <select
-                  id="type"
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                  value={type}
-                  onChange={(e) => setType(e.target.value)}
-                >
-                  <option value="pm">私聊</option>
-                  <option value="group">群聊</option>
-                  <option value="ai">AI</option>
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="source">来源</Label>
-                <Input
-                  id="source"
-                  placeholder="例如: astr_wechat, astr_qq"
-                  value={source}
-                  onChange={(e) => setSource(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="agent">关联 Agent (可选)</Label>
-                <select
-                  id="agent"
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                  value={agentId}
-                  onChange={(e) => {
-                    setAgentId(e.target.value);
-                    if (!e.target.value) {
-                      setAutoReplyEnabled(false); // 清除 Agent 时关闭自动回复
-                    }
+                <Label htmlFor="agent">关联 Agent</Label>
+                <Select
+                  value={agentId || 'none'}
+                  onValueChange={(value) => {
+                    const id = value === 'none' ? '' : value;
+                    setAgentId(id);
+                    if (!id) setAutoReplyEnabled(false);
                   }}
                 >
-                  <option value="">无</option>
-                  {agents.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.name}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="agent">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">无</SelectItem>
+                    {agents.map((agent) => (
+                      <SelectItem key={agent.id} value={agent.id}>
+                        {agent.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
-              {/* IM 会话配置 */}
-              {(type === 'pm' || type === 'group') && (
-                <>
-                  <div className="space-y-2">
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        id="autoSendIM"
-                        checked={autoSendIM}
-                        onChange={(e) => setAutoSendIM(e.target.checked)}
-                        className="h-4 w-4 rounded border-gray-300"
-                      />
-                      <Label htmlFor="autoSendIM" className="cursor-pointer">
-                        自动发送到 IM 平台
-                      </Label>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      启用后，发送的消息会直接通过 IM Gateway 发送到对应平台（私聊/群聊）
-                    </p>
-                  </div>
+              {/* 高级选项 */}
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => {
+                    if (showAdvanced) {
+                      setType('ai');
+                      setSource('');
+                      setAutoReplyEnabled(false);
+                    }
+                    setShowAdvanced(!showAdvanced);
+                  }}
+                >
+                  {showAdvanced
+                    ? <ChevronDown className="h-3 w-3" />
+                    : <ChevronRight className="h-3 w-3" />
+                  }
+                  高级选项
+                </button>
 
-                  {/* 自动回复配置 */}
-                  <div className="space-y-3 rounded-lg border p-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label htmlFor="autoReply" className="cursor-pointer font-medium">
-                          自动回复
-                        </Label>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          收到消息时，由关联的 Agent 自动生成回复
-                        </p>
-                      </div>
-                      <Switch
-                        id="autoReply"
-                        checked={autoReplyEnabled}
-                        onCheckedChange={setAutoReplyEnabled}
-                        disabled={!agentId}
-                      />
+                {showAdvanced && (
+                  <div className="space-y-4 rounded-md border px-3 py-3">
+                    {/* 会话类型 */}
+                    <div className="space-y-2">
+                      <Label htmlFor="type">会话类型</Label>
+                      <Select
+                        value={type}
+                        onValueChange={(value) => {
+                          setType(value);
+                          if (value === 'ai') {
+                            setAutoReplyEnabled(false);
+                            setSource('');
+                          }
+                        }}
+                      >
+                        <SelectTrigger id="type">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ai">AI 会话</SelectItem>
+                          <SelectItem value="pm">私聊（IM 调试）</SelectItem>
+                          <SelectItem value="group">群聊（IM 调试）</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
 
-                    {autoReplyEnabled && !agentId && (
-                      <p className="text-xs text-destructive">
-                        请先选择一个 Agent 才能启用自动回复
-                      </p>
+                    {/* IM 会话专属配置 */}
+                    {(type === 'pm' || type === 'group') && (
+                      <>
+                        <div className="space-y-2">
+                          <Label htmlFor="source">来源</Label>
+                          <Input
+                            id="source"
+                            placeholder="例如: astr_wechat, astr_qq"
+                            value={source}
+                            onChange={(e) => setSource(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id="autoSendIM"
+                              checked={autoSendIM}
+                              onChange={(e) => setAutoSendIM(e.target.checked)}
+                              className="h-4 w-4 rounded border-gray-300"
+                            />
+                            <Label htmlFor="autoSendIM" className="cursor-pointer">
+                              自动发送到 IM 平台
+                            </Label>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            启用后，发送的消息会直接通过 IM Gateway 发送到对应平台（私聊/群聊）
+                          </p>
+                        </div>
+
+                        <div className="space-y-3 rounded-lg border p-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <Label htmlFor="autoReply" className="cursor-pointer font-medium">
+                                自动回复
+                              </Label>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                收到消息时，由关联的 Agent 自动生成回复
+                              </p>
+                            </div>
+                            <Switch
+                              id="autoReply"
+                              checked={autoReplyEnabled}
+                              onCheckedChange={setAutoReplyEnabled}
+                              disabled={!agentId}
+                            />
+                          </div>
+                          {autoReplyEnabled && !agentId && (
+                            <p className="text-xs text-destructive">
+                              请先选择一个 Agent 才能启用自动回复
+                            </p>
+                          )}
+                        </div>
+                      </>
                     )}
                   </div>
-                </>
-              )}
+                )}
+              </div>
             </div>
 
             <DialogFooter>
@@ -546,7 +586,7 @@ export function SessionDialog({ open, onOpenChange, session, onSubmit }: Session
                 取消
               </Button>
               <Button type="submit" disabled={loading}>
-                {loading ? '保存中...' : '保存'}
+                {loading ? '创建中...' : '创建'}
               </Button>
             </DialogFooter>
           </form>
