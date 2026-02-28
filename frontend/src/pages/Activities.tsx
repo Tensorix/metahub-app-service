@@ -1,796 +1,374 @@
-import { useState, useEffect } from 'react';
-import { Plus, Trash2, Calendar, Tag, AlertCircle, LayoutGrid, List, GripVertical, Search } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { Plus, Search, LayoutGrid, List, SlidersHorizontal, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { activityApi } from '@/lib/activityApi';
 import type { Activity, ActivityListQuery } from '@/lib/activityApi';
 import ActivityDialog from '@/components/ActivityDialog';
-import { RelationLink } from '@/components/RelationLink';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  closestCorners,
-  useDroppable,
-  type DragEndEvent,
-  type DragStartEvent,
-  type DragOverEvent,
-} from '@dnd-kit/core';
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+import { ActivityStatsBar } from '@/components/activity/ActivityStatsBar';
+import { ActivityBoardView } from '@/components/activity/ActivityBoardView';
+import { ActivityListView } from '@/components/activity/ActivityListView';
+import { ActivityEmptyState } from '@/components/activity/ActivityEmptyState';
 
-// 格式化日期时间
-const formatDateTime = (dateString: string) => {
-  const date = new Date(dateString);
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-};
-
-// 看板列配置
-const BOARD_COLUMNS = [
-  { status: 'pending' as const, title: '待处理', color: 'bg-yellow-100 dark:bg-yellow-900/20' },
-  { status: 'active' as const, title: '进行中', color: 'bg-blue-100 dark:bg-blue-900/20' },
-  { status: 'done' as const, title: '已完成', color: 'bg-green-100 dark:bg-green-900/20' },
-  { status: 'dismissed' as const, title: '已忽略', color: 'bg-gray-100 dark:bg-gray-900/20' },
-];
-
-// 可拖拽的活动卡片组件
-interface ActivityCardProps {
-  activity: Activity;
-  onOpen: (activity: Activity) => void;
-  onDelete: (id: string) => void;
-  getPriorityColor: (priority: number) => string;
-}
-
-const ActivityCard = ({ activity, onOpen, onDelete, getPriorityColor }: ActivityCardProps) => {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: activity.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
-  return (
-    <Card
-      ref={setNodeRef}
-      style={style}
-      className="p-3 hover:shadow-md transition-all cursor-pointer group"
-      onClick={() => onOpen(activity)}
-    >
-      {/* 优先级指示器 + 拖拽把手 */}
-      <div className="flex items-start gap-2">
-        <span
-          {...attributes}
-          {...listeners}
-          className="cursor-grab active:cursor-grabbing touch-none p-0.5 rounded hover:bg-muted shrink-0 -m-0.5"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <GripVertical className="w-3.5 h-3.5 text-muted-foreground" />
-        </span>
-        <div
-          className={`w-1 h-full rounded-full flex-shrink-0 ${
-            activity.priority >= 8
-              ? 'bg-red-500'
-              : activity.priority >= 5
-              ? 'bg-orange-500'
-              : activity.priority >= 3
-              ? 'bg-yellow-500'
-              : 'bg-gray-400'
-          }`}
-        />
-        <div className="flex-1 min-w-0">
-          {/* 标题 */}
-          <h4 className="font-medium text-sm mb-1 line-clamp-2">
-            {activity.name}
-          </h4>
-
-          {/* 备注 */}
-          {activity.comments && (
-            <p className="text-xs text-muted-foreground mb-2 line-clamp-2">
-              {activity.comments}
-            </p>
-          )}
-
-          {/* 标签 */}
-          {activity.tags && activity.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-2">
-              {activity.tags.slice(0, 3).map((tag, idx) => (
-                <Badge key={idx} variant="outline" className="text-xs px-1 py-0">
-                  {tag}
-                </Badge>
-              ))}
-              {activity.tags.length > 3 && (
-                <Badge variant="outline" className="text-xs px-1 py-0">
-                  +{activity.tags.length - 3}
-                </Badge>
-              )}
-            </div>
-          )}
-
-          {/* 关联 */}
-          {activity.relations && activity.relations.length > 0 && (
-            <div
-              className="flex flex-wrap items-center gap-1 mb-2 text-xs"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {activity.relations.slice(0, 3).map((r) => (
-                <RelationLink
-                  key={`${r.type}-${r.id}`}
-                  relation={r}
-                  variant="compact"
-                />
-              ))}
-              {activity.relations.length > 3 && (
-                <span className="text-xs px-2 py-0.5">
-                  +{activity.relations.length - 3}
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* 元信息 */}
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <div className="flex items-center gap-1">
-              <Tag className="w-3 h-3" />
-              <span>{activity.type}</span>
-            </div>
-            <span className={getPriorityColor(activity.priority)}>
-              P{activity.priority}
-            </span>
-          </div>
-
-          {/* 截止日期 */}
-          {activity.due_date && (
-            <div className="flex items-center gap-1 mt-2 text-xs text-muted-foreground">
-              <Calendar className="w-3 h-3" />
-              <span>{formatDateTime(activity.due_date)}</span>
-            </div>
-          )}
-
-          {/* 操作按钮（悬停显示） */}
-          <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-xs"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpen(activity);
-              }}
-            >
-              编辑
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-xs text-destructive"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(activity.id);
-              }}
-            >
-              删除
-            </Button>
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-};
-
-// 可放置的列组件
-interface DroppableColumnProps {
-  column: typeof BOARD_COLUMNS[0];
-  activities: Activity[];
-  onOpen: (activity: Activity) => void;
-  onDelete: (id: string) => void;
-  getPriorityColor: (priority: number) => string;
-}
-
-const DroppableColumn = ({ column, activities, onOpen, onDelete, getPriorityColor }: DroppableColumnProps) => {
-  const { setNodeRef, isOver } = useDroppable({
-    id: column.status,
-  });
-
-  return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* 列头 */}
-      <div className={`${column.color} rounded-t-lg p-3 border-b flex-shrink-0`}>
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold">{column.title}</h3>
-          <Badge variant="secondary">
-            {activities.length}
-          </Badge>
-        </div>
-      </div>
-
-      {/* 卡片列表（可放置区域） */}
-      <div
-        ref={setNodeRef}
-        className={`flex-1 border-x border-b rounded-b-lg transition-colors overflow-hidden ${
-          isOver ? 'bg-primary/10' : 'bg-muted/20'
-        }`}
-      >
-        <ScrollArea className="h-full">
-          <div className="p-2 space-y-2">
-            <SortableContext
-              items={activities.map(a => a.id)}
-              strategy={verticalListSortingStrategy}
-              id={column.status}
-            >
-              {activities.map((activity) => (
-                <ActivityCard
-                  key={activity.id}
-                  activity={activity}
-                  onOpen={onOpen}
-                  onDelete={onDelete}
-                  getPriorityColor={getPriorityColor}
-                />
-              ))}
-            </SortableContext>
-          </div>
-        </ScrollArea>
-      </div>
-    </div>
-  );
-};
+// ──────────────────────────────────────────── component
 
 const Activities = () => {
   const [activities, setActivities] = useState<Activity[]>([]);
-  const [page, setPage] = useState(1);
-  const [size] = useState(100); // 增加每页数量以支持看板视图
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [defaultStatus, setDefaultStatus] = useState<Activity['status'] | undefined>();
   const [viewMode, setViewMode] = useState<'board' | 'list'>('board');
+  const [isMobile, setIsMobile] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   const { toast } = useToast();
 
-  // 检测屏幕尺寸
-  const [isMobile, setIsMobile] = useState(false);
-  
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  // 筛选条件
+  // Filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<Activity['status'] | null>(null);
   const [filters, setFilters] = useState<ActivityListQuery>({
     page: 1,
     size: 100,
   });
 
-  // 客户端搜索（按名称）
-  const [searchQuery, setSearchQuery] = useState('');
+  // ──────── Responsive
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
-  // 配置拖拽传感器
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8, // 移动 8px 后才开始拖拽
-      },
-    })
-  );
-
-  const loadActivities = async () => {
+  // ──────── Data loading
+  const loadActivities = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await activityApi.getActivities({ ...filters, page, size });
+      const response = await activityApi.getActivities({ ...filters, page: 1, size: 100 });
       setActivities(response.items || []);
     } catch (error) {
       console.error('加载活动失败:', error);
       setActivities([]);
-      toast({
-        title: '加载失败',
-        description: '无法加载活动列表',
-        variant: 'destructive',
-      });
+      toast({ title: '加载失败', description: '无法加载活动列表', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters, toast]);
 
   useEffect(() => {
     loadActivities();
-  }, [page, filters]);
+  }, [loadActivities]);
 
-  const handleCreate = () => {
+  // ──────── Handlers
+  const handleCreate = useCallback((status?: Activity['status']) => {
     setEditingActivity(null);
+    setDefaultStatus(status);
     setDialogOpen(true);
-  };
+  }, []);
 
-  const handleOpenActivity = (activity: Activity) => {
+  const handleOpen = useCallback((activity: Activity) => {
     setEditingActivity(activity);
+    setDefaultStatus(undefined);
     setDialogOpen(true);
-  };
+  }, []);
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = useCallback(async (id: string) => {
     if (!confirm('确定要删除这个活动吗？')) return;
-    
     try {
       await activityApi.deleteActivity(id);
-      toast({
-        title: '删除成功',
-        description: '活动已被删除',
-      });
-      loadActivities();
-    } catch (error) {
-      toast({
-        title: '删除失败',
-        description: '无法删除活动',
-        variant: 'destructive',
-      });
+      setActivities((prev) => prev.filter((a) => a.id !== id));
+      toast({ title: '已删除', description: '活动已被移除' });
+    } catch {
+      toast({ title: '删除失败', description: '无法删除活动', variant: 'destructive' });
     }
-  };
+  }, [toast]);
 
-  const handleStatusChange = async (activity: Activity, newStatus: Activity['status']) => {
+  const handleStatusChange = useCallback(async (activity: Activity, newStatus: Activity['status']) => {
+    // Optimistic update
+    setActivities((prev) =>
+      prev.map((a) => (a.id === activity.id ? { ...a, status: newStatus } : a))
+    );
     try {
       await activityApi.updateActivity(activity.id, { status: newStatus });
-      // 乐观更新
-      setActivities(prev =>
-        prev.map(a => (a.id === activity.id ? { ...a, status: newStatus } : a))
-      );
-    } catch (error) {
-      toast({
-        title: '更新失败',
-        description: '无法更新活动状态',
-        variant: 'destructive',
-      });
-      // 失败时重新加载
+    } catch {
+      toast({ title: '更新失败', description: '无法更新活动状态', variant: 'destructive' });
       loadActivities();
     }
-  };
+  }, [toast, loadActivities]);
 
-  const getPriorityColor = (priority: number) => {
-    if (priority >= 8) return 'text-red-600 font-bold';
-    if (priority >= 5) return 'text-orange-600 font-semibold';
-    if (priority >= 3) return 'text-yellow-600';
-    return 'text-gray-600';
-  };
+  // ──────── Filtered data
+  const filteredActivities = useMemo(() => {
+    return activities.filter((a) => {
+      if (a.is_deleted) return false;
+      if (searchQuery && !a.name.toLowerCase().includes(searchQuery.toLowerCase().trim())) return false;
+      if (statusFilter && a.status !== statusFilter) return false;
+      return true;
+    });
+  }, [activities, searchQuery, statusFilter]);
 
-  const getStatusText = (status: Activity['status']) => {
-    switch (status) {
-      case 'pending': return '待处理';
-      case 'active': return '进行中';
-      case 'done': return '已完成';
-      case 'dismissed': return '已忽略';
-      default: return status;
-    }
-  };
-
-  const getStatusBadgeColor = (status: Activity['status']) => {
-    switch (status) {
-      case 'pending': return 'bg-yellow-500 hover:bg-yellow-600';
-      case 'active': return 'bg-blue-500 hover:bg-blue-600';
-      case 'done': return 'bg-green-500 hover:bg-green-600';
-      case 'dismissed': return 'bg-gray-500 hover:bg-gray-600';
-      default: return 'bg-gray-500';
-    }
-  };
-
-  // 按名称过滤（客户端）+ 排除已删除
-  const filteredActivities = activities.filter(
-    (a) =>
-      !a.is_deleted &&
-      (!searchQuery || a.name.toLowerCase().includes(searchQuery.toLowerCase().trim()))
-  );
-
-  // 按状态分组活动
-  const groupedActivities = BOARD_COLUMNS.reduce((acc, column) => {
-    acc[column.status] = filteredActivities.filter((a) => a.status === column.status);
-    return acc;
-  }, {} as Record<Activity['status'], Activity[]>);
-
-  // 拖拽开始
-  const handleDragStart = (event: DragStartEvent) => {
-    setActiveId(event.active.id as string);
-  };
-
-  // 拖拽悬停
-  const handleDragOver = (event: DragOverEvent) => {
-    const { over } = event;
-    if (!over) return;
-
-    // 检查是否悬停在列上
-    const targetColumn = BOARD_COLUMNS.find(col => col.status === over.id);
-    if (targetColumn) {
-      // 可以在这里添加视觉反馈
-    }
-  };
-
-  // 拖拽结束
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    setActiveId(null);
-
-    if (!over) return;
-
-    const activeId = active.id as string;
-    const overId = over.id as string;
-
-    const activity = activities.find(a => a.id === activeId);
-    if (!activity) return;
-
-    // 检查是否拖到列上
-    const targetColumn = BOARD_COLUMNS.find(col => col.status === overId);
-    if (targetColumn && activity.status !== targetColumn.status) {
-      handleStatusChange(activity, targetColumn.status);
-      return;
-    }
-
-    // 检查是否拖到另一个卡片上
-    const targetActivity = activities.find(a => a.id === overId);
-    if (targetActivity && activity.status !== targetActivity.status) {
-      handleStatusChange(activity, targetActivity.status);
-    }
-  };
-
-  // 获取当前拖拽的活动
-  const activeActivity = activeId ? activities.find(a => a.id === activeId) : null;
+  // Active filter count
+  const activeFilterCount = [filters.type, filters.priority_min, statusFilter].filter(Boolean).length;
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* 头部 */}
-      <div className="flex-shrink-0 px-6 pt-6 pb-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">活动管理</h1>
-            <p className="text-muted-foreground mt-1">
-              {isMobile ? '管理您的活动' : '拖拽卡片到不同列来改变状态'}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {!isMobile && (
-              <div className="flex items-center gap-1 mr-2">
-                <Button
-                  variant={viewMode === 'board' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setViewMode('board')}
-                >
-                  <LayoutGrid className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant={viewMode === 'list' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setViewMode('list')}
-                >
-                  <List className="w-4 h-4" />
-                </Button>
-              </div>
-            )}
-            <Button onClick={handleCreate}>
-              <Plus className="w-4 h-4 mr-2" />
-              新建活动
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* 筛选栏：移动端紧凑单行，桌面端保持原布局 */}
-      <div className="flex-shrink-0 px-4 sm:px-6 pb-3 sm:pb-4">
-        <Card className="p-3 sm:p-4">
-          {isMobile ? (
-            /* 移动端：紧凑布局，类型+优先级同一行，减少垂直占用 */
-            <div className="space-y-2">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground shrink-0" />
-                <Input
-                  placeholder="搜索活动名称..."
-                  className="pl-8 h-9 text-sm"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Select
-                  value={filters.type || 'all'}
-                  onValueChange={(value) => {
-                    setFilters({ ...filters, type: value === 'all' ? undefined : value });
-                    setPage(1);
-                  }}
-                >
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="类型" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">全部类型</SelectItem>
-                    <SelectItem value="meeting">会议</SelectItem>
-                    <SelectItem value="task">任务</SelectItem>
-                    <SelectItem value="reminder">提醒</SelectItem>
-                    <SelectItem value="ping">Ping</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={filters.priority_min?.toString() || 'all'}
-                  onValueChange={(value) => {
-                    setFilters({
-                      ...filters,
-                      priority_min: value === 'all' ? undefined : parseInt(value),
-                    });
-                    setPage(1);
-                  }}
-                >
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="优先级" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">全部优先级</SelectItem>
-                    <SelectItem value="8">高优先级 (≥8)</SelectItem>
-                    <SelectItem value="5">中优先级 (≥5)</SelectItem>
-                    <SelectItem value="3">低优先级 (≥3)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+    <TooltipProvider delayDuration={300}>
+      <div className="flex flex-col h-full overflow-hidden">
+        {/* ──────── Header */}
+        <div className="flex-shrink-0 px-6 pt-6 pb-2">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">活动管理</h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {loading ? '加载中...' : `共 ${filteredActivities.length} 项活动`}
+              </p>
             </div>
-          ) : (
-            /* 桌面端：保持原有横排布局 */
-            <div className="flex flex-wrap gap-4">
-              <div className="flex-1 min-w-[200px]">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="搜索活动名称..."
-                    className="pl-9"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
-              </div>
-              <Select
-                value={filters.type || 'all'}
-                onValueChange={(value) => {
-                  setFilters({ ...filters, type: value === 'all' ? undefined : value });
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="w-[150px]">
-                  <SelectValue placeholder="类型" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部类型</SelectItem>
-                  <SelectItem value="meeting">会议</SelectItem>
-                  <SelectItem value="task">任务</SelectItem>
-                  <SelectItem value="reminder">提醒</SelectItem>
-                  <SelectItem value="ping">Ping</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select
-                value={filters.priority_min?.toString() || 'all'}
-                onValueChange={(value) => {
-                  setFilters({
-                    ...filters,
-                    priority_min: value === 'all' ? undefined : parseInt(value),
-                  });
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="w-[150px]">
-                  <SelectValue placeholder="优先级" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部优先级</SelectItem>
-                  <SelectItem value="8">高优先级 (≥8)</SelectItem>
-                  <SelectItem value="5">中优先级 (≥5)</SelectItem>
-                  <SelectItem value="3">低优先级 (≥3)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-        </Card>
-      </div>
 
-      {/* 看板/列表视图 */}
-      <div className="flex-1 px-6 pb-6 overflow-hidden">
-        {loading ? (
-          <div className="flex items-center justify-center h-full text-muted-foreground">加载中...</div>
-        ) : !activities || activities.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
-            <Card className="p-12 text-center">
-              <AlertCircle className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">暂无活动</p>
-              <Button onClick={handleCreate} className="mt-4">
-                创建第一个活动
-              </Button>
-            </Card>
-          </div>
-        ) : isMobile || viewMode === 'list' ? (
-          // 列表视图（移动端或用户选择）
-          <ScrollArea className="h-full">
-            <div className="space-y-3 pb-4">
-              {filteredActivities.map((activity) => (
-                <Card
-                  key={activity.id}
-                  className="p-4 hover:shadow-md transition-shadow cursor-pointer"
-                  onClick={() => handleOpenActivity(activity)}
-                >
-                  <div className="flex items-start gap-3">
-                    {/* 优先级指示器 */}
-                    <div
-                      className={`w-1 h-16 rounded-full flex-shrink-0 ${
-                        activity.priority >= 8
-                          ? 'bg-red-500'
-                          : activity.priority >= 5
-                          ? 'bg-orange-500'
-                          : activity.priority >= 3
-                          ? 'bg-yellow-500'
-                          : 'bg-gray-400'
-                      }`}
-                    />
-                    
-                    <div className="flex-1 min-w-0">
-                      {/* 标题和状态 */}
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <h3 className="font-semibold text-base line-clamp-2">{activity.name}</h3>
-                        <Badge className={getStatusBadgeColor(activity.status)}>
-                          {getStatusText(activity.status)}
-                        </Badge>
-                      </div>
-
-                      {/* 备注 */}
-                      {activity.comments && (
-                        <p className="text-sm text-muted-foreground mb-2 line-clamp-2">
-                          {activity.comments}
-                        </p>
-                      )}
-
-                      {/* 关联 */}
-                      {activity.relations && activity.relations.length > 0 && (
-                        <div
-                          className="flex flex-wrap items-center gap-1 mb-2 text-xs"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {activity.relations.slice(0, 3).map((r) => (
-                            <RelationLink
-                              key={`${r.type}-${r.id}`}
-                              relation={r}
-                              variant="compact"
-                            />
-                          ))}
-                          {activity.relations.length > 3 && (
-                            <span className="text-xs px-2 py-0.5">
-                              +{activity.relations.length - 3}
-                            </span>
-                          )}
-                        </div>
-                      )}
-
-                      {/* 元信息 */}
-                      <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                        <div className="flex items-center gap-1">
-                          <Tag className="w-3 h-3" />
-                          <span>{activity.type}</span>
-                        </div>
-                        <span className={getPriorityColor(activity.priority)}>
-                          优先级: {activity.priority}
-                        </span>
-                        {activity.due_date && (
-                          <div className="flex items-center gap-1">
-                            <Calendar className="w-3 h-3" />
-                            <span>{formatDateTime(activity.due_date)}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* 标签 */}
-                      {activity.tags && activity.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {activity.tags.slice(0, 3).map((tag, idx) => (
-                            <Badge key={idx} variant="outline" className="text-xs">
-                              {tag}
-                            </Badge>
-                          ))}
-                          {activity.tags.length > 3 && (
-                            <Badge variant="outline" className="text-xs">
-                              +{activity.tags.length - 3}
-                            </Badge>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 操作按钮 */}
-                    <div className="flex items-center gap-1 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              {/* View toggle */}
+              {!isMobile && (
+                <div className="flex items-center border rounded-lg p-0.5 bg-muted/50">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
                       <Button
-                        variant="ghost"
+                        variant={viewMode === 'board' ? 'default' : 'ghost'}
                         size="sm"
-                        className="h-8 px-2 text-xs"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenActivity(activity);
-                        }}
+                        className="h-7 w-7 p-0"
+                        onClick={() => setViewMode('board')}
                       >
-                        编辑
+                        <LayoutGrid className="w-3.5 h-3.5" />
                       </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>看板视图</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
                       <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(activity.id);
-                        }}
+                        variant={viewMode === 'list' ? 'default' : 'ghost'}
+                        size="sm"
+                        className="h-7 w-7 p-0"
+                        onClick={() => setViewMode('list')}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <List className="w-3.5 h-3.5" />
                       </Button>
-                    </div>
-                  </div>
-                </Card>
-              ))}
+                    </TooltipTrigger>
+                    <TooltipContent>列表视图</TooltipContent>
+                  </Tooltip>
+                </div>
+              )}
+
+              <Button onClick={() => handleCreate()} className="gap-2 rounded-lg">
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">新建活动</span>
+              </Button>
             </div>
-          </ScrollArea>
-        ) : (
-          // 看板视图（桌面端）
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCorners}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDragEnd={handleDragEnd}
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 h-full">
-              {BOARD_COLUMNS.map((column) => (
-                <DroppableColumn
-                  key={column.status}
-                  column={column}
-                  activities={groupedActivities[column.status] || []}
-                  onOpen={handleOpenActivity}
-                  onDelete={handleDelete}
-                  getPriorityColor={getPriorityColor}
-                />
-              ))}
+          </div>
+
+          {/* Stats bar */}
+          <ActivityStatsBar
+            activities={activities}
+            onFilterStatus={setStatusFilter}
+            activeFilter={statusFilter}
+          />
+        </div>
+
+        {/* ──────── Filter bar */}
+        <div className="flex-shrink-0 px-6 py-3">
+          <div className="flex items-center gap-2">
+            {/* Search */}
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="搜索活动..."
+                className="pl-9 h-9 rounded-lg bg-muted/40 border-0 focus-visible:bg-background focus-visible:ring-1"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-muted"
+                >
+                  <X className="w-3 h-3 text-muted-foreground" />
+                </button>
+              )}
             </div>
 
-            {/* 拖拽预览 */}
-            <DragOverlay>
-              {activeActivity ? (
-                <Card className="p-3 opacity-90 rotate-3 shadow-lg">
-                  <div className="flex items-start gap-2">
-                    <div className="w-1 h-full rounded-full bg-primary" />
-                    <div className="flex-1">
-                      <h4 className="font-medium text-sm">{activeActivity.name}</h4>
-                    </div>
-                  </div>
-                </Card>
-              ) : null}
-            </DragOverlay>
-          </DndContext>
-        )}
+            {/* Filter toggle */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={showFilters ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-9 gap-1.5 rounded-lg"
+                  onClick={() => setShowFilters(!showFilters)}
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  {!isMobile && <span>筛选</span>}
+                  {activeFilterCount > 0 && (
+                    <Badge variant="secondary" className="h-4 min-w-4 px-1 text-[10px]">
+                      {activeFilterCount}
+                    </Badge>
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>展开筛选项</TooltipContent>
+            </Tooltip>
+          </div>
+
+          {/* Expandable filters */}
+          <AnimatePresence>
+            {showFilters && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="flex flex-wrap gap-2 pt-3">
+                  <Select
+                    value={filters.type || 'all'}
+                    onValueChange={(v) => setFilters({ ...filters, type: v === 'all' ? undefined : v })}
+                  >
+                    <SelectTrigger className="w-[130px] h-8 text-xs rounded-lg">
+                      <SelectValue placeholder="全部类型" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部类型</SelectItem>
+                      <SelectItem value="task">任务</SelectItem>
+                      <SelectItem value="meeting">会议</SelectItem>
+                      <SelectItem value="reminder">提醒</SelectItem>
+                      <SelectItem value="event">事件</SelectItem>
+                      <SelectItem value="ping">Ping</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={filters.priority_min?.toString() || 'all'}
+                    onValueChange={(v) =>
+                      setFilters({ ...filters, priority_min: v === 'all' ? undefined : parseInt(v) })
+                    }
+                  >
+                    <SelectTrigger className="w-[140px] h-8 text-xs rounded-lg">
+                      <SelectValue placeholder="全部优先级" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部优先级</SelectItem>
+                      <SelectItem value="8">紧急 (P8+)</SelectItem>
+                      <SelectItem value="5">高优先级 (P5+)</SelectItem>
+                      <SelectItem value="3">中优先级 (P3+)</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Clear all filters */}
+                  {activeFilterCount > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs text-muted-foreground"
+                      onClick={() => {
+                        setFilters({ page: 1, size: 100 });
+                        setStatusFilter(null);
+                        setSearchQuery('');
+                      }}
+                    >
+                      <X className="w-3 h-3 mr-1" />
+                      清除筛选
+                    </Button>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* ──────── Content */}
+        <div className="flex-1 px-6 pb-6 overflow-hidden">
+          {loading ? (
+            <LoadingSkeleton viewMode={isMobile ? 'list' : viewMode} />
+          ) : activities.length === 0 ? (
+            <ActivityEmptyState onCreate={() => handleCreate()} />
+          ) : filteredActivities.length === 0 ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex flex-col items-center justify-center h-full"
+            >
+              <Search className="w-10 h-10 text-muted-foreground/30 mb-4" />
+              <p className="text-muted-foreground text-sm">没有匹配的活动</p>
+              <Button
+                variant="link"
+                size="sm"
+                className="mt-2"
+                onClick={() => {
+                  setSearchQuery('');
+                  setStatusFilter(null);
+                  setFilters({ page: 1, size: 100 });
+                }}
+              >
+                清除所有筛选
+              </Button>
+            </motion.div>
+          ) : isMobile || viewMode === 'list' ? (
+            <ActivityListView
+              activities={filteredActivities}
+              onOpen={handleOpen}
+              onDelete={handleDelete}
+              onStatusChange={handleStatusChange}
+            />
+          ) : (
+            <ActivityBoardView
+              activities={filteredActivities}
+              onOpen={handleOpen}
+              onDelete={handleDelete}
+              onStatusChange={handleStatusChange}
+              onCreateInColumn={(status) => handleCreate(status)}
+            />
+          )}
+        </div>
+
+        {/* ──────── Dialog */}
+        <ActivityDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          activity={editingActivity}
+          defaultStatus={defaultStatus}
+          onSuccess={loadActivities}
+        />
       </div>
-
-      {/* 活动对话框 */}
-      <ActivityDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        activity={editingActivity}
-        onSuccess={loadActivities}
-      />
-    </div>
+    </TooltipProvider>
   );
 };
+
+// ──────── Loading skeleton
+
+function LoadingSkeleton({ viewMode }: { viewMode: 'board' | 'list' }) {
+  if (viewMode === 'board') {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 h-full">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="flex flex-col gap-2">
+            <Skeleton className="h-12 w-full rounded-xl" />
+            {Array.from({ length: 3 }).map((_, j) => (
+              <Skeleton key={j} className="h-24 w-full rounded-lg" />
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <Skeleton key={i} className="h-20 w-full rounded-lg" />
+      ))}
+    </div>
+  );
+}
 
 export default Activities;
