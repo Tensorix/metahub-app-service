@@ -216,3 +216,11 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Reset antd-style's injected `a { color: colorLink }` (blue by default).
+   antd injects unlayered CSS via emotion, so it beats @layer base rules.
+   Using a two-element selector (html a) gives higher specificity than antd's
+   single-element `a` rule, so this always wins regardless of injection order. */
+html a {
+  color: inherit;
+}

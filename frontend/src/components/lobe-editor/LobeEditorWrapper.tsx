@@ -2,15 +2,18 @@ import { useCallback, useMemo } from 'react';
 import {
   Editor,
   useEditor,
+  useEditorState,
   type EditorProps,
 } from '@lobehub/editor/react';
 import {
   ReactListPlugin,
-  ReactLinkPlugin,
+  ReactLinkHighlightPlugin,
+  ReactCodePlugin,
   ReactCodeblockPlugin,
   ReactTablePlugin,
   ReactHRPlugin,
   ReactImagePlugin,
+  ReactVirtualBlockPlugin,
   INSERT_HEADING_COMMAND,
   INSERT_QUOTE_COMMAND,
   INSERT_HORIZONTAL_RULE_COMMAND,
@@ -21,6 +24,19 @@ import {
   INSERT_UNORDERED_LIST_COMMAND,
 } from '@lobehub/editor';
 import type { IEditor, SlashOptions } from '@lobehub/editor';
+import {
+  Heading1Icon,
+  Heading2Icon,
+  Heading3Icon,
+  ListIcon,
+  ListOrderedIcon,
+  ListTodoIcon,
+  QuoteIcon,
+  MinusIcon,
+  Table2Icon,
+  ImageIcon,
+  SquareDashedBottomCodeIcon,
+} from 'lucide-react';
 
 // Minimal valid Lexical JSON state — required because @lobehub/editor's
 // ReactPlainText unconditionally calls setDocument(type, content) even
@@ -65,6 +81,7 @@ export function LobeEditorWrapper({
   placeholder = '输入 / 唤起命令…',
 }: LobeEditorWrapperProps) {
   const editor = useEditor();
+  const editorState = useEditorState(editor);
 
   const parsedContent = useMemo(() => {
     if (!initialContent) return EMPTY_EDITOR_STATE;
@@ -111,7 +128,7 @@ export function LobeEditorWrapper({
       {
         key: 'h1',
         label: '标题 1',
-        title: '大标题',
+        icon: Heading1Icon,
         onSelect: (ed: IEditor) => {
           ed.dispatchCommand(INSERT_HEADING_COMMAND, { tag: 'h1' });
         },
@@ -119,7 +136,7 @@ export function LobeEditorWrapper({
       {
         key: 'h2',
         label: '标题 2',
-        title: '中标题',
+        icon: Heading2Icon,
         onSelect: (ed: IEditor) => {
           ed.dispatchCommand(INSERT_HEADING_COMMAND, { tag: 'h2' });
         },
@@ -127,112 +144,102 @@ export function LobeEditorWrapper({
       {
         key: 'h3',
         label: '标题 3',
-        title: '小标题',
+        icon: Heading3Icon,
         onSelect: (ed: IEditor) => {
           ed.dispatchCommand(INSERT_HEADING_COMMAND, { tag: 'h3' });
         },
       },
-      {
-        key: 'ul',
-        label: '无序列表',
-        title: '项目符号列表',
-        onSelect: (ed: IEditor) => {
-          ed.dispatchCommand(
-            INSERT_UNORDERED_LIST_COMMAND,
-            undefined as never,
-          );
-        },
-      },
-      {
-        key: 'ol',
-        label: '有序列表',
-        title: '编号列表',
-        onSelect: (ed: IEditor) => {
-          ed.dispatchCommand(
-            INSERT_ORDERED_LIST_COMMAND,
-            undefined as never,
-          );
-        },
-      },
+      { type: 'divider' as const },
       {
         key: 'checklist',
         label: '待办列表',
-        title: '可勾选的任务列表',
+        icon: ListTodoIcon,
         onSelect: (ed: IEditor) => {
           ed.dispatchCommand(INSERT_CHECK_LIST_COMMAND, undefined as never);
         },
       },
       {
+        key: 'ul',
+        label: '无序列表',
+        icon: ListIcon,
+        onSelect: (ed: IEditor) => {
+          ed.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined as never);
+        },
+      },
+      {
+        key: 'ol',
+        label: '有序列表',
+        icon: ListOrderedIcon,
+        onSelect: (ed: IEditor) => {
+          ed.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined as never);
+        },
+      },
+      { type: 'divider' as const },
+      {
         key: 'quote',
         label: '引用',
-        title: '引用段落',
+        icon: QuoteIcon,
         onSelect: (ed: IEditor) => {
           ed.dispatchCommand(INSERT_QUOTE_COMMAND, undefined as never);
         },
       },
       {
-        key: 'code',
-        label: '代码块',
-        title: '带语法高亮的代码（也可输入 ```）',
+        key: 'hr',
+        label: '分割线',
+        icon: MinusIcon,
         onSelect: (ed: IEditor) => {
-          // Insert a markdown code fence via the editor's markdown API
-          // The codeblock plugin will render it with Shiki highlighting
-          const current = ed.getDocument('markdown');
-          const markdown = current ? `${String(current)}\n\`\`\`\n\n\`\`\`` : '```\n\n```';
-          ed.setDocument('markdown', markdown);
-        },
-      },
-      {
-        key: 'image',
-        label: '图片',
-        title: '上传或插入图片',
-        onSelect: (ed: IEditor) => {
-          if (!onUploadImage) return;
-          const input = document.createElement('input');
-          input.type = 'file';
-          input.accept = 'image/*';
-          input.onchange = () => {
-            const file = input.files?.[0];
-            if (!file) return;
-            ed.dispatchCommand(INSERT_IMAGE_COMMAND, { file });
-          };
-          input.click();
+          ed.dispatchCommand(INSERT_HORIZONTAL_RULE_COMMAND, {});
         },
       },
       {
         key: 'table',
         label: '表格',
-        title: '插入表格',
+        icon: Table2Icon,
         onSelect: (ed: IEditor) => {
-          ed.dispatchCommand(INSERT_TABLE_COMMAND, {
-            columns: '3',
-            rows: '3',
-            includeHeaders: true,
-          });
+          ed.dispatchCommand(INSERT_TABLE_COMMAND, { columns: '3', rows: '3' });
         },
       },
       {
-        key: 'hr',
-        label: '分割线',
-        title: '水平分割线',
-        onSelect: (ed: IEditor) => {
-          ed.dispatchCommand(
-            INSERT_HORIZONTAL_RULE_COMMAND,
-            undefined as never,
-          );
+        key: 'codeblock',
+        label: '代码块',
+        icon: SquareDashedBottomCodeIcon,
+        onSelect: () => {
+          editorState.codeblock();
         },
       },
+      ...(onUploadImage
+        ? [
+            {
+              key: 'image',
+              label: '图片',
+              icon: ImageIcon,
+              onSelect: (ed: IEditor) => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/*';
+                input.onchange = () => {
+                  const file = input.files?.[0];
+                  if (!file) return;
+                  ed.dispatchCommand(INSERT_IMAGE_COMMAND, { file });
+                };
+                input.click();
+              },
+            },
+          ]
+        : []),
     ],
-    [onUploadImage],
+    [onUploadImage, editorState],
   );
 
   const plugins: EditorProps['plugins'] = useMemo(
     () => [
       ReactListPlugin,
-      ReactLinkPlugin,
+      ReactLinkHighlightPlugin,
+      ReactCodePlugin,
       ReactCodeblockPlugin,
       ReactTablePlugin,
       ReactHRPlugin,
+      ReactVirtualBlockPlugin,
       ImagePluginWithUpload,
     ],
     [ImagePluginWithUpload],
@@ -247,9 +254,9 @@ export function LobeEditorWrapper({
       plugins={plugins}
       slashOption={{ items: slashItems }}
       content={parsedContent}
-      type="json"
       onTextChange={handleTextChange}
-      className="prose prose-lg dark:prose-invert prose-headings:font-title font-default max-w-full min-h-[300px] px-8 py-8 sm:px-12"
+      className="px-10"
+      style={{ minHeight: 300 }}
     />
   );
 }

@@ -10,6 +10,10 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    // Force single instances of shared modules to prevent:
+    // "You are loading @emotion/react when it is already loaded"
+    // which causes LobeThemeProvider to crash (React hook context mismatch)
+    dedupe: ['react', 'react-dom', '@emotion/react', '@emotion/cache', '@emotion/styled'],
   },
   server: {
     proxy: {
