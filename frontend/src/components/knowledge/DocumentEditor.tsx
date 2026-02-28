@@ -1,18 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Save, Loader2, ArrowLeft, Download, FileJson, FileText } from 'lucide-react';
+import { Save, Loader2, ArrowLeft, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { knowledgeApi } from '@/lib/knowledgeApi';
 import type { KnowledgeNode } from '@/lib/knowledgeApi';
 import { LobeEditorWrapper } from '@/components/lobe-editor';
-import type { LobeEditorWrapperHandle } from '@/components/lobe-editor';
 import { api } from '@/lib/api';
 
 const MAX_SIZE_MB = 10;
@@ -29,21 +22,16 @@ interface DocumentEditorProps {
 export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: DocumentEditorProps) {
   const { toast } = useToast();
   const [title, setTitle] = useState(node.name);
-  const [contentJson, setContentJson] = useState<string>('');
+  const [content, setContent] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const initialMount = useRef(true);
-  const editorRef = useRef<LobeEditorWrapperHandle>(null);
 
   useEffect(() => {
     setTitle(node.name);
     setDirty(false);
     initialMount.current = true;
-    if (node.content) {
-      setContentJson(node.content);
-    } else {
-      setContentJson('');
-    }
+    setContent(node.content ?? '');
   }, [node.id, node.name, node.content]);
 
   const handleSave = useCallback(async () => {
@@ -51,7 +39,7 @@ export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: Docum
     try {
       const updates: Record<string, string> = {};
       if (title !== node.name) updates.name = title;
-      if (contentJson !== (node.content || '')) updates.content = contentJson;
+      if (content !== (node.content ?? '')) updates.content = content;
       if (Object.keys(updates).length > 0) {
         await knowledgeApi.updateNode(node.id, updates);
         toast({ title: '已保存' });
@@ -63,7 +51,7 @@ export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: Docum
     } finally {
       setSaving(false);
     }
-  }, [title, contentJson, node, toast, onUpdate]);
+  }, [title, content, node, toast, onUpdate]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -76,8 +64,8 @@ export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: Docum
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSave]);
 
-  const handleEditorChange = useCallback((jsonString: string) => {
-    setContentJson(jsonString);
+  const handleEditorChange = useCallback((markdown: string) => {
+    setContent(markdown);
     if (!initialMount.current) {
       setDirty(true);
     }
@@ -128,17 +116,10 @@ export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: Docum
     URL.revokeObjectURL(url);
   }, []);
 
-  const handleExportJson = useCallback(() => {
-    const json = editorRef.current?.exportJson() ?? contentJson;
-    const filename = `${title || 'document'}.json`;
-    downloadFile(json, filename, 'application/json');
-  }, [contentJson, title, downloadFile]);
-
   const handleExportMarkdown = useCallback(() => {
-    const md = editorRef.current?.exportMarkdown() ?? '';
     const filename = `${title || 'document'}.md`;
-    downloadFile(md, filename, 'text/markdown');
-  }, [title, downloadFile]);
+    downloadFile(content, filename, 'text/markdown');
+  }, [content, title, downloadFile]);
 
   return (
     <div className="flex flex-col h-full">
@@ -178,28 +159,15 @@ export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: Docum
           )}
           {saving ? '保存中' : '保存'}
         </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex items-center justify-center gap-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground shrink-0 h-8">
-            <Download className="w-4 h-4" />
-            导出
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={handleExportMarkdown}>
-              <FileText className="w-4 h-4 mr-2" />
-              导出为 Markdown
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleExportJson}>
-              <FileJson className="w-4 h-4 mr-2" />
-              导出为 Lexical JSON
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Button variant="outline" size="sm" onClick={handleExportMarkdown} className="shrink-0">
+          <Download className="w-4 h-4 mr-1" />
+          导出
+        </Button>
       </div>
 
       {/* Lexical editor */}
       <div className="flex-1 overflow-y-auto">
         <LobeEditorWrapper
-          ref={editorRef}
           key={node.id}
           initialContent={node.content || undefined}
           onChange={handleEditorChange}

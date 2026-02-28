@@ -1,4 +1,4 @@
-import { useCallback, useImperativeHandle, useMemo, forwardRef, type Ref } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import {
   Editor,
   useEditor,
@@ -64,63 +64,46 @@ const EMPTY_EDITOR_STATE = {
   },
 };
 
-export interface LobeEditorWrapperHandle {
-  exportJson: () => string;
-  exportMarkdown: () => string;
-}
-
 export interface LobeEditorWrapperProps {
   initialContent?: string;
-  onChange?: (jsonString: string) => void;
+  /** Callback receives Markdown string on every change */
+  onChange?: (markdown: string) => void;
   onUploadImage?: (file: File) => Promise<string>;
   editable?: boolean;
   autoFocus?: boolean;
   placeholder?: string;
 }
 
-export const LobeEditorWrapper = forwardRef<LobeEditorWrapperHandle, LobeEditorWrapperProps>(function LobeEditorWrapper({
+export function LobeEditorWrapper({
   initialContent,
   onChange,
   onUploadImage,
   editable = true,
   autoFocus = true,
   placeholder = '输入 / 唤起命令…',
-}: LobeEditorWrapperProps, ref: Ref<LobeEditorWrapperHandle>) {
+}: LobeEditorWrapperProps) {
   const editor = useEditor();
   const editorState = useEditorState(editor);
 
-  useImperativeHandle(ref, () => ({
-    exportJson: () => {
-      const doc = editor.getDocument('json');
-      return doc ? JSON.stringify(doc) : '{}';
-    },
-    exportMarkdown: () => {
-      try {
-        const md = editor.getDocument('markdown');
-        return (md as unknown as string) ?? '';
-      } catch {
-        return '';
-      }
-    },
-  }), [editor]);
-
-  const parsedContent = useMemo(() => {
-    if (!initialContent) return EMPTY_EDITOR_STATE;
+  // Load initial Markdown content after the editor (child) has mounted.
+  // key={node.id} on the wrapper guarantees a full remount when the doc changes.
+  useEffect(() => {
     try {
-      const parsed = JSON.parse(initialContent);
-      if (parsed?.root?.type === 'root') return parsed;
+      editor.setDocument('markdown', initialContent ?? '');
     } catch {
-      // Invalid JSON — start with empty editor
+      // editor not yet ready — silently ignore (shouldn't happen after mount)
     }
-    return EMPTY_EDITOR_STATE;
-  }, [initialContent]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);  // intentionally empty: runs once per mount (key remounts on node change)
 
   const handleTextChange = useCallback(
     (ed: IEditor) => {
       if (!onChange) return;
-      const doc = ed.getDocument('json');
-      if (doc) {
-        onChange(JSON.stringify(doc));
+      try {
+        const md = ed.getDocument('markdown');
+        if (md !== undefined) onChange(md as unknown as string);
+      } catch {
+        // markdown plugin not yet ready
       }
     },
     [onChange],
@@ -275,10 +258,10 @@ export const LobeEditorWrapper = forwardRef<LobeEditorWrapperHandle, LobeEditorW
       placeholder={placeholder}
       plugins={plugins}
       slashOption={{ items: slashItems }}
-      content={parsedContent}
+      content={EMPTY_EDITOR_STATE}
       onTextChange={handleTextChange}
       className="px-10"
       style={{ minHeight: 300 }}
     />
   );
-});
+}
