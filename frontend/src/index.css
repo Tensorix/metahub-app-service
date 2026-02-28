@@ -1,8 +1,6 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @import "tw-animate-css";
-@import "highlight.js/styles/github.css";
-
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -210,53 +208,6 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
-/* highlight.js dark mode overrides (GitHub Dark theme) */
-.dark .hljs { color: #c9d1d9; background: transparent }
-.dark .hljs-doctag,
-.dark .hljs-keyword,
-.dark .hljs-meta .hljs-keyword,
-.dark .hljs-template-tag,
-.dark .hljs-template-variable,
-.dark .hljs-type,
-.dark .hljs-variable.language_ { color: #ff7b72 }
-.dark .hljs-title,
-.dark .hljs-title.class_,
-.dark .hljs-title.class_.inherited__,
-.dark .hljs-title.function_ { color: #d2a8ff }
-.dark .hljs-attr,
-.dark .hljs-attribute,
-.dark .hljs-literal,
-.dark .hljs-meta,
-.dark .hljs-number,
-.dark .hljs-operator,
-.dark .hljs-variable,
-.dark .hljs-selector-attr,
-.dark .hljs-selector-class,
-.dark .hljs-selector-id { color: #79c0ff }
-.dark .hljs-regexp,
-.dark .hljs-string,
-.dark .hljs-meta .hljs-string { color: #a5d6ff }
-.dark .hljs-built_in,
-.dark .hljs-symbol { color: #ffa657 }
-.dark .hljs-comment,
-.dark .hljs-code,
-.dark .hljs-formula { color: #8b949e }
-.dark .hljs-name,
-.dark .hljs-quote,
-.dark .hljs-selector-tag,
-.dark .hljs-selector-pseudo { color: #7ee787 }
-.dark .hljs-subst { color: #c9d1d9 }
-.dark .hljs-section { color: #1f6feb; font-weight: bold }
-.dark .hljs-bullet { color: #f2cc60 }
-.dark .hljs-emphasis { color: #c9d1d9; font-style: italic }
-.dark .hljs-strong { color: #c9d1d9; font-weight: bold }
-.dark .hljs-addition { color: #aff5b4; background-color: #033a16 }
-.dark .hljs-deletion { color: #ffdcd7; background-color: #67060c }
-
-/* Override hljs backgrounds to use our bg-muted */
-.hljs { background: transparent }
-pre code.hljs { padding: 0 }
-
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -264,54 +215,4 @@ pre code.hljs { padding: 0 }
   body {
     @apply bg-background text-foreground;
   }
-}
-
-/* ====== Lexical editor styles ====== */
-
-/* Lexical check list items */
-.lexical-listitem-checked,
-.lexical-listitem-unchecked {
-  list-style-type: none;
-}
-
-.lexical-listitem-checked::before,
-.lexical-listitem-unchecked::before {
-  content: '';
-  display: inline-block;
-  width: 1.1em;
-  height: 1.1em;
-  position: absolute;
-  left: 0;
-  top: 0.35em;
-  border: 2px solid var(--border);
-  border-radius: 3px;
-  cursor: pointer;
-  background-color: var(--background);
-}
-
-.lexical-listitem-checked::before {
-  background-color: var(--primary);
-  border-color: var(--primary);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 0.75em;
-}
-
-.lexical-listitem-unchecked:hover::before {
-  background-color: var(--accent);
-}
-
-/* Lexical placeholder positioning */
-.lexical-content-editable:empty + .lexical-placeholder {
-  display: block;
-}
-
-/* Lexical content editable focus */
-.lexical-content-editable {
-  caret-color: var(--foreground);
-}
-
-.lexical-content-editable:focus {
-  outline: none;
 }

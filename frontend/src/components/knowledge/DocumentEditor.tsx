@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { knowledgeApi } from '@/lib/knowledgeApi';
 import type { KnowledgeNode } from '@/lib/knowledgeApi';
-import { LexicalEditor } from '@/components/lexical-editor';
+import { LobeEditorWrapper } from '@/components/lobe-editor';
 import { api } from '@/lib/api';
 
 const MAX_SIZE_MB = 10;
@@ -152,7 +152,7 @@ export function DocumentEditor({ node, onUpdate, showBackButton, onBack }: Docum
 
       {/* Lexical editor */}
       <div className="flex-1 overflow-y-auto">
-        <LexicalEditor
+        <LobeEditorWrapper
           key={node.id}
           initialContent={node.content || undefined}
           onChange={handleEditorChange}

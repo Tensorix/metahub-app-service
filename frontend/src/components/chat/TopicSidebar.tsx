@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'motion/react';
 import { Hash, Plus, X, ChevronUp, ChevronDown, Check, MessageSquare, Search, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import {
   DropdownMenu,

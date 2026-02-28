@@ -1,5 +1,5 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'motion/react';
 import type { Message, Topic } from '@/lib/api';
 import type { VirtualTopic } from '@/lib/virtualTopic';
 import { useChatStore } from '@/store/chat';
