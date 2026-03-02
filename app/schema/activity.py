@@ -31,6 +31,7 @@ class ActivityBase(BaseModel):
     source_id: Optional[str] = Field(None, description="来源ID", max_length=255)
     relation_ids: Optional[list[str]] = Field(None, description="关联ID列表")
     status: str = Field("pending", description="状态: pending/active/done/dismissed", max_length=20)
+    sort_order: int = Field(0, description="排序序号，数字越小越靠前")
     remind_at: Optional[datetime] = Field(None, description="提醒时间")
     due_date: Optional[datetime] = Field(None, description="截止日期")
 
@@ -52,8 +53,14 @@ class ActivityUpdate(BaseModel):
     source_id: Optional[str] = Field(None, description="来源ID", max_length=255)
     relation_ids: Optional[list[str]] = Field(None, description="关联ID列表")
     status: Optional[str] = Field(None, description="状态: pending/active/done/dismissed", max_length=20)
+    sort_order: Optional[int] = Field(None, description="排序序号，数字越小越靠前")
     remind_at: Optional[datetime] = Field(None, description="提醒时间")
     due_date: Optional[datetime] = Field(None, description="截止日期")
+
+
+class ActivityReorderRequest(BaseModel):
+    """活动排序请求模型"""
+    ordered_ids: list[str] = Field(..., description="按顺序排列的活动ID列表")
 
 
 class ActivityResponse(ActivityBase):

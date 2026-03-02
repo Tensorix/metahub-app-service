@@ -101,6 +101,23 @@ const Activities = () => {
     }
   }, [toast, loadActivities]);
 
+  const handleReorder = useCallback(async (orderedIds: string[]) => {
+    // Optimistic update: assign new sort_order based on array index
+    setActivities((prev) => {
+      const orderMap = new Map(orderedIds.map((id, idx) => [id, idx]));
+      return prev.map((a) => ({
+        ...a,
+        sort_order: orderMap.has(a.id) ? orderMap.get(a.id)! : a.sort_order,
+      }));
+    });
+    try {
+      await activityApi.reorderActivities(orderedIds);
+    } catch {
+      toast({ title: '排序失败', description: '无法保存排序', variant: 'destructive' });
+      loadActivities();
+    }
+  }, [toast, loadActivities]);
+
   // ──────── Filtered data
   const filteredActivities = useMemo(() => {
     return activities.filter((a) => {
@@ -319,6 +336,7 @@ const Activities = () => {
               onOpen={handleOpen}
               onDelete={handleDelete}
               onStatusChange={handleStatusChange}
+              onReorder={handleReorder}
             />
           ) : (
             <ActivityBoardView
@@ -326,6 +344,7 @@ const Activities = () => {
               onOpen={handleOpen}
               onDelete={handleDelete}
               onStatusChange={handleStatusChange}
+              onReorder={handleReorder}
               onCreateInColumn={(status) => handleCreate(status)}
             />
           )}

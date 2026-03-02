@@ -28,6 +28,7 @@ export interface Activity {
   relation_ids?: string[];
   relations?: RelationInfo[];
   status: 'pending' | 'active' | 'done' | 'dismissed';
+  sort_order: number;
   remind_at?: string;
   due_date?: string;
   created_at: string;
@@ -61,6 +62,7 @@ export interface ActivityUpdate {
   source_id?: string;
   relation_ids?: string[];
   status?: 'pending' | 'active' | 'done' | 'dismissed';
+  sort_order?: number;
   remind_at?: string;
   due_date?: string;
 }
@@ -117,5 +119,10 @@ export const activityApi = {
   restoreActivity: async (id: string): Promise<Activity> => {
     const response = await apiClient.post(`/api/v1/activities/${id}/restore`);
     return response.data;
+  },
+
+  // 批量更新活动排序
+  reorderActivities: async (orderedIds: string[]): Promise<void> => {
+    await apiClient.patch('/api/v1/activities/reorder', { ordered_ids: orderedIds });
   },
 };

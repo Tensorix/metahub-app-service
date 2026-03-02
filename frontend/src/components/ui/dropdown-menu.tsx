@@ -19,11 +19,14 @@ const DropdownMenu = ({ children }: { children: React.ReactNode }) => {
 const DropdownMenuTrigger = React.forwardRef<
   HTMLButtonElement,
   React.ButtonHTMLAttributes<HTMLButtonElement> & { open?: boolean; setOpen?: (open: boolean) => void }
->(({ children, open, setOpen, ...props }, ref) => {
+>(({ children, open, setOpen, onClick, ...props }, ref) => {
   return (
-    <button 
-      ref={ref} 
-      onClick={() => setOpen?.(!open)}
+    <button
+      ref={ref}
+      onClick={(e) => {
+        setOpen?.(!open)
+        onClick?.(e)
+      }}
       {...props}
     >
       {children}

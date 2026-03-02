@@ -62,6 +62,10 @@ class Activity(Base):
     status: Mapped[str] = mapped_column(
         String(20), default="pending", nullable=False, comment="状态: pending/active/done/dismissed"
     )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False, server_default=text("0"),
+        comment="排序序号，数字越小越靠前"
+    )
     remind_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="提醒时间"
     )

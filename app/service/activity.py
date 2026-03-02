@@ -71,7 +71,7 @@ class ActivityService:
         
         # 分页
         offset = (query_params.page - 1) * query_params.size
-        activities = query.order_by(Activity.priority.desc(), Activity.created_at.desc())\
+        activities = query.order_by(Activity.sort_order.asc(), Activity.priority.desc(), Activity.created_at.desc())\
                          .offset(offset)\
                          .limit(query_params.size)\
                          .all()
@@ -135,6 +135,22 @@ class ActivityService:
         db.commit()
         db.refresh(db_activity)
         return db_activity
+
+    @staticmethod
+    def reorder_activities(db: Session, ordered_ids: list[str], user_id: UUID) -> bool:
+        """批量更新活动的排序顺序（带用户隔离）
+
+        ordered_ids 是按照期望顺序排列的活动 ID 列表，
+        列表索引即为新的 sort_order 值。
+        """
+        for idx, activity_id in enumerate(ordered_ids):
+            db.query(Activity).filter(
+                Activity.id == activity_id,
+                Activity.user_id == user_id,
+                Activity.is_deleted == False,
+            ).update({"sort_order": idx}, synchronize_session=False)
+        db.commit()
+        return True
 
     @staticmethod
     def create_activity_from_event(db: Session, event_id: UUID, event_type: str, event_data: dict, user_id: UUID) -> Activity:

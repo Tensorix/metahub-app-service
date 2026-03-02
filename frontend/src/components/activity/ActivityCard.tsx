@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { Calendar, Tag, GripVertical, MoreHorizontal, ArrowRight } from 'lucide-react';
+import { Calendar, Tag, MoreHorizontal, ArrowRight } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -94,7 +94,12 @@ export function ActivityCard({
   } = useSortable({ id: activity.id, disabled: !draggable });
 
   const style = draggable
-    ? { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }
+    ? {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.3 : 1,
+        zIndex: isDragging ? 50 : undefined,
+      }
     : undefined;
 
   const pCfg = getPriorityConfig(activity.priority);
@@ -112,31 +117,22 @@ export function ActivityCard({
         <Card
           ref={draggable ? setNodeRef : undefined}
           style={style}
+          {...(draggable ? { ...attributes, ...listeners } : {})}
           className={`
             group relative overflow-hidden transition-all
             hover:shadow-md hover:border-primary/20
             ${variant === 'compact' ? 'p-3' : 'p-4'}
             ${isDragging ? 'shadow-lg ring-2 ring-primary/20' : ''}
-            cursor-pointer
+            ${draggable ? 'cursor-grab active:cursor-grabbing touch-none' : 'cursor-pointer'}
           `}
-          onClick={() => onOpen(activity)}
+          onClick={() => {
+            if (!isDragging) onOpen(activity);
+          }}
         >
           {/* Priority accent line */}
           <div className={`absolute left-0 top-0 bottom-0 w-1 ${pCfg.dot} rounded-l`} />
 
           <div className={`flex items-start gap-2 ${variant === 'compact' ? 'pl-2' : 'pl-3'}`}>
-            {/* Drag handle */}
-            {draggable && (
-              <span
-                {...attributes}
-                {...listeners}
-                className="cursor-grab active:cursor-grabbing touch-none p-0.5 rounded hover:bg-muted shrink-0 -ml-1 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <GripVertical className="w-3.5 h-3.5 text-muted-foreground" />
-              </span>
-            )}
-
             <div className="flex-1 min-w-0">
               {/* Row 1: Title + actions */}
               <div className="flex items-start justify-between gap-2">
@@ -154,6 +150,7 @@ export function ActivityCard({
                           variant="ghost"
                           size="sm"
                           className="h-6 px-2 text-xs gap-1"
+                          onPointerDown={(e) => e.stopPropagation()}
                           onClick={(e) => {
                             e.stopPropagation();
                             onStatusChange(activity, STATUS_NEXT[activity.status]);
@@ -172,6 +169,7 @@ export function ActivityCard({
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       className="inline-flex items-center justify-center h-6 w-6 rounded-md hover:bg-muted transition-colors"
+                      onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <MoreHorizontal className="w-3.5 h-3.5" />
@@ -233,6 +231,7 @@ export function ActivityCard({
               {activity.relations && activity.relations.length > 0 && (
                 <div
                   className="flex flex-wrap items-center gap-1 mt-2"
+                  onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {activity.relations.slice(0, 3).map((r) => (
