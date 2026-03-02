@@ -46,6 +46,20 @@ def create_activity(
         raise HTTPException(status_code=500, detail=f"创建活动失败: {str(e)}")
 
 
+@router.patch("/reorder", status_code=status.HTTP_200_OK, summary="批量更新活动排序")
+def reorder_activities(
+    reorder_data: ActivityReorderRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """批量更新活动的排序顺序，传入按期望顺序排列的活动ID列表"""
+    try:
+        ActivityService.reorder_activities(db, reorder_data.ordered_ids, current_user.id)
+        return {"message": "排序已更新"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"更新排序失败: {str(e)}")
+
+
 @router.get("/{activity_id}", response_model=ActivityResponse, summary="获取活动详情")
 def get_activity(
     activity_id: UUID,
@@ -81,7 +95,7 @@ def get_activities(
         tags=tags,
         is_deleted=is_deleted
     )
-    
+
     activities, total = ActivityService.get_activities(db, query_params, current_user.id)
     pages = ceil(total / size) if total > 0 else 0
 
@@ -132,17 +146,3 @@ def restore_activity(
     if not activity:
         raise HTTPException(status_code=404, detail="活动不存在或未被删除")
     return _build_activity_response(activity, db, current_user.id)
-
-
-@router.patch("/reorder", status_code=status.HTTP_200_OK, summary="批量更新活动排序")
-def reorder_activities(
-    reorder_data: ActivityReorderRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """批量更新活动的排序顺序，传入按期望顺序排列的活动ID列表"""
-    try:
-        ActivityService.reorder_activities(db, reorder_data.ordered_ids, current_user.id)
-        return {"message": "排序已更新"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"更新排序失败: {str(e)}")
