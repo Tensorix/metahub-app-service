@@ -123,7 +123,7 @@ export function ActivityCard({
             hover:shadow-md hover:border-primary/20
             ${variant === 'compact' ? 'p-3' : 'p-4'}
             ${isDragging ? 'shadow-lg ring-2 ring-primary/20' : ''}
-            ${draggable ? 'cursor-grab active:cursor-grabbing touch-none' : 'cursor-pointer'}
+            ${draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
           `}
           onClick={() => {
             if (!isDragging) onOpen(activity);
