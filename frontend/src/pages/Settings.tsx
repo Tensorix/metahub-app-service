@@ -14,13 +14,15 @@ export function Settings() {
       </div>
 
       <Tabs defaultValue="general" className="flex-1 flex flex-col overflow-hidden">
-        <TabsList className="shrink-0">
-          <TabsTrigger value="general">通用设置</TabsTrigger>
-          <TabsTrigger value="providers">模型服务</TabsTrigger>
-          <TabsTrigger value="message-analyzer">消息分析</TabsTrigger>
-          <TabsTrigger value="embedding">向量嵌入</TabsTrigger>
-          <TabsTrigger value="account">账户</TabsTrigger>
-        </TabsList>
+        <div className="shrink-0 overflow-x-auto scrollbar-hide">
+          <TabsList className="w-max">
+            <TabsTrigger value="general">通用设置</TabsTrigger>
+            <TabsTrigger value="providers">模型服务</TabsTrigger>
+            <TabsTrigger value="message-analyzer">消息分析</TabsTrigger>
+            <TabsTrigger value="embedding">向量嵌入</TabsTrigger>
+            <TabsTrigger value="account">账户</TabsTrigger>
+          </TabsList>
+        </div>
 
         <div className="flex-1 overflow-y-auto pr-2 mt-4">
           <TabsContent value="general" className="mt-0">

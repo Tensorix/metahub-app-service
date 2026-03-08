@@ -217,6 +217,16 @@
   }
 }
 
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* Reset antd-style's injected `a { color: colorLink }` (blue by default).
    antd injects unlayered CSS via emotion, so it beats @layer base rules.
    Using a two-element selector (html a) gives higher specificity than antd's
