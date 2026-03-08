@@ -11,14 +11,28 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { ModelSelect } from '@/components/ModelSelect';
 import type { Agent, AgentCreate, AgentUpdate, MountedSubagentSummary } from '@/lib/agentManagementApi';
 import type { McpServerResponse } from '@/types/mcpServer';
-import { X, Plus, ChevronDown, ChevronRight, ShieldCheck } from 'lucide-react';
+import type { UpstreamModel } from '@/lib/systemConfigApi';
+import { X, Plus, ChevronDown, ChevronRight, ShieldCheck, Loader2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useTools } from '@/hooks/useTools';
 import { MCPServerConfig } from './MCPServerConfig';
 import { SubAgentSection } from './SubAgentSection';
+import {
+  getSystemConfig,
+  fetchUpstreamModels,
+  type ProvidersMap,
+} from '@/lib/systemConfigApi';
 
 interface AgentDialogProps {
   open: boolean;
@@ -64,6 +78,11 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
   const [activeTab, setActiveTab] = useState<'basic' | 'advanced' | 'subagents' | 'summarization' | 'mcp'>('basic');
   const [mcpServers, setMcpServers] = useState<McpServerResponse[]>([]);
   const [mountedSubagents, setMountedSubagents] = useState<MountedSubagentSummary[]>([]);
+
+  // Provider registry + model fetching
+  const [providerIds, setProviderIds] = useState<string[]>([]);
+  const [upstreamModels, setUpstreamModels] = useState<UpstreamModel[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
 
   // Skill editing state
   const [editingSkill, setEditingSkill] = useState<{ name: string; content: string } | null>(null);
@@ -115,7 +134,32 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
       setMcpServers([]);
     }
     setActiveTab('basic');
+    setUpstreamModels([]);
   }, [agent, open]);
+
+  // Load provider IDs from registry on mount
+  useEffect(() => {
+    if (!open) return;
+    getSystemConfig<ProvidersMap>('providers')
+      .then((resp) => {
+        if (resp?.value) setProviderIds(Object.keys(resp.value));
+      })
+      .catch(() => {});
+  }, [open]);
+
+  const handleFetchModels = async () => {
+    const provider = formData.model_provider;
+    if (!provider) return;
+    setFetchingModels(true);
+    try {
+      const result = await fetchUpstreamModels({ providerId: provider });
+      setUpstreamModels(result);
+    } catch {
+      // silently ignore — user can still type manually
+    } finally {
+      setFetchingModels(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -340,26 +384,54 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="model">模型</Label>
-                    <Input
-                      id="model"
-                      value={formData.model}
-                      onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                      placeholder="gpt-4o-mini"
-                    />
-                  </div>
+                <div className="grid gap-2">
+                  <Label>模型提供商</Label>
+                  <Select
+                    value={formData.model_provider}
+                    onValueChange={(v) => {
+                      setFormData({ ...formData, model_provider: v });
+                      setUpstreamModels([]);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择服务商" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {providerIds.map((id) => (
+                        <SelectItem key={id} value={id}>
+                          {id}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-                  <div className="grid gap-2">
-                    <Label htmlFor="model_provider">模型提供商</Label>
-                    <Input
-                      id="model_provider"
-                      value={formData.model_provider}
-                      onChange={(e) => setFormData({ ...formData, model_provider: e.target.value })}
-                      placeholder="openai"
-                    />
+                <div className="grid gap-2">
+                  <Label>模型</Label>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <ModelSelect
+                        value={formData.model || ''}
+                        onChange={(v) => setFormData({ ...formData, model: v })}
+                        models={upstreamModels}
+                        placeholder="gpt-4o-mini"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleFetchModels}
+                      disabled={fetchingModels || !formData.model_provider}
+                    >
+                      {fetchingModels ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                      ) : null}
+                      获取模型
+                    </Button>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    可直接输入模型名称，或点击"获取模型"从上游拉取后输入关键词过滤
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
