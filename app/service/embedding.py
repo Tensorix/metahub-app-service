@@ -225,8 +225,10 @@ def get_active_embedding_service(
 ) -> tuple[EmbeddingService, EmbeddingModelConfig]:
     """Get the active embedding service for a category.
 
-    Queries the embedding_config table for the active model_id,
-    then returns the corresponding EmbeddingService and config.
+    Priority:
+      1. system_config table (key="embedding") — supports arbitrary models
+      2. embedding_config table — legacy registry-based selection
+      3. DEFAULT_EMBEDDING_MODEL from registry
 
     Args:
         db: Database session
@@ -235,6 +237,26 @@ def get_active_embedding_service(
     Returns:
         (EmbeddingService, EmbeddingModelConfig) tuple
     """
+    # Priority 1: system_config table
+    try:
+        from app.service.system_config import get_embedding_config, resolve_provider
+        sc = get_embedding_config(db)
+        if sc and sc.model_name:
+            api_base_url, _api_key = resolve_provider(db, sc.provider)
+            model_config = EmbeddingModelConfig(
+                model_id=f"sys-{sc.provider}-{sc.model_name}",
+                provider=sc.provider,
+                model_name=sc.model_name,
+                dimensions=sc.dimensions,
+                max_tokens=sc.max_tokens,
+                batch_size=sc.batch_size,
+                api_base_url=api_base_url,
+            )
+            return EmbeddingService(model_config), model_config
+    except Exception as e:
+        logger.warning(f"Failed to load embedding config from system_config: {e}")
+
+    # Priority 2: embedding_config table (legacy)
     row = (
         db.query(EmbeddingConfig)
         .filter(EmbeddingConfig.category == category)

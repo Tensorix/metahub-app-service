@@ -356,8 +356,18 @@ class DeepAgentService:
                 else f"{model_provider}:{model_name}"
             )
 
-            # 获取 provider 对应的 API key
-            kwargs = self._get_model_kwargs_for_provider(model_provider)
+            # Use subagent's own _resolved_* first (injected by factory)
+            kwargs = {}
+            sa_key = sa_config.get("_resolved_api_key")
+            sa_url = sa_config.get("_resolved_base_url")
+            if sa_key:
+                kwargs["api_key"] = sa_key
+            if sa_url:
+                kwargs["base_url"] = sa_url
+
+            # Fallback to parent/env resolution
+            if not kwargs:
+                kwargs = self._get_model_kwargs_for_provider(model_provider)
 
             return init_chat_model(model_string, **kwargs)
         else:
@@ -368,22 +378,33 @@ class DeepAgentService:
     def _get_model_kwargs_for_provider(self, provider: str) -> dict:
         """获取指定 provider 的 model kwargs。
 
-        扩展 _get_model_kwargs() 以支持多 provider。
+        For the parent agent's own provider, uses _resolved_* values first.
+        For subagent providers, falls back to env vars.
         """
         kwargs = {}
 
+        # Check if this is the same provider as the parent agent — reuse resolved values
+        parent_provider = self.config.get("model_provider") or config.AGENT_DEFAULT_PROVIDER
+        if provider == parent_provider:
+            resolved_key = self.config.get("_resolved_api_key")
+            resolved_url = self.config.get("_resolved_base_url")
+            if resolved_key:
+                kwargs["api_key"] = resolved_key
+            if resolved_url:
+                kwargs["base_url"] = resolved_url
+
+        # Env var fallbacks
         if provider == "openai":
-            if config.OPENAI_API_KEY:
+            if "api_key" not in kwargs and config.OPENAI_API_KEY:
                 kwargs["api_key"] = config.OPENAI_API_KEY
-            if config.OPENAI_BASE_URL:
+            if "base_url" not in kwargs and config.OPENAI_BASE_URL:
                 kwargs["base_url"] = config.OPENAI_BASE_URL
         elif provider == "anthropic":
-            if hasattr(config, 'ANTHROPIC_API_KEY') and config.ANTHROPIC_API_KEY:
+            if "api_key" not in kwargs and hasattr(config, 'ANTHROPIC_API_KEY') and config.ANTHROPIC_API_KEY:
                 kwargs["api_key"] = config.ANTHROPIC_API_KEY
         elif provider == "google":
-            if hasattr(config, 'GOOGLE_API_KEY') and config.GOOGLE_API_KEY:
+            if "api_key" not in kwargs and hasattr(config, 'GOOGLE_API_KEY') and config.GOOGLE_API_KEY:
                 kwargs["api_key"] = config.GOOGLE_API_KEY
-        # 可按需添加更多 provider
 
         return kwargs
 
@@ -428,19 +449,28 @@ class DeepAgentService:
     def _get_model_kwargs(self) -> dict:
         """
         Build model-specific kwargs including API keys.
-        
+
+        Priority: _resolved_* from provider registry > env vars.
         Returns kwargs to pass to init_chat_model.
         """
         provider = self.config.get("model_provider") or config.AGENT_DEFAULT_PROVIDER
         kwargs = {}
-        
-        # Add provider-specific API keys from config
-        if provider == "openai":
-            if config.OPENAI_API_KEY:
-                kwargs["api_key"] = config.OPENAI_API_KEY
-            if config.OPENAI_BASE_URL:
-                kwargs["base_url"] = config.OPENAI_BASE_URL
-        
+
+        # Priority 1: Pre-resolved from provider registry (injected by factory)
+        resolved_key = self.config.get("_resolved_api_key")
+        resolved_url = self.config.get("_resolved_base_url")
+
+        if resolved_key:
+            kwargs["api_key"] = resolved_key
+        if resolved_url:
+            kwargs["base_url"] = resolved_url
+
+        # Priority 2: Env vars as fallback
+        if "api_key" not in kwargs and provider == "openai" and config.OPENAI_API_KEY:
+            kwargs["api_key"] = config.OPENAI_API_KEY
+        if "base_url" not in kwargs and provider == "openai" and config.OPENAI_BASE_URL:
+            kwargs["base_url"] = config.OPENAI_BASE_URL
+
         return kwargs
 
 

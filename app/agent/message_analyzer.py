@@ -23,14 +23,20 @@ class ActivitySuggestion(BaseModel):
 
 class MessageAnalyzer:
     """消息分析器 - 使用 LangChain Agent 分析消息"""
-    
-    def __init__(self):
+
+    def __init__(
+        self,
+        model_name: Optional[str] = None,
+        provider: Optional[str] = None,
+        api_base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ):
         """初始化 LangChain LLM"""
         self.llm = ChatOpenAI(
-            model="gpt-4o-mini",
+            model=model_name or "gpt-4o-mini",
             temperature=0.1,
-            openai_api_key=config.OPENAI_API_KEY,
-            openai_api_base=config.OPENAI_BASE_URL,
+            openai_api_key=api_key or config.OPENAI_API_KEY,
+            openai_api_base=api_base_url or config.OPENAI_BASE_URL,
         )
         
         # 定义输出解析器
@@ -140,9 +146,32 @@ Activity 类型说明：
 _analyzer: Optional[MessageAnalyzer] = None
 
 
-def get_message_analyzer() -> MessageAnalyzer:
-    """获取消息分析器单例"""
+def get_message_analyzer(db=None) -> MessageAnalyzer:
+    """获取消息分析器单例。传入 db 时从 system_config 表读取动态配置。"""
     global _analyzer
     if _analyzer is None:
-        _analyzer = MessageAnalyzer()
+        kwargs: dict = {}
+        if db is not None:
+            try:
+                from app.service.system_config import (
+                    get_message_analyzer_config,
+                    resolve_provider,
+                )
+                cfg = get_message_analyzer_config(db)
+                api_base_url, api_key = resolve_provider(db, cfg.provider)
+                kwargs = dict(
+                    model_name=cfg.model_name,
+                    provider=cfg.provider,
+                    api_base_url=api_base_url,
+                    api_key=api_key,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to load analyzer config from DB: {e}")
+        _analyzer = MessageAnalyzer(**kwargs)
     return _analyzer
+
+
+def reset_message_analyzer() -> None:
+    """清除分析器单例，下次调用时将重新创建。"""
+    global _analyzer
+    _analyzer = None

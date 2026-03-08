@@ -84,7 +84,7 @@ class WebhookService:
             logger.info(f"Event created: id={event.id}, type={event.type}")
             
             # 6. 使用 Agent 分析消息
-            analyzer = get_message_analyzer()
+            analyzer = get_message_analyzer(db)
             suggestion = analyzer.analyze_message(
                 sender_name=webhook_data.sender.get("nickname", "Unknown"),
                 message_type=webhook_data.session_type,

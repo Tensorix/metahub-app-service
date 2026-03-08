@@ -142,7 +142,7 @@ async def _send_ai_message(
                 .first()
             )
             if agent:
-                agent_config = AgentFactory.build_agent_config(agent)
+                agent_config = AgentFactory.build_agent_config(agent, db=db)
                 agent_service = await AgentFactory.get_agent(agent_id, agent_config)
                 thread_id = f"topic_{topic.id}"
                 await agent_service.append_assistant_message(

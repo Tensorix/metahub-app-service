@@ -95,7 +95,7 @@ class AutoReplyService:
         context_messages = cls._build_context(db, session_id)
 
         # 5. Invoke agent (non-streaming)
-        agent_config = AgentFactory.build_agent_config(agent)
+        agent_config = AgentFactory.build_agent_config(agent, db=db)
         agent_service = await AgentFactory.get_agent(agent.id, agent_config)
 
         # 使用 session_id 作为 thread_id，保持对话连续性

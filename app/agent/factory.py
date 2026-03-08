@@ -186,24 +186,42 @@ class AgentFactory:
         cls._store = None
 
     @classmethod
-    def build_agent_config(cls, agent: "Agent") -> dict[str, Any]:
+    def build_agent_config(cls, agent: "Agent", db=None) -> dict[str, Any]:
         """
         Build agent config dict from ORM model.
-        
+
         SubAgent 现在是完整的 Agent，拥有所有 Agent 能力。
+        When agent.model / agent.model_provider are null, falls back to
+        agent_default system config.
 
         Args:
             agent: Agent ORM model instance
+            db: Optional SQLAlchemy session for provider resolution
 
         Returns:
             Configuration dictionary for DeepAgentService
         """
+        model = agent.model
+        model_provider = agent.model_provider
+
+        # Fallback to agent_default system config when ORM fields are null
+        if db and (not model or not model_provider):
+            try:
+                from app.service.system_config import get_agent_default_config
+                defaults = get_agent_default_config(db)
+                if not model:
+                    model = defaults.model_name
+                if not model_provider:
+                    model_provider = defaults.provider
+            except Exception:
+                pass  # Fall through to env defaults
+
         agent_config = {
             "_agent_id": agent.id,  # 用于 MCP 缓存 key
             "name": agent.name,
             "description": agent.description,
-            "model": agent.model,
-            "model_provider": agent.model_provider,
+            "model": model,
+            "model_provider": model_provider,
             "system_prompt": agent.system_prompt,
             "temperature": agent.temperature,
             "max_tokens": agent.max_tokens,
@@ -211,10 +229,22 @@ class AgentFactory:
             "interrupt_on": agent.interrupt_on or {},
         }
 
+        # Resolve provider credentials from registry
+        if db and model_provider:
+            try:
+                from app.service.system_config import resolve_provider
+                base_url, api_key = resolve_provider(db, model_provider)
+                if base_url:
+                    agent_config["_resolved_base_url"] = base_url
+                if api_key:
+                    agent_config["_resolved_api_key"] = api_key
+            except Exception:
+                pass  # Fall through to env defaults
+
         # --- SubAgent 配置：从关联表读取完整 Agent 信息 ---
         if agent.mounted_subagents:
             agent_config["subagents"] = [
-                cls._build_subagent_config(mount)
+                cls._build_subagent_config(mount, db=db)
                 for mount in agent.mounted_subagents
                 if not mount.child_agent.is_deleted
             ]
@@ -248,7 +278,7 @@ class AgentFactory:
         return agent_config
 
     @classmethod
-    def _build_subagent_config(cls, mount: "AgentSubagent") -> dict[str, Any]:
+    def _build_subagent_config(cls, mount: "AgentSubagent", db=None) -> dict[str, Any]:
         """从关联记录 + 子 Agent 构建 SubAgent 运行时配置。
 
         关键改进：SubAgent 现在拥有完整的 Agent 能力：
@@ -258,7 +288,7 @@ class AgentFactory:
         - skills / memory_files：独立的知识库
         """
         from app.db.model.agent_subagent import AgentSubagent
-        
+
         child = mount.child_agent
 
         config = {
@@ -273,6 +303,18 @@ class AgentFactory:
             "max_tokens": child.max_tokens,
             "tools": child.tools or [],
         }
+
+        # Resolve provider credentials for subagent
+        if db and child.model_provider:
+            try:
+                from app.service.system_config import resolve_provider
+                base_url, api_key = resolve_provider(db, child.model_provider)
+                if base_url:
+                    config["_resolved_base_url"] = base_url
+                if api_key:
+                    config["_resolved_api_key"] = api_key
+            except Exception:
+                pass
 
         # ✅ 新增：SubAgent 的 MCP Servers
         if child.mcp_servers:
