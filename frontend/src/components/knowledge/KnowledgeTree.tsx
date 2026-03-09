@@ -437,46 +437,83 @@ export function KnowledgeTree({
         )}
 
         {/* Tree */}
-        <div className="flex-1 overflow-y-auto py-1">
-          {items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-sm gap-2 px-4">
-              <Folder className="w-8 h-8" />
-              <p>知识库为空</p>
-              <Button variant="outline" size="sm" onClick={() => onCreate(null, 'folder')}>
-                创建文件夹
-              </Button>
-            </div>
-          ) : (
-            <>
-              {items.map((node) => (
-                <TreeNode
-                  key={node.id}
-                  node={node}
-                  depth={0}
-                  selectedId={selectedId}
-                  expandedIds={expandedIds}
-                  toggleExpand={toggleExpand}
-                  onSelect={onSelect}
-                  onCreate={onCreate}
-                  onRename={onRename}
-                  onDelete={onDelete}
-                  onToggleVector={onToggleVector}
-                  onOpenFolderSettings={onOpenFolderSettings}
-                  isMobile={isMobile}
-                  isDragging={activeId === node.id}
-                />
-              ))}
-              {/* 根目录拖放区域 - 在列表底部 */}
-              {activeId && (
-                <RootDropZone>
-                  <div className="mx-2 my-2 p-4 border-2 border-dashed rounded-lg text-center text-sm text-muted-foreground">
-                    拖到这里移动到根目录
-                  </div>
-                </RootDropZone>
+        {!isMobile ? (
+          // 桌面端：整个区域都是 drop zone
+          <RootDropZone fullHeight>
+            <div className="flex-1 overflow-y-auto py-1">
+              {items.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-sm gap-2 px-4">
+                  <Folder className="w-8 h-8" />
+                  <p>知识库为空</p>
+                  <Button variant="outline" size="sm" onClick={() => onCreate(null, 'folder')}>
+                    创建文件夹
+                  </Button>
+                </div>
+              ) : (
+                items.map((node) => (
+                  <TreeNode
+                    key={node.id}
+                    node={node}
+                    depth={0}
+                    selectedId={selectedId}
+                    expandedIds={expandedIds}
+                    toggleExpand={toggleExpand}
+                    onSelect={onSelect}
+                    onCreate={onCreate}
+                    onRename={onRename}
+                    onDelete={onDelete}
+                    onToggleVector={onToggleVector}
+                    onOpenFolderSettings={onOpenFolderSettings}
+                    isMobile={isMobile}
+                    isDragging={activeId === node.id}
+                  />
+                ))
               )}
-            </>
-          )}
-        </div>
+            </div>
+          </RootDropZone>
+        ) : (
+          // 移动端：底部有明确的 drop zone
+          <div className="flex-1 overflow-y-auto py-1">
+            {items.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-sm gap-2 px-4">
+                <Folder className="w-8 h-8" />
+                <p>知识库为空</p>
+                <Button variant="outline" size="sm" onClick={() => onCreate(null, 'folder')}>
+                  创建文件夹
+                </Button>
+              </div>
+            ) : (
+              <>
+                {items.map((node) => (
+                  <TreeNode
+                    key={node.id}
+                    node={node}
+                    depth={0}
+                    selectedId={selectedId}
+                    expandedIds={expandedIds}
+                    toggleExpand={toggleExpand}
+                    onSelect={onSelect}
+                    onCreate={onCreate}
+                    onRename={onRename}
+                    onDelete={onDelete}
+                    onToggleVector={onToggleVector}
+                    onOpenFolderSettings={onOpenFolderSettings}
+                    isMobile={isMobile}
+                    isDragging={activeId === node.id}
+                  />
+                ))}
+                {/* 移动端：根目录拖放区域 - 在列表底部 */}
+                {activeId && (
+                  <RootDropZone>
+                    <div className="mx-2 my-2 p-4 border-2 border-dashed rounded-lg text-center text-sm text-muted-foreground">
+                      拖到这里移动到根目录
+                    </div>
+                  </RootDropZone>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Drag overlay */}
@@ -499,7 +536,7 @@ export function KnowledgeTree({
 }
 
 // Root drop zone component for dropping items at root level
-function RootDropZone({ children }: { children: React.ReactNode }) {
+function RootDropZone({ children, fullHeight = false }: { children: React.ReactNode; fullHeight?: boolean }) {
   const { setNodeRef, isOver } = useDroppable({
     id: 'root',
     disabled: false,
@@ -510,7 +547,8 @@ function RootDropZone({ children }: { children: React.ReactNode }) {
       ref={setNodeRef}
       className={cn(
         'transition-colors',
-        isOver && 'bg-primary/10 border-primary/50'
+        fullHeight && 'flex-1 overflow-hidden',
+        isOver && (fullHeight ? 'bg-primary/5 ring-2 ring-primary/20 ring-inset' : 'bg-primary/10 border-primary/50')
       )}
     >
       {children}
