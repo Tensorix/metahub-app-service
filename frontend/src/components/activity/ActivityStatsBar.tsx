@@ -65,7 +65,7 @@ export function ActivityStatsBar({ activities, onFilterStatus, activeFilter }: A
   return (
     <TooltipProvider delayDuration={200}>
       {/* Stats cards - single row */}
-      <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+      <div className="flex sm:grid sm:grid-cols-4 gap-2 overflow-x-auto sm:overflow-x-visible pb-1 sm:pb-0 scrollbar-hide">
         {STATUS_CONFIG.map((cfg) => {
           const Icon = cfg.icon;
           const count = counts[cfg.status] || 0;
@@ -82,7 +82,7 @@ export function ActivityStatsBar({ activities, onFilterStatus, activeFilter }: A
                     relative flex items-center gap-2 rounded-lg border px-3 py-2 transition-all
                     ${cfg.bg} ${cfg.border}
                     ${isActive ? `ring-2 ${cfg.ring} shadow-sm` : 'hover:shadow-sm'}
-                    cursor-pointer select-none flex-shrink-0
+                    cursor-pointer select-none flex-shrink-0 sm:flex-shrink sm:w-full
                   `}
                 >
                   <div className={`rounded-md p-1.5 ${cfg.bg}`}>
