@@ -12,6 +12,8 @@ function LayoutContent() {
   const { title, actions } = usePageTitle();
   const location = useLocation();
   const isKnowledge = location.pathname.includes('/knowledge');
+  const isAgents = location.pathname.includes('/agents');
+  const isActivities = location.pathname.includes('/activities');
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -64,7 +66,7 @@ function LayoutContent() {
           <div
             className={cn(
               'flex-1 flex flex-col min-h-0',
-              isKnowledge
+              isKnowledge || isAgents || isActivities
                 ? 'p-0 w-full'
                 : 'container mx-auto p-4 md:p-6 max-w-7xl'
             )}
