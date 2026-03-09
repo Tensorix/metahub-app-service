@@ -210,6 +210,22 @@ export default function Knowledge() {
     }
   };
 
+  const handleMove = async (nodeId: string, targetParentId: string | null) => {
+    try {
+      await knowledgeApi.moveNode(nodeId, { parent_id: targetParentId });
+      toast({ title: '移动成功' });
+      await loadTree();
+      if (selectedId === nodeId) loadNodeDetail(nodeId);
+    } catch (error) {
+      toast({ 
+        title: '移动失败', 
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive' 
+      });
+      throw error;
+    }
+  };
+
   const handleNodeUpdate = () => {
     loadTree();
     if (selectedId) loadNodeDetail(selectedId);
@@ -292,6 +308,7 @@ export default function Knowledge() {
               onRename={handleRename}
               onDelete={setDeleteTarget}
               onToggleVector={handleToggleVector}
+              onMove={handleMove}
               onOpenFolderSettings={isMobile ? handleOpenFolderSettings : undefined}
             />
           </div>
@@ -410,6 +427,7 @@ export default function Knowledge() {
           onRename={handleRename}
           onDelete={setDeleteTarget}
           onToggleVector={handleToggleVector}
+          onMove={handleMove}
         />
       </div>
       <div className="flex-1 min-w-0 overflow-hidden">

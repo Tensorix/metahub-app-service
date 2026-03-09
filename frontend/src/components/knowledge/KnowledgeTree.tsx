@@ -13,6 +13,17 @@ import {
   MoreHorizontal,
   Settings2,
 } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragOverlay,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core';
+import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,6 +52,7 @@ interface KnowledgeTreeProps {
   onRename: (node: NodeTreeItem, newName: string) => void;
   onDelete: (node: NodeTreeItem) => void;
   onToggleVector: (node: NodeTreeItem) => void;
+  onMove?: (nodeId: string, targetParentId: string | null, position?: number) => Promise<void>;
   /** 移动端：打开文件夹高级设置（向量化配置等） */
   onOpenFolderSettings?: (node: NodeTreeItem) => void;
 }
@@ -64,6 +76,7 @@ function TreeNode({
   onToggleVector,
   onOpenFolderSettings,
   isMobile,
+  isDragging,
 }: {
   node: NodeTreeItem;
   depth: number;
@@ -77,6 +90,7 @@ function TreeNode({
   onToggleVector: (node: NodeTreeItem) => void;
   onOpenFolderSettings?: (node: NodeTreeItem) => void;
   isMobile: boolean;
+  isDragging?: boolean;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
@@ -87,6 +101,20 @@ function TreeNode({
 
   const FolderIcon = isExpanded ? FolderOpen : Folder;
   const Icon = isFolder ? FolderIcon : NODE_ICONS[node.node_type] || FileText;
+
+  // Draggable setup
+  const { attributes, listeners, setNodeRef: setDragRef, isDragging: isNodeDragging } = useDraggable({
+    id: node.id,
+    data: { node },
+    disabled: isMobile || renaming,
+  });
+
+  // Droppable setup (only for folders)
+  const { setNodeRef: setDropRef, isOver } = useDroppable({
+    id: `drop-${node.id}`,
+    data: { node },
+    disabled: !isFolder || isMobile,
+  });
 
   const handleClick = () => {
     if (isFolder) {
@@ -175,10 +203,18 @@ function TreeNode({
 
   const rowContent = (
     <div
+      ref={(el) => {
+        setDragRef(el);
+        if (isFolder) setDropRef(el);
+      }}
+      {...attributes}
+      {...listeners}
       className={cn(
         'group flex items-center gap-1 px-2 py-1 rounded-md cursor-pointer text-sm select-none',
         'hover:bg-accent/50 transition-colors',
-        isSelected && 'bg-accent text-accent-foreground'
+        isSelected && 'bg-accent text-accent-foreground',
+        isOver && 'bg-primary/10 ring-2 ring-primary/20',
+        (isNodeDragging || isDragging) && 'opacity-50'
       )}
       style={{ paddingLeft: `${depth * 16 + 8}px` }}
       onClick={handleClick}
@@ -268,6 +304,7 @@ function TreeNode({
               onToggleVector={onToggleVector}
               onOpenFolderSettings={onOpenFolderSettings}
               isMobile={isMobile}
+              isDragging={isDragging}
             />
       ))}
     </>
@@ -283,9 +320,20 @@ export function KnowledgeTree({
   onDelete,
   onToggleVector,
   onOpenFolderSettings,
+  onMove,
 }: KnowledgeTreeProps) {
   const { isMobile } = useBreakpoints();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        delay: 250, // 长按250ms后激活拖拽
+        tolerance: 5, // 允许5px的移动容差
+      },
+    })
+  );
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedIds((prev) => {
@@ -296,66 +344,155 @@ export function KnowledgeTree({
     });
   }, []);
 
-  return (
-    <div className="flex flex-col h-full">
-      {/* Header - 移动端隐藏，因为已经在顶栏显示 */}
-      {!isMobile && (
-        <div className="flex items-center justify-between px-3 py-2 border-b">
-          <span className="text-sm font-medium">知识库</span>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className={cn(
-                'inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground',
-                'h-7 w-7'
-              )}
-            >
-              <Plus className="w-4 h-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onCreate(null, 'folder')}>
-                <Folder className="w-4 h-4 mr-2" /> 新建文件夹
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onCreate(null, 'document')}>
-                <FileText className="w-4 h-4 mr-2" /> 新建文档
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onCreate(null, 'dataset')}>
-                <Table2 className="w-4 h-4 mr-2" /> 新建表格
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      )}
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
 
-      {/* Tree */}
-      <div className="flex-1 overflow-y-auto py-1">
-        {items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-sm gap-2 px-4">
-            <Folder className="w-8 h-8" />
-            <p>知识库为空</p>
-            <Button variant="outline" size="sm" onClick={() => onCreate(null, 'folder')}>
-              创建文件夹
-            </Button>
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveId(null);
+
+    if (!over || !onMove) return;
+
+    const draggedId = active.id as string;
+    const overId = over.id as string;
+
+    // Extract node id from drop zone id (format: "drop-{nodeId}" or "root")
+    const targetParentId = overId === 'root' ? null : overId.replace('drop-', '');
+
+    // Don't move if dropping on itself
+    if (draggedId === targetParentId) return;
+
+    // Don't move if already in the same parent
+    const draggedNode = findNodeById(items, draggedId);
+    if (draggedNode?.parent_id === targetParentId) return;
+
+    try {
+      await onMove(draggedId, targetParentId);
+    } catch (error) {
+      console.error('Failed to move node:', error);
+    }
+  };
+
+  const findNodeById = (nodes: NodeTreeItem[], id: string): NodeTreeItem | null => {
+    for (const node of nodes) {
+      if (node.id === id) return node;
+      if (node.children) {
+        const found = findNodeById(node.children, id);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  const activeNode = activeId ? findNodeById(items, activeId) : null;
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="flex flex-col h-full">
+        {/* Header - 移动端隐藏，因为已经在顶栏显示 */}
+        {!isMobile && (
+          <div className="flex items-center justify-between px-3 py-2 border-b">
+            <span className="text-sm font-medium">知识库</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className={cn(
+                  'inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground',
+                  'h-7 w-7'
+                )}
+              >
+                <Plus className="w-4 h-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => onCreate(null, 'folder')}>
+                  <Folder className="w-4 h-4 mr-2" /> 新建文件夹
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onCreate(null, 'document')}>
+                  <FileText className="w-4 h-4 mr-2" /> 新建文档
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onCreate(null, 'dataset')}>
+                  <Table2 className="w-4 h-4 mr-2" /> 新建表格
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-        ) : (
-          items.map((node) => (
-            <TreeNode
-              key={node.id}
-              node={node}
-              depth={0}
-              selectedId={selectedId}
-              expandedIds={expandedIds}
-              toggleExpand={toggleExpand}
-              onSelect={onSelect}
-              onCreate={onCreate}
-              onRename={onRename}
-              onDelete={onDelete}
-              onToggleVector={onToggleVector}
-              onOpenFolderSettings={onOpenFolderSettings}
-              isMobile={isMobile}
-            />
-          ))
         )}
+
+        {/* Tree */}
+        <RootDropZone isMobile={isMobile}>
+          <div className="flex-1 overflow-y-auto py-1">
+            {items.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-sm gap-2 px-4">
+                <Folder className="w-8 h-8" />
+                <p>知识库为空</p>
+                <Button variant="outline" size="sm" onClick={() => onCreate(null, 'folder')}>
+                  创建文件夹
+                </Button>
+              </div>
+            ) : (
+              items.map((node) => (
+                <TreeNode
+                  key={node.id}
+                  node={node}
+                  depth={0}
+                  selectedId={selectedId}
+                  expandedIds={expandedIds}
+                  toggleExpand={toggleExpand}
+                  onSelect={onSelect}
+                  onCreate={onCreate}
+                  onRename={onRename}
+                  onDelete={onDelete}
+                  onToggleVector={onToggleVector}
+                  onOpenFolderSettings={onOpenFolderSettings}
+                  isMobile={isMobile}
+                  isDragging={activeId === node.id}
+                />
+              ))
+            )}
+          </div>
+        </RootDropZone>
       </div>
+
+      {/* Drag overlay */}
+      <DragOverlay>
+        {activeNode && (
+          <div className="bg-background border rounded-md px-3 py-2 shadow-lg flex items-center gap-2">
+            {activeNode.node_type === 'folder' ? (
+              <Folder className="w-4 h-4 text-muted-foreground" />
+            ) : activeNode.node_type === 'dataset' ? (
+              <Table2 className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <FileText className="w-4 h-4 text-muted-foreground" />
+            )}
+            <span className="text-sm">{activeNode.name}</span>
+          </div>
+        )}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+
+// Root drop zone component for dropping items at root level
+function RootDropZone({ children, isMobile }: { children: React.ReactNode; isMobile: boolean }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: 'root',
+    disabled: isMobile,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'flex-1 overflow-hidden',
+        isOver && 'bg-primary/5'
+      )}
+    >
+      {children}
     </div>
   );
 }

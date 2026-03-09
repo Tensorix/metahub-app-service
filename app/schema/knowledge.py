@@ -131,7 +131,7 @@ class NodeUpdate(BaseModel):
 class NodeMove(BaseModel):
     """Move a node to a new parent / position."""
 
-    parent_id: Optional[UUID] = Field(None, description="New parent ID (null = root)")
+    parent_id: Optional[UUID] = None
     position: Optional[int] = Field(None, description="New position among siblings")
 
 

@@ -320,20 +320,28 @@ class KnowledgeService:
         node = self.get_node(db, node_id, user_id)
         if not node:
             return None
-        if data.parent_id is not None:
+        
+        # Handle parent_id change
+        # parent_id can be: UUID (move to folder), None (move to root), or not provided (no change)
+        if data.parent_id is None:
+            # Explicitly moving to root
+            node.parent_id = None
+        elif data.parent_id == UUID(int=0):
+            # Special case: UUID(int=0) also means root
+            node.parent_id = None
+        else:
+            # Moving to a specific folder
             if data.parent_id == node_id:
                 raise ValueError("Cannot move node into itself")
-            if data.parent_id != UUID(int=0):
-                parent = self.get_node(db, data.parent_id, user_id)
-                if not parent:
-                    raise ValueError("Target parent not found")
-                if parent.node_type != "folder":
-                    raise ValueError("Target parent must be a folder")
-                if self._is_descendant(db, data.parent_id, node_id):
-                    raise ValueError("Cannot move node into its descendant")
-                node.parent_id = data.parent_id
-            else:
-                node.parent_id = None
+            parent = self.get_node(db, data.parent_id, user_id)
+            if not parent:
+                raise ValueError("Target parent not found")
+            if parent.node_type != "folder":
+                raise ValueError("Target parent must be a folder")
+            if self._is_descendant(db, data.parent_id, node_id):
+                raise ValueError("Cannot move node into its descendant")
+            node.parent_id = data.parent_id
+            
         if data.position is not None:
             node.position = data.position
         db.commit()
