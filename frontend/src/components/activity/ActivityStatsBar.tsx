@@ -78,63 +78,85 @@ export function ActivityStatsBar({ activities, onFilterStatus, activeFilter }: A
     return map;
   }, [activities]);
 
+  const progressStatuses = STATUS_CONFIG.filter((cfg) => cfg.status !== 'focus');
+  const total = progressStatuses.reduce((sum, cfg) => sum + (counts[cfg.status] || 0), 0);
+
   return (
     <TooltipProvider delayDuration={200}>
-      {/* Stats cards - single row */}
-      <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide sm:grid sm:grid-cols-5 sm:overflow-x-visible sm:pb-0">
-        {STATUS_CONFIG.map((cfg) => {
-          const Icon = cfg.icon;
-          const count = counts[cfg.status] || 0;
-          const isActive = activeFilter === cfg.status;
+      <div className="flex flex-col gap-3">
+        {/* Stats cards - single row */}
+        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide sm:grid sm:grid-cols-5 sm:overflow-x-visible sm:pb-0">
+          {STATUS_CONFIG.map((cfg) => {
+            const Icon = cfg.icon;
+            const count = counts[cfg.status] || 0;
+            const isActive = activeFilter === cfg.status;
 
-          return (
-            <Tooltip key={cfg.status}>
-              <TooltipTrigger asChild>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => {
-                    // 对于 focus，传递 'focus' 字符串；对于其他状态，传递实际状态
-                    const filterValue = cfg.status === 'focus' 
-                      ? 'focus' 
-                      : cfg.status as Activity['status'];
-                    onFilterStatus?.(isActive ? null : filterValue);
-                  }}
-                  className={`
-                    relative flex items-center gap-2 rounded-lg border px-3 py-2 transition-all
-                    ${cfg.bg} ${cfg.border}
-                    ${isActive ? `ring-2 ${cfg.ring} shadow-sm` : 'hover:shadow-sm'}
-                    cursor-pointer select-none flex-shrink-0 sm:flex-shrink sm:w-full
-                  `}
-                >
-                  <div className={`rounded-md p-1.5 ${cfg.bg}`}>
-                    <Icon className={`w-3.5 h-3.5 ${cfg.color}`} />
-                  </div>
-                  <div className="flex flex-col items-start">
-                    <motion.span
-                      key={count}
-                      initial={{ opacity: 0, y: -4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={`text-lg font-bold leading-none ${cfg.color}`}
-                    >
-                      {count}
-                    </motion.span>
-                    <span className="text-[10px] text-muted-foreground mt-0.5 whitespace-nowrap">{cfg.label}</span>
-                  </div>
-                  {isActive && (
-                    <motion.div
-                      layoutId="statsIndicator"
-                      className={`absolute -bottom-px left-2 right-2 h-0.5 rounded-full ${cfg.barColor}`}
-                    />
-                  )}
-                </motion.button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {isActive ? '点击取消筛选' : `筛选${cfg.label}活动`}
-              </TooltipContent>
-            </Tooltip>
-          );
-        })}
+            return (
+              <Tooltip key={cfg.status}>
+                <TooltipTrigger asChild>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => {
+                      const filterValue = cfg.status === 'focus'
+                        ? 'focus'
+                        : cfg.status as Activity['status'];
+                      onFilterStatus?.(isActive ? null : filterValue);
+                    }}
+                    className={`
+                      relative flex items-center gap-2 rounded-lg border px-3 py-2 transition-all
+                      ${cfg.bg} ${cfg.border}
+                      ${isActive ? `ring-2 ${cfg.ring} shadow-sm` : 'hover:shadow-sm'}
+                      cursor-pointer select-none flex-shrink-0 sm:flex-shrink sm:w-full
+                    `}
+                  >
+                    <div className={`rounded-md p-1.5 ${cfg.bg}`}>
+                      <Icon className={`w-3.5 h-3.5 ${cfg.color}`} />
+                    </div>
+                    <div className="flex flex-col items-start">
+                      <motion.span
+                        key={count}
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={`text-lg font-bold leading-none ${cfg.color}`}
+                      >
+                        {count}
+                      </motion.span>
+                      <span className="text-[10px] text-muted-foreground mt-0.5 whitespace-nowrap">{cfg.label}</span>
+                    </div>
+                    {isActive && (
+                      <motion.div
+                        layoutId="statsIndicator"
+                        className={`absolute -bottom-px left-2 right-2 h-0.5 rounded-full ${cfg.barColor}`}
+                      />
+                    )}
+                  </motion.button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {isActive ? '点击取消筛选' : `筛选${cfg.label}活动`}
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
+
+        {total > 0 && (
+          <div className="flex h-1.5 rounded-full overflow-hidden bg-muted/50">
+            {progressStatuses.map((cfg) => {
+              const pct = ((counts[cfg.status] || 0) / total) * 100;
+              if (pct === 0) return null;
+              return (
+                <motion.div
+                  key={cfg.status}
+                  initial={{ width: 0 }}
+                  animate={{ width: `${pct}%` }}
+                  transition={{ duration: 0.5, ease: 'easeOut' }}
+                  className={`${cfg.barColor} first:rounded-l-full last:rounded-r-full`}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
     </TooltipProvider>
   );
