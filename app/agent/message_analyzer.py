@@ -1,4 +1,5 @@
 """消息分析 Agent - 使用 LangChain 判断消息重要性并生成 Activity"""
+from datetime import datetime, timezone
 from typing import Optional
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
@@ -84,6 +85,7 @@ Activity 类型说明：
 
 发送者：{sender_name}
 消息类型：{message_type}
+发送时间：{timestamp}
 消息内容：{message_content}
 
 上下文（最近的消息）：
@@ -97,7 +99,8 @@ Activity 类型说明：
         sender_name: str,
         message_type: str,
         message_content: str,
-        context_messages: list[dict]
+        context_messages: list[dict],
+        timestamp: str = "",
     ) -> ActivitySuggestion:
         """
         分析消息并返回 Activity 建议
@@ -113,8 +116,13 @@ Activity 类型说明：
         """
         try:
             # 格式化上下文消息
+            def _fmt_ts(ts) -> str:
+                if isinstance(ts, (int, float)) and ts > 0:
+                    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                return str(ts) if ts else ""
+
             context_str = "\n".join([
-                f"[{msg.get('sender', 'Unknown')}]: {msg.get('content', '')}"
+                f"[{_fmt_ts(msg.get('timestamp'))}] [{msg.get('sender', 'Unknown')}]: {msg.get('content', '')}"
                 for msg in context_messages[-10:]  # 只取最近 10 条
             ]) if context_messages else "无上下文"
             
@@ -125,6 +133,7 @@ Activity 类型说明：
             result = chain.invoke({
                 "sender_name": sender_name,
                 "message_type": message_type,
+                "timestamp": timestamp,
                 "message_content": message_content,
                 "context_messages": context_str,
                 "format_instructions": self.parser.get_format_instructions()

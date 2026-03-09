@@ -89,7 +89,8 @@ class WebhookService:
                 sender_name=webhook_data.sender.get("nickname", "Unknown"),
                 message_type=webhook_data.session_type,
                 message_content=webhook_data.message_str,
-                context_messages=context_messages
+                context_messages=context_messages,
+                timestamp=datetime.fromtimestamp(webhook_data.timestamp, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
             )
             logger.info(f"Analysis result: is_important={suggestion.is_important}, reasoning={suggestion.reasoning}")
             
