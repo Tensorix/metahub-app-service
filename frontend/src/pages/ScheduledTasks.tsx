@@ -33,6 +33,8 @@ import type {
 } from '@/lib/scheduledTaskApi';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { usePageTitle } from '@/contexts/PageTitleContext';
+import { useBreakpoints } from '@/hooks/useMediaQuery';
 
 const PAGE_SIZE = 20;
 const STATUS_OPTIONS = [
@@ -102,15 +104,32 @@ export default function ScheduledTasks() {
   const [editingTask, setEditingTask] = useState<ScheduledTask | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ScheduledTask | null>(null);
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
   const { toast } = useToast();
+  const { setTitle, setActions } = usePageTitle();
+  const { isMobile } = useBreakpoints();
 
+  // Setup page title and actions
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+    if (isMobile) {
+      setTitle('定时任务');
+      setActions([
+        {
+          key: 'create',
+          label: '创建',
+          icon: <Plus className="h-4 w-4" />,
+          onClick: openCreateDialog,
+        },
+      ]);
+    } else {
+      setTitle(null);
+      setActions([]);
+    }
+
+    return () => {
+      setTitle(null);
+      setActions([]);
+    };
+  }, [isMobile, setTitle, setActions]);
 
   useEffect(() => {
     debounceRef.current = setTimeout(() => setDebouncedSearch(searchQuery), 300);
@@ -238,18 +257,20 @@ export default function ScheduledTasks() {
 
   return (
     <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">定时任务</h1>
-          <p className="text-muted-foreground mt-1">
-            管理 Cron、固定间隔和一次性定时任务
-          </p>
+      {!isMobile && (
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">定时任务</h1>
+            <p className="text-muted-foreground mt-1">
+              管理 Cron、固定间隔和一次性定时任务
+            </p>
+          </div>
+          <Button onClick={openCreateDialog}>
+            <Plus className="mr-2 h-4 w-4" />
+            创建任务
+          </Button>
         </div>
-        <Button onClick={openCreateDialog}>
-          <Plus className="mr-2 h-4 w-4" />
-          创建任务
-        </Button>
-      </div>
+      )}
 
       {/* 筛选栏：搜索 + 状态 + 类型 */}
       <Card className="p-3 sm:p-4">

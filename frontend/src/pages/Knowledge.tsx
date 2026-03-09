@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { BookOpen, ArrowLeft } from 'lucide-react';
+import { BookOpen, ArrowLeft, Plus, Folder, FileText, Table2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import {
@@ -17,6 +17,7 @@ import { useToast } from '@/hooks/use-toast';
 import { knowledgeApi } from '@/lib/knowledgeApi';
 import type { NodeTreeItem, KnowledgeNode, NodeType } from '@/lib/knowledgeApi';
 import { KnowledgeTree, DocumentEditor, DatasetView, FolderDetail, KnowledgeSearchPanel } from '@/components/knowledge';
+import { usePageTitle } from '@/contexts/PageTitleContext';
 
 export default function Knowledge() {
   const { toast } = useToast();
@@ -25,15 +26,47 @@ export default function Knowledge() {
   const navigate = useNavigate();
   const toastRef = useRef(toast);
   toastRef.current = toast;
+  const { setTitle, setActions } = usePageTitle();
 
   const [tree, setTree] = useState<NodeTreeItem[]>([]);
   const [selectedId, setSelectedIdInternal] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<KnowledgeNode | null>(null);
   const [loading, setLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<NodeTreeItem | null>(null);
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
 
   // 移动端视图：'tree' 树形列表 | 'content' 内容详情
   const [mobileView, setMobileView] = useState<'tree' | 'content'>('tree');
+
+  // Setup page title and actions
+  useEffect(() => {
+    if (isMobile) {
+      if (mobileView === 'tree') {
+        setTitle('知识库');
+        setActions([
+          {
+            key: 'create',
+            label: '新建',
+            icon: <Plus className="h-4 w-4" />,
+            onClick: () => setShowCreateMenu(true),
+            variant: 'outline',
+          },
+        ]);
+      } else {
+        // In content view, title is handled by individual components
+        setTitle(selectedNode?.name || '知识库');
+        setActions([]);
+      }
+    } else {
+      setTitle(null);
+      setActions([]);
+    }
+
+    return () => {
+      setTitle(null);
+      setActions([]);
+    };
+  }, [isMobile, mobileView, selectedNode, setTitle, setActions]);
 
   // URL 深度链接：?node=xxx
   const nodeFromUrl = searchParams.get('node');
@@ -284,6 +317,57 @@ export default function Knowledge() {
             </div>
           </div>
         )}
+        
+        {/* 移动端创建菜单对话框 */}
+        <AlertDialog open={showCreateMenu} onOpenChange={setShowCreateMenu}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>新建内容</AlertDialogTitle>
+              <AlertDialogDescription>
+                选择要创建的内容类型
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="flex flex-col gap-2 py-4">
+              <Button
+                variant="outline"
+                className="justify-start"
+                onClick={() => {
+                  handleCreate(null, 'folder');
+                  setShowCreateMenu(false);
+                }}
+              >
+                <Folder className="w-4 h-4 mr-2" />
+                新建文件夹
+              </Button>
+              <Button
+                variant="outline"
+                className="justify-start"
+                onClick={() => {
+                  handleCreate(null, 'document');
+                  setShowCreateMenu(false);
+                }}
+              >
+                <FileText className="w-4 h-4 mr-2" />
+                新建文档
+              </Button>
+              <Button
+                variant="outline"
+                className="justify-start"
+                onClick={() => {
+                  handleCreate(null, 'dataset');
+                  setShowCreateMenu(false);
+                }}
+              >
+                <Table2 className="w-4 h-4 mr-2" />
+                新建表格
+              </Button>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel>取消</AlertDialogCancel>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        
         <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>

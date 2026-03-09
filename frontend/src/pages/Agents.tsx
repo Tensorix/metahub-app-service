@@ -9,6 +9,8 @@ import { DeleteAgentDialog } from '@/components/DeleteAgentDialog';
 import { agentManagementApi } from '@/lib/agentManagementApi';
 import type { Agent, AgentCreate, AgentUpdate } from '@/lib/agentManagementApi';
 import { useToast } from '@/hooks/use-toast';
+import { usePageTitle } from '@/contexts/PageTitleContext';
+import { useBreakpoints } from '@/hooks/useMediaQuery';
 
 export default function Agents() {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -20,8 +22,32 @@ export default function Agents() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const { toast } = useToast();
+  const { setTitle, setActions } = usePageTitle();
+  const { isMobile } = useBreakpoints();
 
   const pageSize = 20;
+
+  useEffect(() => {
+    if (isMobile) {
+      setTitle('Agent 管理');
+      setActions([
+        {
+          key: 'create',
+          label: '创建',
+          icon: <Plus className="h-4 w-4" />,
+          onClick: openCreateDialog,
+        },
+      ]);
+    } else {
+      setTitle(null);
+      setActions([]);
+    }
+
+    return () => {
+      setTitle(null);
+      setActions([]);
+    };
+  }, [isMobile, setTitle, setActions]);
 
   const loadAgents = useCallback(async () => {
     try {
@@ -134,16 +160,18 @@ export default function Agents() {
 
   return (
     <div className="container mx-auto p-6 space-y-6 flex-1 min-h-0 overflow-y-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Agent 管理</h1>
-          <p className="text-muted-foreground mt-1">管理你的 AI Agents</p>
+      {!isMobile && (
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">Agent 管理</h1>
+            <p className="text-muted-foreground mt-1">管理你的 AI Agents</p>
+          </div>
+          <Button onClick={openCreateDialog}>
+            <Plus className="mr-2 h-4 w-4" />
+            创建 Agent
+          </Button>
         </div>
-        <Button onClick={openCreateDialog}>
-          <Plus className="mr-2 h-4 w-4" />
-          创建 Agent
-        </Button>
-      </div>
+      )}
 
       <div className="flex items-center gap-4">
         <div className="relative flex-1 max-w-md">

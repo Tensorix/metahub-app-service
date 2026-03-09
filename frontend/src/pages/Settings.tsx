@@ -1,17 +1,40 @@
+import { useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { GeneralSettings } from './settings/GeneralSettings';
 import { ProviderSettings } from './settings/ProviderSettings';
 import { MessageAnalyzerSettings } from './settings/MessageAnalyzerSettings';
 import { EmbeddingSettings } from './settings/EmbeddingSettings';
 import { AccountSettings } from './settings/AccountSettings';
+import { usePageTitle } from '@/contexts/PageTitleContext';
+import { useBreakpoints } from '@/hooks/useMediaQuery';
 
 export function Settings() {
+  const { setTitle, setActions } = usePageTitle();
+  const { isMobile } = useBreakpoints();
+
+  useEffect(() => {
+    if (isMobile) {
+      setTitle('设置');
+      setActions([]);
+    } else {
+      setTitle(null);
+      setActions([]);
+    }
+
+    return () => {
+      setTitle(null);
+      setActions([]);
+    };
+  }, [isMobile, setTitle, setActions]);
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="shrink-0 pb-4">
-        <h1 className="text-3xl font-bold tracking-tight">设置</h1>
-        <p className="text-muted-foreground mt-2">管理您的应用偏好设置</p>
-      </div>
+      {!isMobile && (
+        <div className="shrink-0 pb-4">
+          <h1 className="text-3xl font-bold tracking-tight">设置</h1>
+          <p className="text-muted-foreground mt-2">管理您的应用偏好设置</p>
+        </div>
+      )}
 
       <Tabs defaultValue="general" className="flex-1 flex flex-col overflow-hidden">
         <div className="shrink-0 overflow-x-auto scrollbar-hide">

@@ -298,31 +298,33 @@ export function KnowledgeTree({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b">
-        <span className="text-sm font-medium">知识库</span>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className={cn(
-              'inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground',
-              isMobile ? 'h-11 min-h-11 w-11 min-w-11' : 'h-7 w-7'
-            )}
-          >
-            <Plus className="w-4 h-4" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onCreate(null, 'folder')}>
-              <Folder className="w-4 h-4 mr-2" /> 新建文件夹
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onCreate(null, 'document')}>
-              <FileText className="w-4 h-4 mr-2" /> 新建文档
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onCreate(null, 'dataset')}>
-              <Table2 className="w-4 h-4 mr-2" /> 新建表格
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+      {/* Header - 移动端隐藏，因为已经在顶栏显示 */}
+      {!isMobile && (
+        <div className="flex items-center justify-between px-3 py-2 border-b">
+          <span className="text-sm font-medium">知识库</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={cn(
+                'inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground',
+                'h-7 w-7'
+              )}
+            >
+              <Plus className="w-4 h-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onCreate(null, 'folder')}>
+                <Folder className="w-4 h-4 mr-2" /> 新建文件夹
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onCreate(null, 'document')}>
+                <FileText className="w-4 h-4 mr-2" /> 新建文档
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onCreate(null, 'dataset')}>
+                <Table2 className="w-4 h-4 mr-2" /> 新建表格
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
 
       {/* Tree */}
       <div className="flex-1 overflow-y-auto py-1">

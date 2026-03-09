@@ -15,6 +15,8 @@ import { ActivityStatsBar } from '@/components/activity/ActivityStatsBar';
 import { ActivityBoardView } from '@/components/activity/ActivityBoardView';
 import { ActivityListView } from '@/components/activity/ActivityListView';
 import { ActivityEmptyState } from '@/components/activity/ActivityEmptyState';
+import { usePageTitle } from '@/contexts/PageTitleContext';
+import { useBreakpoints } from '@/hooks/useMediaQuery';
 
 // ──────────────────────────────────────────── component
 
@@ -25,9 +27,10 @@ const Activities = () => {
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [defaultStatus, setDefaultStatus] = useState<Activity['status'] | undefined>();
   const [viewMode, setViewMode] = useState<'board' | 'list'>('board');
-  const [isMobile, setIsMobile] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const { toast } = useToast();
+  const { setTitle, setActions } = usePageTitle();
+  const { isMobile } = useBreakpoints();
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,13 +40,28 @@ const Activities = () => {
     size: 100,
   });
 
-  // ──────── Responsive
+  // ──────── Setup page title and actions
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
-    check();
-    window.addEventListener('resize', check);
-    return () => window.removeEventListener('resize', check);
-  }, []);
+    if (isMobile) {
+      setTitle('活动管理');
+      setActions([
+        {
+          key: 'create',
+          label: '新建',
+          icon: <Plus className="h-4 w-4" />,
+          onClick: () => handleCreate(),
+        },
+      ]);
+    } else {
+      setTitle(null);
+      setActions([]);
+    }
+
+    return () => {
+      setTitle(null);
+      setActions([]);
+    };
+  }, [isMobile, setTitle, setActions]);
 
   // ──────── Data loading
   const loadActivities = useCallback(async () => {
@@ -135,18 +153,18 @@ const Activities = () => {
     <TooltipProvider delayDuration={300}>
       <div className="flex flex-col h-full overflow-hidden">
         {/* ──────── Header */}
-        <div className="flex-shrink-0 px-6 pt-6 pb-2">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight">活动管理</h1>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                {loading ? '加载中...' : `共 ${filteredActivities.length} 项活动`}
-              </p>
-            </div>
+        {!isMobile && (
+          <div className="flex-shrink-0 px-6 pt-6 pb-2">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight">活动管理</h1>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  {loading ? '加载中...' : `共 ${filteredActivities.length} 项活动`}
+                </p>
+              </div>
 
-            <div className="flex items-center gap-2">
-              {/* View toggle */}
-              {!isMobile && (
+              <div className="flex items-center gap-2">
+                {/* View toggle */}
                 <div className="flex items-center border rounded-lg p-0.5 bg-muted/50">
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -175,22 +193,33 @@ const Activities = () => {
                     <TooltipContent>列表视图</TooltipContent>
                   </Tooltip>
                 </div>
-              )}
 
-              <Button onClick={() => handleCreate()} className="gap-2 rounded-lg">
-                <Plus className="w-4 h-4" />
-                <span className="hidden sm:inline">新建活动</span>
-              </Button>
+                <Button onClick={() => handleCreate()} className="gap-2 rounded-lg">
+                  <Plus className="w-4 h-4" />
+                  <span className="hidden sm:inline">新建活动</span>
+                </Button>
+              </div>
             </div>
-          </div>
 
-          {/* Stats bar */}
-          <ActivityStatsBar
-            activities={activities}
-            onFilterStatus={setStatusFilter}
-            activeFilter={statusFilter}
-          />
-        </div>
+            {/* Stats bar */}
+            <ActivityStatsBar
+              activities={activities}
+              onFilterStatus={setStatusFilter}
+              activeFilter={statusFilter}
+            />
+          </div>
+        )}
+
+        {/* Mobile stats bar */}
+        {isMobile && (
+          <div className="flex-shrink-0 px-4 pt-2 pb-2">
+            <ActivityStatsBar
+              activities={activities}
+              onFilterStatus={setStatusFilter}
+              activeFilter={statusFilter}
+            />
+          </div>
+        )}
 
         {/* ──────── Filter bar */}
         <div className="flex-shrink-0 px-6 py-3">

@@ -25,6 +25,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useBreakpoints } from '@/hooks/useMediaQuery';
 
 interface SessionSidebarProps {
   onSessionSelect?: () => void;
@@ -43,6 +44,7 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
   const selectSession = useChatStore((state) => state.selectSession);
   const createSession = useChatStore((state) => state.createSession);
   const deleteSession = useChatStore((state) => state.deleteSession);
+  const { isMobile } = useBreakpoints();
 
   useEffect(() => {
     void loadSessions();
@@ -109,41 +111,44 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <MessageSquare className="h-4 w-4" />
-          <span className="font-semibold">会话</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <SessionImportDialog
-            trigger={
-              <Button size="sm" variant="ghost" title="导入会话">
-                <Upload className="h-4 w-4" />
-              </Button>
-            }
-            onSuccess={(ids) => {
-              void loadSessions();
-              if (ids.length === 1) {
-                void selectSession(ids[0]);
+      {/* 移动端隐藏标题栏，因为已经在顶栏显示 */}
+      {!isMobile && (
+        <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4" />
+            <span className="font-semibold">会话</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <SessionImportDialog
+              trigger={
+                <Button size="sm" variant="ghost" title="导入会话">
+                  <Upload className="h-4 w-4" />
+                </Button>
               }
-            }}
-          />
-          <BatchExportDialog
-            trigger={
-              <Button size="sm" variant="ghost" title="批量导出">
-                <Archive className="h-4 w-4" />
-              </Button>
-            }
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setShowCreateDialog(true)}
-          >
-            新建
-          </Button>
+              onSuccess={(ids) => {
+                void loadSessions();
+                if (ids.length === 1) {
+                  void selectSession(ids[0]);
+                }
+              }}
+            />
+            <BatchExportDialog
+              trigger={
+                <Button size="sm" variant="ghost" title="批量导出">
+                  <Archive className="h-4 w-4" />
+                </Button>
+              }
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowCreateDialog(true)}
+            >
+              新建
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="border-b px-3 py-2 space-y-2">
         <div className="relative">

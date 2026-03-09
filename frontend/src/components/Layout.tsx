@@ -9,7 +9,7 @@ import { PageTitleProvider, usePageTitle } from '@/contexts/PageTitleContext';
 
 function LayoutContent() {
   const { isMobile } = useBreakpoints();
-  const { title } = usePageTitle();
+  const { title, actions } = usePageTitle();
   const location = useLocation();
   const isKnowledge = location.pathname.includes('/knowledge');
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
@@ -34,13 +34,30 @@ function LayoutContent() {
               variant="ghost"
               size="icon"
               onClick={() => setMobileMenuOpen(true)}
-              className="mr-2"
+              className="mr-2 shrink-0"
             >
               <Menu className="h-5 w-5" />
             </Button>
             <h1 className="text-lg font-semibold truncate flex-1 min-w-0">
               {title || 'MetaHub'}
             </h1>
+            {/* 顶栏操作按钮 */}
+            {actions.length > 0 && (
+              <div className="flex items-center gap-2 ml-2 shrink-0">
+                {actions.map((action) => (
+                  <Button
+                    key={action.key}
+                    variant={action.variant || 'default'}
+                    size="sm"
+                    onClick={action.onClick}
+                    className="gap-1.5"
+                  >
+                    {action.icon}
+                    <span className="hidden sm:inline">{action.label}</span>
+                  </Button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">

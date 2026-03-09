@@ -41,6 +41,8 @@ import type {
 } from '@/lib/documentApi';
 import { CollectionDialog, DocumentDialog } from '@/components/documents';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { usePageTitle } from '@/contexts/PageTitleContext';
+import { useBreakpoints } from '@/hooks/useMediaQuery';
 
 const formatDate = (s: string) =>
   new Date(s).toLocaleString('zh-CN', {
@@ -55,6 +57,8 @@ export default function Documents() {
   const { collectionId } = useParams<{ collectionId?: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { setTitle, setActions } = usePageTitle();
+  const { isMobile } = useBreakpoints();
 
   const [collections, setCollections] = useState<DocumentCollection[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -72,6 +76,41 @@ export default function Documents() {
   >(null);
 
   const currentCollection = collections.find((c) => c.id === collectionId);
+
+  // Setup page title and actions
+  useEffect(() => {
+    if (isMobile) {
+      if (collectionId) {
+        setTitle(currentCollection?.name || '文档');
+        setActions([
+          {
+            key: 'create',
+            label: '新建',
+            icon: <Plus className="h-4 w-4" />,
+            onClick: handleCreateDocument,
+          },
+        ]);
+      } else {
+        setTitle('文档库');
+        setActions([
+          {
+            key: 'create',
+            label: '新建',
+            icon: <Plus className="h-4 w-4" />,
+            onClick: handleCreateCollection,
+          },
+        ]);
+      }
+    } else {
+      setTitle(null);
+      setActions([]);
+    }
+
+    return () => {
+      setTitle(null);
+      setActions([]);
+    };
+  }, [isMobile, collectionId, currentCollection, setTitle, setActions]);
 
   const loadCollections = async () => {
     setLoading(true);
@@ -188,41 +227,43 @@ export default function Documents() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex-shrink-0 px-4 py-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            {collectionId && (
-              <Button variant="ghost" size="icon" onClick={() => navigate('/documents')}>
-                <ArrowLeft className="w-4 h-4" />
-              </Button>
-            )}
-            <h1 className="text-2xl font-bold">
-              {collectionId ? currentCollection?.name || '文档' : '文档库'}
-            </h1>
-          </div>
-          <div className="flex items-center gap-2">
-            {collectionId ? (
-              <>
-                <Button onClick={handleCreateDocument}>
+        {!isMobile && (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {collectionId && (
+                <Button variant="ghost" size="icon" onClick={() => navigate('/documents')}>
+                  <ArrowLeft className="w-4 h-4" />
+                </Button>
+              )}
+              <h1 className="text-2xl font-bold">
+                {collectionId ? currentCollection?.name || '文档' : '文档库'}
+              </h1>
+            </div>
+            <div className="flex items-center gap-2">
+              {collectionId ? (
+                <>
+                  <Button onClick={handleCreateDocument}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    新建文档
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleEditCollection(currentCollection!)}
+                    disabled={!currentCollection}
+                  >
+                    <Settings className="w-4 h-4 mr-2" />
+                    设置
+                  </Button>
+                </>
+              ) : (
+                <Button onClick={handleCreateCollection}>
                   <Plus className="w-4 h-4 mr-2" />
-                  新建文档
+                  新建集合
                 </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => handleEditCollection(currentCollection!)}
-                  disabled={!currentCollection}
-                >
-                  <Settings className="w-4 h-4 mr-2" />
-                  设置
-                </Button>
-              </>
-            ) : (
-              <Button onClick={handleCreateCollection}>
-                <Plus className="w-4 h-4 mr-2" />
-                新建集合
-              </Button>
-            )}
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {collectionId && (
           <div className="flex gap-2">
