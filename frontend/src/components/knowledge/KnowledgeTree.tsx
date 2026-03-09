@@ -17,6 +17,7 @@ import {
   DndContext,
   closestCenter,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragOverlay,
@@ -106,14 +107,14 @@ function TreeNode({
   const { attributes, listeners, setNodeRef: setDragRef, isDragging: isNodeDragging } = useDraggable({
     id: node.id,
     data: { node },
-    disabled: isMobile || renaming,
+    disabled: renaming,
   });
 
   // Droppable setup (only for folders)
   const { setNodeRef: setDropRef, isOver } = useDroppable({
     id: `drop-${node.id}`,
     data: { node },
-    disabled: !isFolder || isMobile,
+    disabled: !isFolder,
   });
 
   const handleClick = () => {
@@ -212,11 +213,17 @@ function TreeNode({
       className={cn(
         'group flex items-center gap-1 px-2 py-1 rounded-md cursor-pointer text-sm select-none',
         'hover:bg-accent/50 transition-colors',
+        'touch-none', // 防止移动端滚动干扰拖拽
         isSelected && 'bg-accent text-accent-foreground',
         isOver && 'bg-primary/10 ring-2 ring-primary/20',
         (isNodeDragging || isDragging) && 'opacity-50'
       )}
-      style={{ paddingLeft: `${depth * 16 + 8}px` }}
+      style={{ 
+        paddingLeft: `${depth * 16 + 8}px`,
+        WebkitTouchCallout: 'none', // 防止iOS长按菜单
+        WebkitUserSelect: 'none',
+        userSelect: 'none',
+      }}
       onClick={handleClick}
     >
       <span
@@ -332,6 +339,12 @@ export function KnowledgeTree({
         delay: 250, // 长按250ms后激活拖拽
         tolerance: 5, // 允许5px的移动容差
       },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250, // 长按250ms后激活拖拽
+        tolerance: 5, // 允许5px的移动容差
+      },
     })
   );
 
@@ -424,18 +437,18 @@ export function KnowledgeTree({
         )}
 
         {/* Tree */}
-        <RootDropZone isMobile={isMobile}>
-          <div className="flex-1 overflow-y-auto py-1">
-            {items.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-sm gap-2 px-4">
-                <Folder className="w-8 h-8" />
-                <p>知识库为空</p>
-                <Button variant="outline" size="sm" onClick={() => onCreate(null, 'folder')}>
-                  创建文件夹
-                </Button>
-              </div>
-            ) : (
-              items.map((node) => (
+        <div className="flex-1 overflow-y-auto py-1">
+          {items.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-sm gap-2 px-4">
+              <Folder className="w-8 h-8" />
+              <p>知识库为空</p>
+              <Button variant="outline" size="sm" onClick={() => onCreate(null, 'folder')}>
+                创建文件夹
+              </Button>
+            </div>
+          ) : (
+            <>
+              {items.map((node) => (
                 <TreeNode
                   key={node.id}
                   node={node}
@@ -452,10 +465,18 @@ export function KnowledgeTree({
                   isMobile={isMobile}
                   isDragging={activeId === node.id}
                 />
-              ))
-            )}
-          </div>
-        </RootDropZone>
+              ))}
+              {/* 根目录拖放区域 - 在列表底部 */}
+              {activeId && (
+                <RootDropZone>
+                  <div className="mx-2 my-2 p-4 border-2 border-dashed rounded-lg text-center text-sm text-muted-foreground">
+                    拖到这里移动到根目录
+                  </div>
+                </RootDropZone>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Drag overlay */}
@@ -478,18 +499,18 @@ export function KnowledgeTree({
 }
 
 // Root drop zone component for dropping items at root level
-function RootDropZone({ children, isMobile }: { children: React.ReactNode; isMobile: boolean }) {
+function RootDropZone({ children }: { children: React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({
     id: 'root',
-    disabled: isMobile,
+    disabled: false,
   });
 
   return (
     <div
       ref={setNodeRef}
       className={cn(
-        'flex-1 overflow-hidden',
-        isOver && 'bg-primary/5'
+        'transition-colors',
+        isOver && 'bg-primary/10 border-primary/50'
       )}
     >
       {children}
