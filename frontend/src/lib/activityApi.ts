@@ -75,6 +75,7 @@ export interface ActivityListQuery {
   priority_max?: number;
   tags?: string[];
   is_deleted?: boolean;
+  archived?: boolean;
 }
 
 export interface ActivityListResponse {
@@ -95,6 +96,12 @@ export const activityApi = {
   // 获取活动详情
   getActivity: async (id: string): Promise<Activity> => {
     const response = await apiClient.get(`/api/v1/activities/${id}`);
+    return response.data;
+  },
+
+  // 获取 focus 活动列表（pending 和 active 状态）
+  getFocusActivities: async (): Promise<Activity[]> => {
+    const response = await apiClient.get('/api/v1/activities/focus');
     return response.data;
   },
 

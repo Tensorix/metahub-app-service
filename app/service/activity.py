@@ -1,5 +1,6 @@
 from typing import Optional
 from uuid import UUID
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from math import ceil
@@ -62,6 +63,16 @@ class ActivityService:
         if query_params.tags:
             # 数组标签筛选，匹配任意给定标签
             filters.append(Activity.tags.overlap(query_params.tags))
+        
+        # 默认不显示超过一天的 done 状态活动，除非明确查询 archived
+        if not query_params.archived:
+            one_day_ago = datetime.utcnow() - timedelta(days=1)
+            filters.append(
+                or_(
+                    Activity.status != "done",
+                    Activity.updated_at >= one_day_ago
+                )
+            )
         
         if filters:
             query = query.filter(and_(*filters))
@@ -151,6 +162,23 @@ class ActivityService:
             ).update({"sort_order": idx}, synchronize_session=False)
         db.commit()
         return True
+
+    @staticmethod
+    def get_focus_activities(db: Session, user_id: UUID) -> list[Activity]:
+        """获取 focus 活动列表（pending 和 active 状态）"""
+        query = db.query(Activity).filter(
+            Activity.user_id == user_id,
+            Activity.is_deleted == False,
+            Activity.status.in_(["pending", "active"])
+        )
+        
+        activities = query.order_by(
+            Activity.sort_order.asc(),
+            Activity.priority.desc(),
+            Activity.created_at.desc()
+        ).all()
+        
+        return activities
 
     @staticmethod
     def create_activity_from_event(db: Session, event_id: UUID, event_type: str, event_data: dict, user_id: UUID) -> Activity:

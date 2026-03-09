@@ -60,6 +60,16 @@ def reorder_activities(
         raise HTTPException(status_code=500, detail=f"更新排序失败: {str(e)}")
 
 
+@router.get("/focus", response_model=list[ActivityResponse], summary="获取 focus 活动列表")
+def get_focus_activities(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取 focus 活动列表（pending 和 active 状态的活动）"""
+    activities = ActivityService.get_focus_activities(db, current_user.id)
+    return [_build_activity_response(a, db, current_user.id) for a in activities]
+
+
 @router.get("/{activity_id}", response_model=ActivityResponse, summary="获取活动详情")
 def get_activity(
     activity_id: UUID,
@@ -82,10 +92,11 @@ def get_activities(
     priority_max: Optional[int] = Query(None, description="最大优先级"),
     tags: Optional[list[str]] = Query(None, description="按标签筛选（数组，匹配任意标签）"),
     is_deleted: bool = Query(False, description="是否包含已删除的记录"),
+    archived: bool = Query(False, description="是否查看已归档的历史活动（超过一天的 done 状态）"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取活动列表，支持分页和筛选"""
+    """获取活动列表，支持分页和筛选。默认不显示超过一天的 done 状态活动"""
     query_params = ActivityListQuery(
         page=page,
         size=size,
@@ -93,7 +104,8 @@ def get_activities(
         priority_min=priority_min,
         priority_max=priority_max,
         tags=tags,
-        is_deleted=is_deleted
+        is_deleted=is_deleted,
+        archived=archived
     )
 
     activities, total = ActivityService.get_activities(db, query_params, current_user.id)

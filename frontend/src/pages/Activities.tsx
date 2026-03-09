@@ -34,7 +34,7 @@ const Activities = () => {
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<Activity['status'] | null>(null);
+  const [statusFilter, setStatusFilter] = useState<Activity['status'] | 'focus' | null>(null);
   const [filters, setFilters] = useState<ActivityListQuery>({
     page: 1,
     size: 100,
@@ -67,8 +67,14 @@ const Activities = () => {
   const loadActivities = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await activityApi.getActivities({ ...filters, page: 1, size: 100 });
-      setActivities(response.items || []);
+      // 如果是 focus 模式，使用专门的 focus 接口
+      if (statusFilter === 'focus') {
+        const focusActivities = await activityApi.getFocusActivities();
+        setActivities(focusActivities || []);
+      } else {
+        const response = await activityApi.getActivities({ ...filters, page: 1, size: 100 });
+        setActivities(response.items || []);
+      }
     } catch (error) {
       console.error('加载活动失败:', error);
       setActivities([]);
@@ -76,7 +82,7 @@ const Activities = () => {
     } finally {
       setLoading(false);
     }
-  }, [filters, toast]);
+  }, [filters, statusFilter, toast]);
 
   useEffect(() => {
     loadActivities();
@@ -141,7 +147,8 @@ const Activities = () => {
     return activities.filter((a) => {
       if (a.is_deleted) return false;
       if (searchQuery && !a.name.toLowerCase().includes(searchQuery.toLowerCase().trim())) return false;
-      if (statusFilter && a.status !== statusFilter) return false;
+      // focus 模式已经在后端过滤了，这里不需要再过滤
+      if (statusFilter && statusFilter !== 'focus' && a.status !== statusFilter) return false;
       return true;
     });
   }, [activities, searchQuery, statusFilter]);
@@ -307,6 +314,19 @@ const Activities = () => {
                       <SelectItem value="8">紧急 (P8+)</SelectItem>
                       <SelectItem value="5">高优先级 (P5+)</SelectItem>
                       <SelectItem value="3">中优先级 (P3+)</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={filters.archived ? 'archived' : 'active'}
+                    onValueChange={(v) => setFilters({ ...filters, archived: v === 'archived' })}
+                  >
+                    <SelectTrigger className="w-[130px] h-8 text-xs rounded-lg">
+                      <SelectValue placeholder="活动状态" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">活跃活动</SelectItem>
+                      <SelectItem value="archived">历史归档</SelectItem>
                     </SelectContent>
                   </Select>
 

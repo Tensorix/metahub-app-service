@@ -90,6 +90,7 @@ class ActivityListQuery(BaseModel):
     priority_max: Optional[int] = Field(None, description="最大优先级")
     tags: Optional[list[str]] = Field(None, description="按标签筛选（数组，匹配任意标签）")
     is_deleted: bool = Field(False, description="是否包含已删除的记录")
+    archived: bool = Field(False, description="是否查看已归档的历史活动（超过一天的 done 状态）")
 
 
 class ActivityListResponse(BaseModel):
