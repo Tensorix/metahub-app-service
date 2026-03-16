@@ -13,6 +13,7 @@ class ProviderConfig(BaseModel):
     name: str                          # Display name, e.g. "OpenAI"
     api_base_url: str                  # e.g. "https://api.openai.com/v1"
     api_key: Optional[str] = None      # null → env fallback
+    sdk: str = "openai"                # LangChain provider type for init_chat_model
 
 
 # --- Config value schemas ---

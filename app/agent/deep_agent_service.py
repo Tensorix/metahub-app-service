@@ -205,11 +205,18 @@ class DeepAgentService:
         )
 
     def _get_model_string(self) -> str:
-        """Build provider:model format string."""
+        """Build provider:model format string.
+
+        Uses ``_resolved_sdk`` (the LangChain-compatible provider type) instead
+        of ``model_provider`` (which is the registry ID) so that custom registry
+        names like ``"newapi"`` are mapped to a known SDK such as ``"openai"``.
+        """
         model = self.config.get("model") or config.AGENT_DEFAULT_MODEL
-        provider = self.config.get("model_provider") or config.AGENT_DEFAULT_PROVIDER
         # If model already contains ":", use as-is
-        return model if ":" in model else f"{provider}:{model}"
+        if ":" in model:
+            return model
+        sdk = self.config.get("_resolved_sdk") or self.config.get("model_provider") or config.AGENT_DEFAULT_PROVIDER
+        return f"{sdk}:{model}"
 
     def _get_tools(self) -> list:
         """Get custom tools based on configuration."""
@@ -351,9 +358,10 @@ class DeepAgentService:
             # SubAgent 有独立的 provider — 需要构建完整的 model 实例
             from langchain.chat_models import init_chat_model
 
+            sdk = sa_config.get("_resolved_sdk") or model_provider
             model_string = (
                 model_name if ":" in model_name
-                else f"{model_provider}:{model_name}"
+                else f"{sdk}:{model_name}"
             )
 
             # Use subagent's own _resolved_* first (injected by factory)
@@ -367,7 +375,7 @@ class DeepAgentService:
 
             # Fallback to parent/env resolution
             if not kwargs:
-                kwargs = self._get_model_kwargs_for_provider(model_provider)
+                kwargs = self._get_model_kwargs_for_provider(sdk)
 
             return init_chat_model(model_string, **kwargs)
         else:
@@ -375,17 +383,18 @@ class DeepAgentService:
             # 返回 model name，由 SubAgentMiddleware 的 default_model 提供 provider
             return model_name
 
-    def _get_model_kwargs_for_provider(self, provider: str) -> dict:
-        """获取指定 provider 的 model kwargs。
+    def _get_model_kwargs_for_provider(self, sdk: str) -> dict:
+        """获取指定 sdk 类型的 model kwargs。
 
-        For the parent agent's own provider, uses _resolved_* values first.
-        For subagent providers, falls back to env vars.
+        ``sdk`` is the LangChain-compatible provider type (e.g. "openai"),
+        NOT the registry ID. For the parent agent's own sdk, reuses
+        _resolved_* values first. Falls back to env vars.
         """
         kwargs = {}
 
-        # Check if this is the same provider as the parent agent — reuse resolved values
-        parent_provider = self.config.get("model_provider") or config.AGENT_DEFAULT_PROVIDER
-        if provider == parent_provider:
+        # Check if this is the same sdk as the parent agent — reuse resolved values
+        parent_sdk = self.config.get("_resolved_sdk") or self.config.get("model_provider") or config.AGENT_DEFAULT_PROVIDER
+        if sdk == parent_sdk:
             resolved_key = self.config.get("_resolved_api_key")
             resolved_url = self.config.get("_resolved_base_url")
             if resolved_key:
@@ -393,16 +402,16 @@ class DeepAgentService:
             if resolved_url:
                 kwargs["base_url"] = resolved_url
 
-        # Env var fallbacks
-        if provider == "openai":
+        # Env var fallbacks (match on sdk type)
+        if sdk == "openai":
             if "api_key" not in kwargs and config.OPENAI_API_KEY:
                 kwargs["api_key"] = config.OPENAI_API_KEY
             if "base_url" not in kwargs and config.OPENAI_BASE_URL:
                 kwargs["base_url"] = config.OPENAI_BASE_URL
-        elif provider == "anthropic":
+        elif sdk == "anthropic":
             if "api_key" not in kwargs and hasattr(config, 'ANTHROPIC_API_KEY') and config.ANTHROPIC_API_KEY:
                 kwargs["api_key"] = config.ANTHROPIC_API_KEY
-        elif provider == "google":
+        elif sdk == "google":
             if "api_key" not in kwargs and hasattr(config, 'GOOGLE_API_KEY') and config.GOOGLE_API_KEY:
                 kwargs["api_key"] = config.GOOGLE_API_KEY
 
@@ -453,7 +462,7 @@ class DeepAgentService:
         Priority: _resolved_* from provider registry > env vars.
         Returns kwargs to pass to init_chat_model.
         """
-        provider = self.config.get("model_provider") or config.AGENT_DEFAULT_PROVIDER
+        sdk = self.config.get("_resolved_sdk") or self.config.get("model_provider") or config.AGENT_DEFAULT_PROVIDER
         kwargs = {}
 
         # Priority 1: Pre-resolved from provider registry (injected by factory)
@@ -465,10 +474,10 @@ class DeepAgentService:
         if resolved_url:
             kwargs["base_url"] = resolved_url
 
-        # Priority 2: Env vars as fallback
-        if "api_key" not in kwargs and provider == "openai" and config.OPENAI_API_KEY:
+        # Priority 2: Env vars as fallback (match on sdk type, not registry ID)
+        if "api_key" not in kwargs and sdk == "openai" and config.OPENAI_API_KEY:
             kwargs["api_key"] = config.OPENAI_API_KEY
-        if "base_url" not in kwargs and provider == "openai" and config.OPENAI_BASE_URL:
+        if "base_url" not in kwargs and sdk == "openai" and config.OPENAI_BASE_URL:
             kwargs["base_url"] = config.OPENAI_BASE_URL
 
         return kwargs

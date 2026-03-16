@@ -167,7 +167,7 @@ def get_message_analyzer(db=None) -> MessageAnalyzer:
                     resolve_provider,
                 )
                 cfg = get_message_analyzer_config(db)
-                api_base_url, api_key = resolve_provider(db, cfg.provider)
+                api_base_url, api_key, _sdk = resolve_provider(db, cfg.provider)
                 kwargs = dict(
                     model_name=cfg.model_name,
                     provider=cfg.provider,

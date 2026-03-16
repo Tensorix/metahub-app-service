@@ -65,19 +65,20 @@ def get_providers(db: Session) -> dict[str, ProviderConfig]:
     return {k: ProviderConfig(**v) for k, v in _DEFAULT_PROVIDERS.items()}
 
 
-def resolve_provider(db: Session, provider_id: str) -> tuple[str, str]:
-    """Resolve (api_base_url, api_key) for a provider_id.
+def resolve_provider(db: Session, provider_id: str) -> tuple[str, str, str]:
+    """Resolve (api_base_url, api_key, sdk) for a provider_id.
 
     Reads exclusively from the provider registry in DB.
-    Returns ("", "") if the provider_id is not registered.
+    Returns ("", "", "") if the provider_id is not registered.
+    ``sdk`` is the LangChain-compatible provider type (e.g. "openai").
     """
     providers = get_providers(db)
     prov = providers.get(provider_id)
 
     if prov:
-        return prov.api_base_url, prov.api_key or ""
+        return prov.api_base_url, prov.api_key or "", prov.sdk
 
-    return "", ""
+    return "", "", ""
 
 
 # ---------------------------------------------------------------------------

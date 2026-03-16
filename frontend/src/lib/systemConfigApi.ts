@@ -10,6 +10,7 @@ export interface ProviderConfig {
   name: string;
   api_base_url: string;
   api_key?: string | null;
+  sdk?: string;
 }
 
 export type ProvidersMap = Record<string, ProviderConfig>;

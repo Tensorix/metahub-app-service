@@ -22,6 +22,14 @@ import {
   AlertDialogTitle,
 } from '../../components/ui/alert-dialog';
 import { useToast } from '../../hooks/use-toast';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/select';
+import { Badge } from '../../components/ui/badge';
 import { Loader2, Plus, Pencil, Trash2, Wifi, Server } from 'lucide-react';
 import {
   getSystemConfig,
@@ -36,9 +44,18 @@ interface ProviderFormData {
   name: string;
   api_base_url: string;
   api_key: string;
+  sdk: string;
 }
 
-const EMPTY_FORM: ProviderFormData = { id: '', name: '', api_base_url: '', api_key: '' };
+const SDK_OPTIONS = [
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'google-genai', label: 'Google GenAI' },
+  { value: 'bedrock', label: 'AWS Bedrock' },
+  { value: 'azure-openai', label: 'Azure OpenAI' },
+] as const;
+
+const EMPTY_FORM: ProviderFormData = { id: '', name: '', api_base_url: '', api_key: '', sdk: 'openai' };
 
 export function ProviderSettings() {
   const { toast } = useToast();
@@ -85,6 +102,7 @@ export function ProviderSettings() {
       name: prov.name,
       api_base_url: prov.api_base_url,
       api_key: '', // Don't prefill masked key
+      sdk: prov.sdk || 'openai',
     });
     setDialogOpen(true);
   };
@@ -107,6 +125,7 @@ export function ProviderSettings() {
       name: form.name.trim() || form.id.trim(),
       api_base_url: form.api_base_url.trim(),
       api_key: form.api_key.trim() || null,
+      sdk: form.sdk || 'openai',
     };
 
     // If editing and key left blank, keep existing (server has the real key)
@@ -233,6 +252,11 @@ export function ProviderSettings() {
                       <span className="text-xs text-muted-foreground font-mono">
                         {id}
                       </span>
+                      {prov.sdk && (
+                        <Badge variant="secondary" className="text-xs">
+                          {prov.sdk}
+                        </Badge>
+                      )}
                     </div>
                     <div className="text-sm text-muted-foreground truncate mt-0.5">
                       {prov.api_base_url}
@@ -314,6 +338,27 @@ export function ProviderSettings() {
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="OpenAI"
               />
+            </div>
+            <div className="space-y-2">
+              <Label>SDK 类型</Label>
+              <Select
+                value={form.sdk}
+                onValueChange={(value) => setForm({ ...form, sdk: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="选择 SDK 类型" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SDK_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                LangChain 使用的 SDK 类型，决定如何调用此服务商的 API
+              </p>
             </div>
             <div className="space-y-2">
               <Label>API Base URL</Label>

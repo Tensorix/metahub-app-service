@@ -89,7 +89,7 @@ async def proxy_fetch_models(
     api_key = body.api_key
 
     if body.provider_id:
-        resolved_url, resolved_key = svc.resolve_provider(db, body.provider_id)
+        resolved_url, resolved_key, _sdk = svc.resolve_provider(db, body.provider_id)
         base_url = base_url or resolved_url
         api_key = api_key or resolved_key
 
