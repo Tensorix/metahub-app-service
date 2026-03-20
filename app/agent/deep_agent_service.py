@@ -81,6 +81,19 @@ def _safe_serialize(value) -> str:
         return f"<{type(value).__name__}>"
 
 
+def _unwrap_exception(e: BaseException) -> BaseException:
+    """Extract the root cause from nested ExceptionGroups.
+
+    When MCP tools fail inside anyio.TaskGroup, the real error (e.g.
+    httpx.HTTPStatusError) gets wrapped in one or more ExceptionGroup
+    layers.  This helper drills down to the first leaf exception so
+    that log messages and user-facing errors are actually useful.
+    """
+    while isinstance(e, BaseExceptionGroup) and e.exceptions:
+        e = e.exceptions[0]
+    return e
+
+
 class DeepAgentService:
     """Deep Agent service for AI conversations with streaming support."""
 
@@ -1032,8 +1045,9 @@ class DeepAgentService:
                 yield {"event": "done", "data": {"status": "complete"}}
 
             except Exception as e:
-                logger.error(f"Error in agent stream: {str(e)}", exc_info=True)
-                yield {"event": "error", "data": {"error": str(e)}}
+                root = _unwrap_exception(e)
+                logger.error(f"Error in agent stream: {root}", exc_info=True)
+                yield {"event": "error", "data": {"error": str(root)}}
         finally:
             agent_user_id.reset(token_uid)
             agent_session_id.reset(token_sid)
@@ -1163,8 +1177,9 @@ class DeepAgentService:
 
             yield {"event": "done", "data": {"status": "complete"}}
         except Exception as e:
-            logger.error(f"Error in chat_resume: {str(e)}", exc_info=True)
-            yield {"event": "error", "data": {"error": str(e)}}
+            root = _unwrap_exception(e)
+            logger.error(f"Error in chat_resume: {root}", exc_info=True)
+            yield {"event": "error", "data": {"error": str(root)}}
         finally:
             agent_user_id.reset(token_uid)
             agent_session_id.reset(token_sid)

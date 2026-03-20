@@ -9,6 +9,7 @@ MCP Client Manager - 管理 Agent 到外部 MCP Server 的连接.
 """
 
 import asyncio
+import functools
 import logging
 import time
 from typing import Any, Optional
@@ -20,6 +21,40 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from app.config import config
 
 logger = logging.getLogger(__name__)
+
+
+def _unwrap_exception_group(e: BaseException) -> BaseException:
+    """Extract the root cause from nested ExceptionGroups."""
+    while isinstance(e, BaseExceptionGroup) and e.exceptions:
+        e = e.exceptions[0]
+    return e
+
+
+def _wrap_mcp_tool(tool: BaseTool) -> BaseTool:
+    """Wrap an MCP tool so execution errors return error strings instead of raising.
+
+    This prevents MCP server failures (e.g. 502, timeout) from crashing the
+    entire agent stream. The LLM receives the error message and can respond
+    gracefully to the user.
+
+    MCP tools are StructuredTool instances with a ``coroutine`` field.
+    """
+    original_coroutine = getattr(tool, "coroutine", None)
+    if original_coroutine is None:
+        return tool
+
+    @functools.wraps(original_coroutine)
+    async def _safe_coroutine(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await original_coroutine(*args, **kwargs)
+        except Exception as exc:
+            root = _unwrap_exception_group(exc)
+            error_msg = f"Tool '{tool.name}' failed: {root}"
+            logger.warning(f"MCP tool execution error: {error_msg}", exc_info=True)
+            return error_msg
+
+    tool.coroutine = _safe_coroutine  # type: ignore[attr-defined]
+    return tool
 
 
 class MCPToolCache:
@@ -189,6 +224,9 @@ class MCPClientManager:
                     f"Failed to get tools from MCP Server " f"'{server_name}': {e}"
                 )
                 # 继续处理其他 server
+
+        # Wrap tools so execution errors are returned as strings, not raised
+        all_tools = [_wrap_mcp_tool(t) for t in all_tools]
 
         # 缓存结果
         if all_tools:
