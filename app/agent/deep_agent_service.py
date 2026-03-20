@@ -186,6 +186,166 @@ class DeepAgentService:
         mounted.update(skill_files)
         return skills_paths, mounted
 
+    def _build_default_system_prompt(self) -> str:
+        """Build a context-aware default system prompt.
+
+        Layered architecture:
+        1. Identity & core behavior — WHO the agent is and HOW it works
+        2. Tool usage strategy — WHEN and HOW to use each tool
+        3. Dynamic capabilities — MCP, SubAgents (conditional)
+        4. AGENTS.md bootstrap — READ instructions first (conditional)
+        5. Skills guidance — progressive disclosure (conditional)
+        6. Quality constraints — guardrails and validation rules
+
+        The actual content of AGENTS.md and skills is stored in the
+        virtual filesystem — this prompt provides behavioral guidance
+        and instructs the agent to read them proactively.
+        """
+        parts = []
+
+        # ── Layer 1: Identity & Core Behavior ──
+        parts.append(
+            "You are an AI agent that helps users complete tasks.\n"
+            "\n"
+            "## Core Behavior\n"
+            "- Keep working until the task is fully resolved before yielding back to the user.\n"
+            "- Do not ask for confirmation on assumptions — act on them and adjust if proven wrong.\n"
+            "- When blocked, try alternative approaches before asking the user.\n"
+            "- For complex tasks, use `write_todos` to break them into steps and track progress.\n"
+            "- Verify your changes are correct before reporting completion."
+        )
+
+        # ── Layer 2: Tool Usage Strategy ──
+        tool_lines = [
+            "",
+            "## Tools",
+            "You have these tools. Use the right tool for each job:",
+            "- **read_file**: Read file content. ALWAYS read a file before editing it.",
+            "- **edit_file**: Modify existing files (preferred over write_file for existing files).",
+            "- **write_file**: Create new files only.",
+            "- **glob**: Search for files by name pattern.",
+            "- **grep**: Search file contents by text or regex.",
+            "- **ls**: List directory contents to understand project structure.",
+            "- **write_todos / read_todos**: Plan and track multi-step tasks.",
+            "",
+            "When multiple tool calls are independent of each other, call them in parallel for efficiency.",
+        ]
+        parts.append("\n".join(tool_lines))
+
+        # ── Layer 3: Dynamic Capabilities ──
+        mcp_servers = self.config.get("mcp_servers") or []
+        if mcp_servers:
+            parts.append(
+                "\n### MCP Tools\n"
+                "Additional tools are dynamically loaded from configured MCP servers. "
+                "Use them when they match the task better than built-in tools."
+            )
+
+        subagents = self.config.get("subagents") or []
+        if subagents:
+            sa_names = [sa.get("name", "unnamed") for sa in subagents]
+            parts.append(
+                "\n### Sub-Agents\n"
+                f"Use the `task` tool to delegate work to specialized sub-agents: {', '.join(sa_names)}.\n"
+                "Delegate when a subtask clearly falls within a sub-agent's specialty, "
+                "or when you need to parallelize independent work."
+            )
+
+        # ── Layer 4: AGENTS.md Bootstrap ──
+        has_memory = bool(self.config.get("memory"))
+        if has_memory:
+            parts.append(
+                "\n## Agent Instructions (AGENTS.md)\n"
+                "CRITICAL: At the START of every new conversation, you MUST use `read_file` to read `/AGENTS.md` "
+                "BEFORE taking any other action. This file contains the user's persistent instructions, "
+                "role definitions, and domain knowledge that govern your behavior.\n"
+                "\n"
+                "Rules from AGENTS.md take PRIORITY over the default behavior described above. "
+                "If AGENTS.md defines a specific persona, workflow, or constraint, follow it exactly."
+            )
+
+        # ── Layer 5: Skills ──
+        has_skills = bool(self.config.get("skills"))
+        if has_skills:
+            parts.append(
+                "\n## Skills\n"
+                "You have a skills library at `/skills/`. When a user's request matches a skill:\n"
+                "1. Use `read_file` to read the skill's `SKILL.md` at its full path IMMEDIATELY.\n"
+                "2. Follow the skill's step-by-step workflow exactly.\n"
+                "3. Use any supporting files referenced by the skill.\n"
+                "\n"
+                "Skills provide proven, structured approaches — always prefer them over ad-hoc solutions."
+            )
+
+        # ── Layer 6: Quality Constraints ──
+        parts.append(
+            "\n## Quality Rules\n"
+            "- **Read before write**: Never edit or overwrite a file you haven't read first.\n"
+            "- **Verify after change**: After making edits, confirm the result is correct.\n"
+            "- **Be concise**: Explain what you did and the result. Avoid unnecessary preambles.\n"
+            "- **Stay focused**: Only make changes directly relevant to the user's request."
+        )
+
+        return "\n".join(parts)
+
+    def _build_user_message(
+        self,
+        raw_message: str,
+        *,
+        user_id: Optional[UUID] = None,
+        session_id: Optional[UUID] = None,
+        thread_id: Optional[str] = None,
+        extra_context: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """Wrap raw user message with runtime context.
+
+        Injects environment info and user rules into the user message
+        using XML tags so the LLM can distinguish system context from
+        actual user intent. This is the "auto-generated user prompt"
+        layer — analogous to Cursor's <user_info>, <rules>, etc.
+
+        Args:
+            raw_message: The user's original text.
+            user_id: Current user ID.
+            session_id: Current session ID.
+            thread_id: Current thread ID.
+            extra_context: Optional dict with additional context fields:
+                - user_name: Display name of the user.
+                - workspace: Project or workspace description.
+                - user_rules: Custom rules/preferences to follow.
+                - datetime: ISO timestamp (auto-filled if omitted).
+                - Any other key-value pairs to include.
+
+        Returns:
+            Enriched message string with XML-tagged context sections.
+        """
+        ctx = extra_context or {}
+        sections: list[str] = []
+
+        # ── Environment ──
+        env_lines: list[str] = []
+        if ctx.get("user_name"):
+            env_lines.append(f"User: {ctx['user_name']}")
+        if ctx.get("workspace"):
+            env_lines.append(f"Workspace: {ctx['workspace']}")
+        dt = ctx.get("datetime") or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        env_lines.append(f"Date: {dt}")
+        if thread_id:
+            env_lines.append(f"Thread: {thread_id}")
+
+        if env_lines:
+            sections.append("<environment>\n" + "\n".join(env_lines) + "\n</environment>")
+
+        # ── User Rules / Preferences ──
+        user_rules = ctx.get("user_rules")
+        if user_rules:
+            sections.append(f"<rules>\n{user_rules}\n</rules>")
+
+        # ── User Query (always last) ──
+        sections.append(f"<user_query>\n{raw_message}\n</user_query>")
+
+        return "\n\n".join(sections)
+
     async def _write_mounted_files_to_store(self, thread_id: str):
         """Write mounted files to thread-scoped store before invoke.
 
@@ -516,11 +676,7 @@ class DeepAgentService:
                 "model": model,  # Pass model instance instead of string
                 "tools": all_tools,  # 使用合并后的工具列表
                 "system_prompt": self.config.get("system_prompt")
-                or (
-                    "You are a helpful AI assistant with access to planning tools "
-                    "(write_todos, read_todos) and file system tools "
-                    "(ls, read_file, write_file, edit_file, glob, grep)."
-                ),
+                or self._build_default_system_prompt(),
                 "subagents": subagents,  # create_deep_agent 会自动创建 SubAgentMiddleware
                 "middleware": [],  # 不需要手动添加 middleware，create_deep_agent 会自动添加
                 "checkpointer": self.checkpointer,
@@ -561,6 +717,7 @@ class DeepAgentService:
         thread_id: str,
         user_id: Optional[UUID] = None,
         session_id: Optional[UUID] = None,
+        extra_context: Optional[dict[str, Any]] = None,
     ) -> str:
         """
         Send a message and get a complete response.
@@ -570,6 +727,7 @@ class DeepAgentService:
             thread_id: Conversation thread ID
             user_id: Optional user ID for context
             session_id: Optional session ID for filesystem isolation
+            extra_context: Optional runtime context (user_name, workspace, user_rules, etc.)
 
         Returns:
             Complete AI response text
@@ -599,7 +757,14 @@ class DeepAgentService:
             # discovers them via backend.ls_info("/skills/")
             await self._write_mounted_files_to_store(thread_id)
 
-            input_data = {"messages": [{"role": "user", "content": message}]}
+            enriched = self._build_user_message(
+                message,
+                user_id=user_id,
+                session_id=session_id,
+                thread_id=thread_id,
+                extra_context=extra_context,
+            )
+            input_data = {"messages": [{"role": "user", "content": enriched}]}
             response = await agent.ainvoke(input_data, config=cfg)
 
             # Extract the last AI message
@@ -619,6 +784,7 @@ class DeepAgentService:
         thread_id: str,
         user_id: Optional[UUID] = None,
         session_id: Optional[UUID] = None,
+        extra_context: Optional[dict[str, Any]] = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """
         Send a message and stream the response.
@@ -628,6 +794,7 @@ class DeepAgentService:
             thread_id: Conversation thread ID
             user_id: Optional user ID for context
             session_id: Optional session ID for filesystem isolation
+            extra_context: Optional runtime context (user_name, workspace, user_rules, etc.)
 
         Yields:
             Event dictionaries with types:
@@ -669,7 +836,14 @@ class DeepAgentService:
                 # 追踪活跃的 SubAgent op_id，用于过滤内部事件
                 _active_subagent_op_ids = set()
 
-                input_data = {"messages": [{"role": "user", "content": message}]}
+                enriched = self._build_user_message(
+                    message,
+                    user_id=user_id,
+                    session_id=session_id,
+                    thread_id=thread_id,
+                    extra_context=extra_context,
+                )
+                input_data = {"messages": [{"role": "user", "content": enriched}]}
 
                 async for event in agent.astream_events(
                     input_data,
