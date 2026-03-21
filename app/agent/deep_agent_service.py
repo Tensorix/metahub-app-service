@@ -200,139 +200,117 @@ class DeepAgentService:
         return skills_paths, mounted
 
     def _build_default_system_prompt(self) -> str:
-        """Build a context-aware default system prompt.
+        """Build a stable, cacheable system prompt.
 
-        Layered architecture:
-        1. Identity & core behavior — WHO the agent is and HOW it works
-        2. Tool usage strategy — WHEN and HOW to use each tool
-        3. Dynamic capabilities — MCP, SubAgents (conditional)
-        4. AGENTS.md bootstrap — READ instructions first (conditional)
-        5. Skills guidance — progressive disclosure (conditional)
-        6. Quality constraints — guardrails and validation rules
-
-        The actual content of AGENTS.md and skills is stored in the
-        virtual filesystem — this prompt provides behavioral guidance
-        and instructs the agent to read them proactively.
+        Contains ONLY identity, behavior, tool strategy, and quality rules.
+        All dynamic context (AGENTS.md content, skills list, environment)
+        is injected via the first user message by _build_user_message().
         """
-        parts = []
-
-        # ── Layer 1: Identity & Core Behavior ──
-        parts.append(
+        return (
             "You are an AI agent that helps users complete tasks.\n"
             "\n"
             "## Core Behavior\n"
             "- Keep working until the task is fully resolved before yielding back to the user.\n"
             "- Do not ask for confirmation on assumptions — act on them and adjust if proven wrong.\n"
             "- When blocked, try alternative approaches before asking the user.\n"
-            "- For complex tasks, use `write_todos` to break them into steps and track progress.\n"
-            "- Verify your changes are correct before reporting completion."
+            "- Verify your changes are correct before reporting completion.\n"
+            "\n"
+            "## Tools\n"
+            "- **read_file**: Read file content. ALWAYS read a file before editing it.\n"
+            "- **edit_file**: Modify existing files (preferred over write_file for existing files).\n"
+            "- **write_file**: Create new files only.\n"
+            "- **glob**: Search for files by name pattern.\n"
+            "- **grep**: Search file contents by text or regex.\n"
+            "- **ls**: List directory contents.\n"
+            "- **write_todos / read_todos**: Plan and track multi-step tasks.\n"
+            "\n"
+            "Call independent tools in parallel for efficiency.\n"
+            "\n"
+            "## Quality Rules\n"
+            "- **Read before write**: Never edit a file you haven't read first.\n"
+            "- **Verify after change**: Confirm the result is correct after edits.\n"
+            "- **Be concise**: Explain what you did, not what you're about to do.\n"
+            "- **Stay focused**: Only make changes directly relevant to the request."
         )
 
-        # ── Layer 2: Tool Usage Strategy ──
-        tool_lines = [
-            "",
-            "## Tools",
-            "You have these tools. Use the right tool for each job:",
-            "- **read_file**: Read file content. ALWAYS read a file before editing it.",
-            "- **edit_file**: Modify existing files (preferred over write_file for existing files).",
-            "- **write_file**: Create new files only.",
-            "- **glob**: Search for files by name pattern.",
-            "- **grep**: Search file contents by text or regex.",
-            "- **ls**: List directory contents to understand project structure.",
-            "- **write_todos / read_todos**: Plan and track multi-step tasks.",
-            "",
-            "When multiple tool calls are independent of each other, call them in parallel for efficiency.",
-        ]
-        parts.append("\n".join(tool_lines))
+    def _get_agents_md_content(self) -> str:
+        """Extract AGENTS.md content from memory config.
 
-        # ── Layer 3: Dynamic Capabilities ──
-        mcp_servers = self.config.get("mcp_servers") or []
-        if mcp_servers:
-            parts.append(
-                "\n### MCP Tools\n"
-                "Additional tools are dynamically loaded from configured MCP servers. "
-                "Use them when they match the task better than built-in tools."
-            )
+        Returns the raw markdown content, or empty string if not configured.
+        """
+        memory_data = self.config.get("memory") or []
+        for item in memory_data:
+            name = item.get("name") if isinstance(item, dict) else getattr(item, "name", None)
+            content = item.get("content") if isinstance(item, dict) else getattr(item, "content", None)
+            normalized = (name or "").strip().lower().removesuffix(".md")
+            if normalized == "agents":
+                return content or ""
+        # Fallback: return first non-empty memory content
+        for item in memory_data:
+            content = item.get("content") if isinstance(item, dict) else getattr(item, "content", None)
+            if content:
+                return content
+        return ""
 
-        subagents = self.config.get("subagents") or []
-        if subagents:
-            sa_names = [sa.get("name", "unnamed") for sa in subagents]
-            parts.append(
-                "\n### Sub-Agents\n"
-                f"Use the `task` tool to delegate work to specialized sub-agents: {', '.join(sa_names)}.\n"
-                "Delegate when a subtask clearly falls within a sub-agent's specialty, "
-                "or when you need to parallelize independent work."
-            )
+    def _get_skills_summary(self) -> list[dict[str, str]]:
+        """Build a summary list of available skills.
 
-        # ── Layer 4: AGENTS.md Bootstrap ──
-        has_memory = bool(self.config.get("memory"))
-        if has_memory:
-            parts.append(
-                "\n## Agent Instructions (AGENTS.md)\n"
-                "CRITICAL: At the START of every new conversation, you MUST use `read_file` to read `/AGENTS.md` "
-                "BEFORE taking any other action. This file contains the user's persistent instructions, "
-                "role definitions, and domain knowledge that govern your behavior.\n"
-                "\n"
-                "Rules from AGENTS.md take PRIORITY over the default behavior described above. "
-                "If AGENTS.md defines a specific persona, workflow, or constraint, follow it exactly."
-            )
-
-        # ── Layer 5: Skills ──
-        has_skills = bool(self.config.get("skills"))
-        if has_skills:
-            parts.append(
-                "\n## Skills\n"
-                "You have a skills library at `/skills/`. When a user's request matches a skill:\n"
-                "1. Use `read_file` to read the skill's `SKILL.md` at its full path IMMEDIATELY.\n"
-                "2. Follow the skill's step-by-step workflow exactly.\n"
-                "3. Use any supporting files referenced by the skill.\n"
-                "\n"
-                "Skills provide proven, structured approaches — always prefer them over ad-hoc solutions."
-            )
-
-        # ── Layer 6: Quality Constraints ──
-        parts.append(
-            "\n## Quality Rules\n"
-            "- **Read before write**: Never edit or overwrite a file you haven't read first.\n"
-            "- **Verify after change**: After making edits, confirm the result is correct.\n"
-            "- **Be concise**: Explain what you did and the result. Avoid unnecessary preambles.\n"
-            "- **Stay focused**: Only make changes directly relevant to the user's request."
-        )
-
-        return "\n".join(parts)
+        Returns list of {name, path, description} dicts.
+        Description is extracted from the first non-empty line of skill content.
+        """
+        skills_data = self.config.get("skills") or []
+        summaries = []
+        for skill in skills_data:
+            name = skill.get("name") if isinstance(skill, dict) else getattr(skill, "name", None)
+            content = skill.get("content") if isinstance(skill, dict) else getattr(skill, "content", None)
+            if not name:
+                continue
+            # Extract first meaningful line as description
+            desc = ""
+            if content:
+                for line in content.splitlines():
+                    stripped = line.strip().lstrip("#").strip()
+                    if stripped and not stripped.startswith("---"):
+                        desc = stripped[:120]
+                        break
+            summaries.append({
+                "name": name,
+                "path": f"/skills/{name}/SKILL.md",
+                "description": desc,
+            })
+        return summaries
 
     def _build_user_message(
         self,
         raw_message: str,
         *,
-        user_id: Optional[UUID] = None,
-        session_id: Optional[UUID] = None,
-        thread_id: Optional[str] = None,
         extra_context: Optional[dict[str, Any]] = None,
     ) -> str:
-        """Wrap raw user message with runtime context.
+        """Build the user message, optionally with bootstrap context.
 
-        Injects environment info and user rules into the user message
-        using XML tags so the LLM can distinguish system context from
-        actual user intent. This is the "auto-generated user prompt"
-        layer — analogous to Cursor's <user_info>, <rules>, etc.
+        Two modes controlled by the caller:
+        - **Bootstrap** (extra_context provided): First message of a session.
+          Injects environment, AGENTS.md content, skills list, and an
+          <attention> block with behavioral directives. All dynamic context
+          the agent needs is delivered upfront in this single message.
+        - **Passthrough** (extra_context is None): Subsequent messages.
+          Returns raw_message as-is — the LLM already has the full context
+          from the bootstrap message in its conversation history.
 
         Args:
             raw_message: The user's original text.
-            user_id: Current user ID.
-            session_id: Current session ID.
-            thread_id: Current thread ID.
-            extra_context: Optional dict with additional context fields:
+            extra_context: Runtime context dict for bootstrap. Keys:
                 - user_name: Display name of the user.
                 - workspace: Project or workspace description.
                 - user_rules: Custom rules/preferences to follow.
                 - datetime: ISO timestamp (auto-filled if omitted).
-                - Any other key-value pairs to include.
-
-        Returns:
-            Enriched message string with XML-tagged context sections.
+                When None, message is passed through without enrichment.
         """
-        ctx = extra_context or {}
+        # ── Passthrough: subsequent messages ──
+        if extra_context is None:
+            return raw_message
+
+        ctx = extra_context
         sections: list[str] = []
 
         # ── Environment ──
@@ -343,16 +321,50 @@ class DeepAgentService:
             env_lines.append(f"Workspace: {ctx['workspace']}")
         dt = ctx.get("datetime") or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         env_lines.append(f"Date: {dt}")
-        if thread_id:
-            env_lines.append(f"Thread: {thread_id}")
-
         if env_lines:
             sections.append("<environment>\n" + "\n".join(env_lines) + "\n</environment>")
 
         # ── User Rules / Preferences ──
-        user_rules = ctx.get("user_rules")
-        if user_rules:
-            sections.append(f"<rules>\n{user_rules}\n</rules>")
+        if ctx.get("user_rules"):
+            sections.append(f"<rules>\n{ctx['user_rules']}\n</rules>")
+
+        # ── Agent Instructions (AGENTS.md content inlined) ──
+        agents_md = self._get_agents_md_content()
+        if agents_md:
+            sections.append(
+                f"<agent_instructions>\n{agents_md}\n</agent_instructions>"
+            )
+
+        # ── Skills summary ──
+        skills = self._get_skills_summary()
+        if skills:
+            skill_lines = []
+            for s in skills:
+                desc_part = f": {s['description']}" if s["description"] else ""
+                skill_lines.append(f"- {s['name']} ({s['path']}){desc_part}")
+            sections.append(
+                "<skills>\n" + "\n".join(skill_lines) + "\n</skills>"
+            )
+
+        # ── Attention: behavioral directives ──
+        attention_parts = [
+            "Before starting any task, carefully follow the instructions in <agent_instructions>."
+            if agents_md else None,
+            "For complex tasks, use `write_todos` to plan steps before execution.",
+            (
+                "When a task matches a skill in <skills>, use `read_file` to load its SKILL.md "
+                "and follow the workflow."
+            ) if skills else None,
+            (
+                "For complex tasks with parallelizable subtasks, "
+                "delegate to sub-agents using the `task` tool."
+            ) if self.config.get("subagents") else None,
+        ]
+        attention_lines = [p for p in attention_parts if p]
+        if attention_lines:
+            sections.append(
+                "<attention>\n" + "\n".join(attention_lines) + "\n</attention>"
+            )
 
         # ── User Query (always last) ──
         sections.append(f"<user_query>\n{raw_message}\n</user_query>")
@@ -770,13 +782,7 @@ class DeepAgentService:
             # discovers them via backend.ls_info("/skills/")
             await self._write_mounted_files_to_store(thread_id)
 
-            enriched = self._build_user_message(
-                message,
-                user_id=user_id,
-                session_id=session_id,
-                thread_id=thread_id,
-                extra_context=extra_context,
-            )
+            enriched = self._build_user_message(message, extra_context=extra_context)
             input_data = {"messages": [{"role": "user", "content": enriched}]}
             response = await agent.ainvoke(input_data, config=cfg)
 
@@ -849,13 +855,7 @@ class DeepAgentService:
                 # 追踪活跃的 SubAgent op_id，用于过滤内部事件
                 _active_subagent_op_ids = set()
 
-                enriched = self._build_user_message(
-                    message,
-                    user_id=user_id,
-                    session_id=session_id,
-                    thread_id=thread_id,
-                    extra_context=extra_context,
-                )
+                enriched = self._build_user_message(message, extra_context=extra_context)
                 input_data = {"messages": [{"role": "user", "content": enriched}]}
 
                 async for event in agent.astream_events(
