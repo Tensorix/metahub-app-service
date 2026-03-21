@@ -247,41 +247,59 @@ class DeepAgentService:
             return "\n".join(str(item) for item in raw)
         return str(raw)
 
-    def _get_agents_md_content(self) -> str:
-        """Read AGENTS.md content from mounted files.
+    def _get_filesystem_context(self) -> dict[str, Any]:
+        """Build a structured snapshot of all mounted files for bootstrap.
 
-        Reads from self._mounted_files (the filesystem layer) rather
-        than self.config (the distribution source). This ensures we
-        read exactly what the agent would see via read_file.
+        Traverses ALL entries in self._mounted_files regardless of path,
+        and categorizes them:
+        - instructions: Files matching AGENTS.md / README.md patterns
+          → content inlined so the agent follows them without read_file
+        - skills: Files matching /skills/*/SKILL.md patterns
+          → name + path + short description (agent reads full content on demand)
+        - files: Everything else
+          → path listed so the agent knows they exist
+
+        Returns:
+            Dict with keys: instructions (str), skills (list), files (list)
         """
-        file_data = self._mounted_files.get("/AGENTS.md")
-        if not file_data:
-            return ""
-        return self._extract_file_content(file_data)
+        instruction_parts: list[str] = []
+        skills: list[dict[str, str]] = []
+        other_files: list[str] = []
 
-    def _get_skills_summary(self) -> list[dict[str, str]]:
-        """Build a summary list of available skills from mounted files.
-
-        Reads from self._mounted_files to stay consistent with the
-        filesystem layer. Returns list of {name, path, description}.
-        """
-        summaries = []
-        for path, file_data in self._mounted_files.items():
-            if not path.startswith("/skills/") or not path.endswith("/SKILL.md"):
-                continue
-            # Extract skill name from path: /skills/{name}/SKILL.md
-            parts = path.strip("/").split("/")
-            name = parts[1] if len(parts) >= 3 else path
+        for path, file_data in sorted(self._mounted_files.items()):
             content = self._extract_file_content(file_data)
-            # First meaningful line as description
-            desc = ""
-            for line in content.splitlines():
-                stripped = line.strip().lstrip("#").strip()
-                if stripped and not stripped.startswith("---"):
-                    desc = stripped[:120]
-                    break
-            summaries.append({"name": name, "path": path, "description": desc})
-        return summaries
+            basename = path.rsplit("/", 1)[-1].lower()
+
+            # Instruction files: inline content
+            if basename in ("agents.md", "readme.md", "instructions.md"):
+                instruction_parts.append(content)
+
+            # Skill files: summarize
+            elif "/skills/" in path and basename == "skill.md":
+                # /skills/{name}/SKILL.md or /workspace/skills/{name}/SKILL.md
+                parts = path.strip("/").split("/")
+                try:
+                    skill_idx = parts.index("skills")
+                    name = parts[skill_idx + 1] if skill_idx + 1 < len(parts) else path
+                except ValueError:
+                    name = path
+                desc = ""
+                for line in content.splitlines():
+                    stripped = line.strip().lstrip("#").strip()
+                    if stripped and not stripped.startswith("---"):
+                        desc = stripped[:120]
+                        break
+                skills.append({"name": name, "path": path, "description": desc})
+
+            # Everything else: list path
+            elif content:
+                other_files.append(path)
+
+        return {
+            "instructions": "\n\n".join(instruction_parts),
+            "skills": skills,
+            "files": other_files,
+        }
 
     def _build_user_message(
         self,
@@ -331,33 +349,37 @@ class DeepAgentService:
         if ctx.get("user_rules"):
             sections.append(f"<rules>\n{ctx['user_rules']}\n</rules>")
 
-        # ── Agent Instructions (AGENTS.md content inlined) ──
-        agents_md = self._get_agents_md_content()
-        if agents_md:
+        # ── Filesystem context (traverses all mounted files) ──
+        fs = self._get_filesystem_context()
+
+        if fs["instructions"]:
             sections.append(
-                f"<agent_instructions>\n{agents_md}\n</agent_instructions>"
+                f"<agent_instructions>\n{fs['instructions']}\n</agent_instructions>"
             )
 
-        # ── Skills summary ──
-        skills = self._get_skills_summary()
-        if skills:
+        if fs["skills"]:
             skill_lines = []
-            for s in skills:
+            for s in fs["skills"]:
                 desc_part = f": {s['description']}" if s["description"] else ""
                 skill_lines.append(f"- {s['name']} ({s['path']}){desc_part}")
             sections.append(
                 "<skills>\n" + "\n".join(skill_lines) + "\n</skills>"
             )
 
+        if fs["files"]:
+            sections.append(
+                "<files>\n" + "\n".join(f"- {p}" for p in fs["files"]) + "\n</files>"
+            )
+
         # ── Attention: behavioral directives ──
         attention_parts = [
             "Before starting any task, carefully follow the instructions in <agent_instructions>."
-            if agents_md else None,
+            if fs["instructions"] else None,
             "For complex tasks, use `write_todos` to plan steps before execution.",
             (
                 "When a task matches a skill in <skills>, use `read_file` to load its SKILL.md "
                 "and follow the workflow."
-            ) if skills else None,
+            ) if fs["skills"] else None,
             (
                 "For complex tasks with parallelizable subtasks, "
                 "delegate to sub-agents using the `task` tool."
