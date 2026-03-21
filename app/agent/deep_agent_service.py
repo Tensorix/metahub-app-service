@@ -233,51 +233,54 @@ class DeepAgentService:
             "- **Stay focused**: Only make changes directly relevant to the request."
         )
 
-    def _get_agents_md_content(self) -> str:
-        """Extract AGENTS.md content from memory config.
+    @staticmethod
+    def _extract_file_content(file_data: dict) -> str:
+        """Extract text content from a mounted file_data dict.
 
-        Returns the raw markdown content, or empty string if not configured.
+        create_file_data() stores content as a list of strings under
+        the "content" key. This helper joins them back into a single string.
         """
-        memory_data = self.config.get("memory") or []
-        for item in memory_data:
-            name = item.get("name") if isinstance(item, dict) else getattr(item, "name", None)
-            content = item.get("content") if isinstance(item, dict) else getattr(item, "content", None)
-            normalized = (name or "").strip().lower().removesuffix(".md")
-            if normalized == "agents":
-                return content or ""
-        # Fallback: return first non-empty memory content
-        for item in memory_data:
-            content = item.get("content") if isinstance(item, dict) else getattr(item, "content", None)
-            if content:
-                return content
-        return ""
+        raw = file_data.get("content")
+        if not raw:
+            return ""
+        if isinstance(raw, list):
+            return "\n".join(str(item) for item in raw)
+        return str(raw)
+
+    def _get_agents_md_content(self) -> str:
+        """Read AGENTS.md content from mounted files.
+
+        Reads from self._mounted_files (the filesystem layer) rather
+        than self.config (the distribution source). This ensures we
+        read exactly what the agent would see via read_file.
+        """
+        file_data = self._mounted_files.get("/AGENTS.md")
+        if not file_data:
+            return ""
+        return self._extract_file_content(file_data)
 
     def _get_skills_summary(self) -> list[dict[str, str]]:
-        """Build a summary list of available skills.
+        """Build a summary list of available skills from mounted files.
 
-        Returns list of {name, path, description} dicts.
-        Description is extracted from the first non-empty line of skill content.
+        Reads from self._mounted_files to stay consistent with the
+        filesystem layer. Returns list of {name, path, description}.
         """
-        skills_data = self.config.get("skills") or []
         summaries = []
-        for skill in skills_data:
-            name = skill.get("name") if isinstance(skill, dict) else getattr(skill, "name", None)
-            content = skill.get("content") if isinstance(skill, dict) else getattr(skill, "content", None)
-            if not name:
+        for path, file_data in self._mounted_files.items():
+            if not path.startswith("/skills/") or not path.endswith("/SKILL.md"):
                 continue
-            # Extract first meaningful line as description
+            # Extract skill name from path: /skills/{name}/SKILL.md
+            parts = path.strip("/").split("/")
+            name = parts[1] if len(parts) >= 3 else path
+            content = self._extract_file_content(file_data)
+            # First meaningful line as description
             desc = ""
-            if content:
-                for line in content.splitlines():
-                    stripped = line.strip().lstrip("#").strip()
-                    if stripped and not stripped.startswith("---"):
-                        desc = stripped[:120]
-                        break
-            summaries.append({
-                "name": name,
-                "path": f"/skills/{name}/SKILL.md",
-                "description": desc,
-            })
+            for line in content.splitlines():
+                stripped = line.strip().lstrip("#").strip()
+                if stripped and not stripped.startswith("---"):
+                    desc = stripped[:120]
+                    break
+            summaries.append({"name": name, "path": path, "description": desc})
         return summaries
 
     def _build_user_message(
