@@ -51,6 +51,8 @@ def _wrap_mcp_tool(tool: BaseTool) -> BaseTool:
             root = _unwrap_exception_group(exc)
             error_msg = f"Tool '{tool.name}' failed: {root}"
             logger.warning(f"MCP tool execution error: {error_msg}", exc_info=True)
+            if tool.response_format == "content_and_artifact":
+                return error_msg, None
             return error_msg
 
     tool.coroutine = _safe_coroutine  # type: ignore[attr-defined]
