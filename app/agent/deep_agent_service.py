@@ -247,11 +247,65 @@ class DeepAgentService:
             return "\n".join(str(item) for item in raw)
         return str(raw)
 
-    def _get_filesystem_context(self) -> dict[str, Any]:
-        """Build a structured snapshot of all mounted files for bootstrap.
+    @staticmethod
+    def _parse_skill_frontmatter(path: str, content: str) -> tuple[str, str]:
+        """Extract name and description from a SKILL.md's YAML frontmatter.
 
-        Traverses ALL entries in self._mounted_files regardless of path,
-        and categorizes them:
+        Skills follow the Agent Skills spec with a YAML header::
+
+            ---
+            name: web-research
+            description: Structured approach to web research
+            ---
+
+        If no valid frontmatter is found, falls back to the directory name
+        (e.g. ``/skills/web-research/SKILL.md`` → ``web-research``).
+
+        Returns:
+            (name, description) tuple.
+        """
+        import re
+
+        # Fallback: directory name from path  /skills/{name}/SKILL.md
+        parts = path.strip("/").split("/")
+        try:
+            skill_idx = parts.index("skills")
+            dir_name = parts[skill_idx + 1] if skill_idx + 1 < len(parts) else path
+        except ValueError:
+            dir_name = path
+
+        # Try to parse YAML frontmatter
+        match = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.DOTALL)
+        if not match:
+            return dir_name, ""
+
+        try:
+            import yaml
+            fm = yaml.safe_load(match.group(1))
+            if not isinstance(fm, dict):
+                return dir_name, ""
+            name = str(fm.get("name") or dir_name)
+            desc = str(fm.get("description") or "")[:1024]
+            return name, desc
+        except Exception:
+            return dir_name, ""
+
+    async def _get_filesystem_context(
+        self,
+        thread_id: str,
+        session_id: Optional[UUID] = None,
+    ) -> dict[str, Any]:
+        """Build a structured snapshot of all files from store for bootstrap.
+
+        Reads from the actual store (matching filesystem router's list_files),
+        covering both thread-scoped and session-scoped namespaces:
+
+        - Thread namespace ``(thread_id, "filesystem")``: AGENTS.md, skills,
+          and any files created by the agent at runtime.
+        - Session namespace ``(str(session_id), "filesystem")``: user files
+          under ``/workspace/``.
+
+        Files are categorized into:
         - instructions: Files matching AGENTS.md / README.md patterns
           → content inlined so the agent follows them without read_file
         - skills: Files matching /skills/*/SKILL.md patterns
@@ -259,40 +313,58 @@ class DeepAgentService:
         - files: Everything else
           → path listed so the agent knows they exist
 
+        Falls back to ``self._mounted_files`` when the store is unavailable.
+
         Returns:
             Dict with keys: instructions (str), skills (list), files (list)
         """
+        # Collect (path, file_data) pairs from store
+        all_files: list[tuple[str, dict]] = []
+
+        if self.store:
+            try:
+                # Thread namespace
+                thread_ns = (str(thread_id), "filesystem")
+                items = await self.store.asearch(thread_ns, limit=1000)
+                for item in items:
+                    all_files.append((item.key, item.value))
+
+                # Session namespace (workspace files)
+                if session_id:
+                    session_ns = (str(session_id), "filesystem")
+                    items = await self.store.asearch(session_ns, limit=1000)
+                    for item in items:
+                        if item.key == "/.workspace":
+                            continue
+                        # Prefix with /workspace to match filesystem router
+                        ws_path = "/workspace" + item.key if item.key.startswith("/") else f"/workspace/{item.key}"
+                        all_files.append((ws_path, item.value))
+            except Exception as e:
+                logger.warning(f"Failed to read store for bootstrap context: {e}, falling back to mounted files")
+                all_files = list(self._mounted_files.items())
+        else:
+            all_files = list(self._mounted_files.items())
+
+        # Categorize
         instruction_parts: list[str] = []
         skills: list[dict[str, str]] = []
         other_files: list[str] = []
 
-        for path, file_data in sorted(self._mounted_files.items()):
+        for path, file_data in sorted(all_files, key=lambda x: x[0]):
             content = self._extract_file_content(file_data)
             basename = path.rsplit("/", 1)[-1].lower()
 
-            # Instruction files: inline content
+            # Instruction files: inline content with source path
             if basename in ("agents.md", "readme.md", "instructions.md"):
-                instruction_parts.append(content)
+                instruction_parts.append(f"<!-- source: {path} -->\n{content}")
 
-            # Skill files: summarize
+            # Skill files: parse YAML frontmatter for name/description
             elif "/skills/" in path and basename == "skill.md":
-                # /skills/{name}/SKILL.md or /workspace/skills/{name}/SKILL.md
-                parts = path.strip("/").split("/")
-                try:
-                    skill_idx = parts.index("skills")
-                    name = parts[skill_idx + 1] if skill_idx + 1 < len(parts) else path
-                except ValueError:
-                    name = path
-                desc = ""
-                for line in content.splitlines():
-                    stripped = line.strip().lstrip("#").strip()
-                    if stripped and not stripped.startswith("---"):
-                        desc = stripped[:120]
-                        break
-                skills.append({"name": name, "path": path, "description": desc})
+                skill_name, desc = self._parse_skill_frontmatter(path, content)
+                skills.append({"name": skill_name, "path": path, "description": desc})
 
-            # Everything else: list path
-            elif content:
+            # Everything else: list path (skip directory markers)
+            elif content and not (isinstance(file_data, dict) and file_data.get("__type") == "directory"):
                 other_files.append(path)
 
         return {
@@ -301,37 +373,44 @@ class DeepAgentService:
             "files": other_files,
         }
 
-    def _build_user_message(
+    def _build_bootstrap_context(self) -> dict[str, Any]:
+        """Build bootstrap context from agent config for first-message enrichment."""
+        ctx: dict[str, Any] = {}
+        if self.config.get("name"):
+            ctx["workspace"] = self.config["name"]
+        # datetime is auto-filled by _build_user_message if omitted
+        return ctx
+
+    async def _build_user_message(
         self,
         raw_message: str,
         *,
-        extra_context: Optional[dict[str, Any]] = None,
+        bootstrap: bool = False,
+        thread_id: str = "",
+        session_id: Optional[UUID] = None,
     ) -> str:
         """Build the user message, optionally with bootstrap context.
 
-        Two modes controlled by the caller:
-        - **Bootstrap** (extra_context provided): First message of a session.
+        Two modes:
+        - **Bootstrap** (bootstrap=True): First message of a thread.
           Injects environment, AGENTS.md content, skills list, and an
-          <attention> block with behavioral directives. All dynamic context
-          the agent needs is delivered upfront in this single message.
-        - **Passthrough** (extra_context is None): Subsequent messages.
+          <attention> block with behavioral directives. Context is built
+          internally from agent config via _build_bootstrap_context().
+        - **Passthrough** (bootstrap=False): Subsequent messages.
           Returns raw_message as-is — the LLM already has the full context
           from the bootstrap message in its conversation history.
 
         Args:
             raw_message: The user's original text.
-            extra_context: Runtime context dict for bootstrap. Keys:
-                - user_name: Display name of the user.
-                - workspace: Project or workspace description.
-                - user_rules: Custom rules/preferences to follow.
-                - datetime: ISO timestamp (auto-filled if omitted).
-                When None, message is passed through without enrichment.
+            bootstrap: Whether to enrich with bootstrap context (first message).
+            thread_id: Thread ID for store namespace lookup.
+            session_id: Session ID for workspace namespace lookup.
         """
         # ── Passthrough: subsequent messages ──
-        if extra_context is None:
+        if not bootstrap:
             return raw_message
 
-        ctx = extra_context
+        ctx = self._build_bootstrap_context()
         sections: list[str] = []
 
         # ── Environment ──
@@ -349,8 +428,8 @@ class DeepAgentService:
         if ctx.get("user_rules"):
             sections.append(f"<rules>\n{ctx['user_rules']}\n</rules>")
 
-        # ── Filesystem context (traverses all mounted files) ──
-        fs = self._get_filesystem_context()
+        # ── Filesystem context (reads from store for full file visibility) ──
+        fs = await self._get_filesystem_context(thread_id, session_id)
 
         if fs["instructions"]:
             sections.append(
@@ -366,10 +445,10 @@ class DeepAgentService:
                 "<skills>\n" + "\n".join(skill_lines) + "\n</skills>"
             )
 
-        if fs["files"]:
-            sections.append(
-                "<files>\n" + "\n".join(f"- {p}" for p in fs["files"]) + "\n</files>"
-            )
+        # if fs["files"]:
+        #     sections.append(
+        #         "<files>\n" + "\n".join(f"- {p}" for p in fs["files"]) + "\n</files>"
+        #     )
 
         # ── Attention: behavioral directives ──
         attention_parts = [
@@ -395,6 +474,15 @@ class DeepAgentService:
         sections.append(f"<user_query>\n{raw_message}\n</user_query>")
 
         return "\n\n".join(sections)
+
+    async def _needs_bootstrap(self, thread_id: str) -> bool:
+        """Check if thread has no prior checkpoint (i.e. first message)."""
+        if not self.checkpointer:
+            return True
+        tup = await self.checkpointer.aget_tuple(
+            {"configurable": {"thread_id": thread_id}}
+        )
+        return tup is None
 
     async def _write_mounted_files_to_store(self, thread_id: str):
         """Write mounted files to thread-scoped store before invoke.
@@ -767,7 +855,6 @@ class DeepAgentService:
         thread_id: str,
         user_id: Optional[UUID] = None,
         session_id: Optional[UUID] = None,
-        extra_context: Optional[dict[str, Any]] = None,
     ) -> str:
         """
         Send a message and get a complete response.
@@ -777,7 +864,6 @@ class DeepAgentService:
             thread_id: Conversation thread ID
             user_id: Optional user ID for context
             session_id: Optional session ID for filesystem isolation
-            extra_context: Optional runtime context (user_name, workspace, user_rules, etc.)
 
         Returns:
             Complete AI response text
@@ -807,7 +893,11 @@ class DeepAgentService:
             # discovers them via backend.ls_info("/skills/")
             await self._write_mounted_files_to_store(thread_id)
 
-            enriched = self._build_user_message(message, extra_context=extra_context)
+            is_bootstrap = await self._needs_bootstrap(thread_id)
+            enriched = await self._build_user_message(
+                message, bootstrap=is_bootstrap,
+                thread_id=thread_id, session_id=session_id,
+            )
             input_data = {"messages": [{"role": "user", "content": enriched}]}
             response = await agent.ainvoke(input_data, config=cfg)
 
@@ -828,7 +918,6 @@ class DeepAgentService:
         thread_id: str,
         user_id: Optional[UUID] = None,
         session_id: Optional[UUID] = None,
-        extra_context: Optional[dict[str, Any]] = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """
         Send a message and stream the response.
@@ -838,7 +927,6 @@ class DeepAgentService:
             thread_id: Conversation thread ID
             user_id: Optional user ID for context
             session_id: Optional session ID for filesystem isolation
-            extra_context: Optional runtime context (user_name, workspace, user_rules, etc.)
 
         Yields:
             Event dictionaries with types:
@@ -880,7 +968,11 @@ class DeepAgentService:
                 # 追踪活跃的 SubAgent op_id，用于过滤内部事件
                 _active_subagent_op_ids = set()
 
-                enriched = self._build_user_message(message, extra_context=extra_context)
+                is_bootstrap = await self._needs_bootstrap(thread_id)
+                enriched = await self._build_user_message(
+                    message, bootstrap=is_bootstrap,
+                    thread_id=thread_id, session_id=session_id,
+                )
                 input_data = {"messages": [{"role": "user", "content": enriched}]}
 
                 async for event in agent.astream_events(
