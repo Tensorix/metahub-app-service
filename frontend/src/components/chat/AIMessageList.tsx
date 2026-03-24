@@ -19,6 +19,20 @@ import { Bot, User } from 'lucide-react';
 import type { Message, MessagePart, SubAgentCallContent } from '@/lib/api';
 import { parseToolCallContent, parseToolResultContent } from '@/lib/api';
 
+function LoadingDots() {
+  return (
+    <div className="flex items-center gap-1.5 py-2 px-4 rounded-lg bg-muted w-fit">
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="w-1.5 h-1.5 rounded-full bg-primary/50 animate-bounce"
+          style={{ animationDelay: `${i * 150}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function AIMessageList({ className }: { className?: string }) {
   const {
     currentSessionId,
@@ -180,6 +194,7 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
   // AI message
   if (isAssistant) {
     const hasTextContent = organizedParts.some(p => p.type === 'text');
+    const showLoadingDots = isStreaming && organizedParts.length === 0;
 
     return (
       <div className="flex gap-3">
@@ -189,6 +204,8 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
 
         <div className="flex-1 min-w-0 space-y-2">
           <span className="text-xs text-muted-foreground">{senderName}</span>
+
+          {showLoadingDots && <LoadingDots />}
 
           {organizedParts.map((item, index) => {
             switch (item.type) {

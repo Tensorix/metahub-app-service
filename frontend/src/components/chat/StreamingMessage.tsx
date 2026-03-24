@@ -15,12 +15,27 @@ interface StreamingMessageProps {
   className?: string;
 }
 
+function LoadingDots() {
+  return (
+    <div className="flex items-center gap-1.5 py-1">
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="w-1.5 h-1.5 rounded-full bg-primary/50 animate-bounce"
+          style={{ animationDelay: `${i * 150}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function StreamingMessage({
   content,
   isStreaming = false,
   className,
 }: StreamingMessageProps) {
   const endRef = useRef<HTMLDivElement>(null);
+  const hasContent = content.trim().length > 0;
 
   useEffect(() => {
     if (isStreaming && endRef.current) {
@@ -30,14 +45,16 @@ export function StreamingMessage({
 
   return (
     <div className={cn('max-w-none', className)}>
-      <Markdown
-        variant="chat"
-        animated={isStreaming}
-        fullFeaturedCodeBlock
-      >
-        {content}
-      </Markdown>
-      {isStreaming && <span className="inline-block w-1.5 h-4 ml-0.5 bg-primary animate-pulse" />}
+      {hasContent ? (
+        <Markdown
+          variant="chat"
+          animated={isStreaming}
+        >
+          {content}
+        </Markdown>
+      ) : (
+        isStreaming && <LoadingDots />
+      )}
       <div ref={endRef} />
     </div>
   );
