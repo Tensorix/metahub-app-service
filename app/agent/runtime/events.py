@@ -26,11 +26,14 @@ class StreamEventTranslator:
         self.logger.warning("Missing run_id in event '%s', generated op_id=%s", event.get("event"), generated)
         return generated
 
-    def _should_filter_subagent_child(self, op_id: str, parent_ids: list[str]) -> bool:
-        if self._active_subagent_op_ids and parent_ids:
-            if any(parent_id in self._active_subagent_op_ids for parent_id in parent_ids):
-                return True
-        return op_id in self._active_subagent_op_ids
+    def _find_parent_subagent_op_id(self, op_id: str, parent_ids: list[str]) -> str | None:
+        """If this event is a child of a subagent, return the parent op_id."""
+        if op_id in self._active_subagent_op_ids:
+            return None  # This IS the subagent itself, not a child
+        for pid in parent_ids:
+            if pid in self._active_subagent_op_ids:
+                return pid
+        return None
 
     def translate_event(self, event: dict[str, Any]) -> list[dict[str, Any]]:
         event_type = event.get("event")
@@ -39,6 +42,7 @@ class StreamEventTranslator:
         parent_ids = event.get("parent_ids", [])
         now_iso = datetime.now(timezone.utc).isoformat()
 
+        # --- Subagent lifecycle ---
         if event_type == "on_tool_start" and event.get("name") == "task":
             tool_input = event_data.get("input", {})
             subagent_name = tool_input.get("subagent_type", "unknown")
@@ -72,9 +76,12 @@ class StreamEventTranslator:
                 }
             ]
 
-        if self._should_filter_subagent_child(op_id, parent_ids):
-            return []
+        # --- Forward subagent child events (instead of filtering) ---
+        parent_op_id = self._find_parent_subagent_op_id(op_id, parent_ids)
+        if parent_op_id:
+            return self._translate_child_event(event, parent_op_id, now_iso)
 
+        # --- Top-level events ---
         if event_type == "on_chat_model_stream":
             chunk = event_data.get("chunk")
             if chunk and hasattr(chunk, "content") and chunk.content:
@@ -105,6 +112,63 @@ class StreamEventTranslator:
                         "name": event.get("name", "unknown"),
                         "result": safe_serialize(event_data.get("output", "")),
                         "success": True,
+                        "ended_at": now_iso,
+                    },
+                }
+            ]
+
+        return []
+
+    def _translate_child_event(
+        self,
+        event: dict[str, Any],
+        parent_op_id: str,
+        now_iso: str,
+    ) -> list[dict[str, Any]]:
+        """Translate a subagent internal event into a transport event with parent_op_id."""
+        event_type = event.get("event")
+        event_data = event.get("data", {})
+
+        if event_type == "on_chat_model_stream":
+            chunk = event_data.get("chunk")
+            if chunk and hasattr(chunk, "content") and chunk.content:
+                return [
+                    {
+                        "event": "message",
+                        "data": {
+                            "content": chunk.content,
+                            "parent_op_id": parent_op_id,
+                        },
+                    }
+                ]
+            return []
+
+        if event_type == "on_tool_start":
+            return [
+                {
+                    "event": "operation_start",
+                    "data": {
+                        "op_id": self._normalize_op_id(event),
+                        "op_type": "tool",
+                        "name": event.get("name", "unknown"),
+                        "args": sanitize_tool_input(event_data.get("input", {})),
+                        "parent_op_id": parent_op_id,
+                        "started_at": now_iso,
+                    },
+                }
+            ]
+
+        if event_type == "on_tool_end":
+            return [
+                {
+                    "event": "operation_end",
+                    "data": {
+                        "op_id": self._normalize_op_id(event),
+                        "op_type": "tool",
+                        "name": event.get("name", "unknown"),
+                        "result": safe_serialize(event_data.get("output", "")),
+                        "success": True,
+                        "parent_op_id": parent_op_id,
                         "ended_at": now_iso,
                     },
                 }

@@ -285,13 +285,25 @@ export interface ToolResultContent {
   status?: 'success' | 'error' | 'cancelled';
 }
 
+export interface ChildEvent {
+  type: 'text' | 'tool_call' | 'tool_result';
+  content?: string;
+  op_id?: string;
+  name?: string;
+  args?: Record<string, unknown>;
+  result?: string;
+  success?: boolean;
+}
+
 export interface SubAgentCallContent {
   op_id: string;
   name: string;
   description: string;
   result: string;
   duration_ms: number;
-  status?: 'success' | 'error' | 'cancelled';
+  status?: 'running' | 'success' | 'error' | 'cancelled';
+  streaming_text?: string;
+  child_events?: ChildEvent[];
 }
 
 export interface ErrorContent {

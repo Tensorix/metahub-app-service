@@ -5,8 +5,7 @@ export * from './TopicSidebar';
 export * from './TopicDivider';
 export * from './TopicSelector';
 export { StreamingMessage } from './StreamingMessage';
-export { ToolCallIndicator } from './ToolCallIndicator';
 export { RegenerateButton } from './RegenerateButton';
 export { AIMessageList } from './AIMessageList';
 export { AIChatPage } from './AIChatPage';
-
+export { CodeBlock } from './CodeBlock';

@@ -7,12 +7,8 @@ import { useChatStore } from '@/store/chat';
 export function useAIChat() {
   const {
     isStreaming,
-    streamingContent,
-    streamingThinking,
     isThinking,
     streamingMessageId,
-    activeOperations,
-    pendingParts,
     streamError,
     pendingInterrupt,
     sendAIMessage,
@@ -60,12 +56,8 @@ export function useAIChat() {
   return {
     // State
     isStreaming,
-    streamingContent,
-    streamingThinking,
     isThinking,
     streamingMessageId,
-    activeOperations,
-    pendingParts,
     error: streamError,
     pendingInterrupt,
 

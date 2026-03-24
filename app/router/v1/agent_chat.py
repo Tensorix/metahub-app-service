@@ -64,6 +64,13 @@ class StreamingCollector:
     errors: List[StreamingPart] = field(default_factory=list)
     subagent_calls: List[StreamingPart] = field(default_factory=list)
     _active_operations: dict = field(default_factory=dict)  # op_id → operation info
+    _subagent_child_events: dict = field(default_factory=dict)  # op_id → list of child events
+
+    def add_subagent_child_event(self, parent_op_id: str, event: dict):
+        """Accumulate a child event for a subagent."""
+        if parent_op_id not in self._subagent_child_events:
+            self._subagent_child_events[parent_op_id] = []
+        self._subagent_child_events[parent_op_id].append(event)
 
     def flush_current_text(self):
         """将当前累积的 text_chunks 转换为一个独立的 text part"""
@@ -141,6 +148,7 @@ class StreamingCollector:
         effective_status = status or ("success" if success else "error")
 
         if effective_type == "subagent":
+            child_events = self._subagent_child_events.pop(op_id, [])
             payload = {
                 "op_id": op_id,
                 "op_type": effective_type,
@@ -150,6 +158,7 @@ class StreamingCollector:
                 "success": success,
                 "duration_ms": max(0, duration),
                 "status": effective_status,
+                "child_events": child_events,
             }
             self.subagent_calls.append(StreamingPart(
                 type=MessagePartType.SUBAGENT_CALL,
@@ -577,8 +586,17 @@ async def chat_with_agent(
                         f"event_loop_ms={event_loop_ms}"
                     )
 
-                # 收集并转发事件
-                if event_type == "message":
+                # Route events — child events go to subagent collector
+                parent_op_id = event_data.get("parent_op_id")
+
+                if parent_op_id:
+                    # Subagent child event — accumulate for DB persistence
+                    collector.add_subagent_child_event(parent_op_id, {
+                        "type": event_type,
+                        **{k: v for k, v in event_data.items() if k != "parent_op_id"},
+                    })
+
+                elif event_type == "message":
                     content = event_data.get("content", "")
                     collector.add_text(content)
 
@@ -760,7 +778,14 @@ async def chat_resume(
                 event_type = event.get("event")
                 event_data = event.get("data", {})
 
-                if event_type == "message":
+                parent_op_id = event_data.get("parent_op_id")
+
+                if parent_op_id:
+                    collector.add_subagent_child_event(parent_op_id, {
+                        "type": event_type,
+                        **{k: v for k, v in event_data.items() if k != "parent_op_id"},
+                    })
+                elif event_type == "message":
                     collector.add_text(event_data.get("content", ""))
                 elif event_type == "operation_start":
                     collector.add_operation_start(

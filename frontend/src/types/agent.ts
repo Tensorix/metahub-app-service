@@ -24,6 +24,7 @@ export interface ChatEventMessage {
   event: 'message';
   data: {
     content: string;
+    parent_op_id?: string;
   };
 }
 
@@ -43,6 +44,7 @@ export interface ChatEventOperationStart {
     args?: Record<string, unknown>;
     description?: string;
     started_at: string;
+    parent_op_id?: string;
   };
 }
 
@@ -57,6 +59,7 @@ export interface ChatEventOperationEnd {
     duration_ms: number;
     status: 'success' | 'error' | 'cancelled';
     ended_at: string;
+    parent_op_id?: string;
   };
 }
 

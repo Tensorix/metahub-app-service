@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Brain, Loader2 } from 'lucide-react';
+import { ChevronRight, Brain, Loader2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { cn } from '@/lib/utils';
 import type { MessagePart } from '@/lib/api';
 
 interface ThinkingPartProps {
@@ -14,44 +16,40 @@ export function ThinkingPart({ part, isStreaming = false }: ThinkingPartProps) {
   const preview = content.length > 100 ? content.slice(0, 100) + '...' : content;
 
   return (
-    <div className="my-2 border border-purple-200 dark:border-purple-800 rounded-lg overflow-hidden">
-      {/* 头部：可点击展开/折叠 */}
+    <div className="my-1.5 rounded-lg border border-purple-500/20 bg-purple-500/5 overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-purple-500/10 transition-colors"
       >
-        {expanded ? (
-          <ChevronDown className="w-4 h-4 text-purple-500" />
-        ) : (
-          <ChevronRight className="w-4 h-4 text-purple-500" />
-        )}
-
+        <ChevronRight className={cn("h-3.5 w-3.5 text-purple-500 transition-transform", expanded && "rotate-90")} />
         {isStreaming ? (
-          <Loader2 className="w-4 h-4 text-purple-500 animate-spin" />
+          <Loader2 className="h-3.5 w-3.5 text-purple-500 animate-spin" />
         ) : (
-          <Brain className="w-4 h-4 text-purple-500" />
+          <Brain className="h-3.5 w-3.5 text-purple-500" />
         )}
-
-        <span className="font-medium text-sm text-purple-700 dark:text-purple-300">
-          思考过程
-        </span>
-
+        <span className="text-sm font-medium text-purple-600 dark:text-purple-400">思考过程</span>
         {!expanded && (
-          <span className="text-xs text-purple-500 ml-auto truncate max-w-[200px]">
-            {preview}
-          </span>
+          <span className="text-xs text-purple-400 ml-auto truncate max-w-[200px]">{preview}</span>
         )}
       </button>
 
-      {/* 展开内容 */}
-      {expanded && (
-        <div className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
-          {content}
-          {isStreaming && (
-            <span className="inline-block w-2 h-4 bg-purple-500 animate-pulse ml-1" />
-          )}
-        </div>
-      )}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+          >
+            <div className="px-3 pb-3 border-t border-purple-500/10">
+              <div className="pt-2 text-sm text-muted-foreground whitespace-pre-wrap">
+                {content}
+                {isStreaming && <span className="inline-block w-1.5 h-4 bg-purple-500 animate-pulse ml-0.5" />}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
