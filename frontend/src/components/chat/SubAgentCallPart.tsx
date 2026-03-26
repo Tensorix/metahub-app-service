@@ -3,7 +3,9 @@ import { Bot, ChevronRight, CheckCircle, XCircle, Loader2, Clock, Wrench } from 
 import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { StreamingMessage } from './StreamingMessage';
+import { LoadingDots } from './LoadingDots';
 import type { SubAgentCallContent } from '@/lib/api';
+import { collapseVariants } from '@/lib/motion';
 
 interface SubAgentCallPartProps {
   data: SubAgentCallContent;
@@ -24,7 +26,7 @@ export function SubAgentCallPart({ data }: SubAgentCallPartProps) {
   return (
     <div className={cn(
       "my-1.5 rounded-lg border overflow-hidden transition-colors",
-      isRunning && "border-primary/30 bg-primary/5",
+      isRunning && "border-brand/30 bg-brand/5",
       isComplete && "border-border bg-muted/30",
       isError && "border-red-500/30 bg-red-500/5",
       !isRunning && !isComplete && !isError && "border-border bg-muted/30",
@@ -35,12 +37,12 @@ export function SubAgentCallPart({ data }: SubAgentCallPartProps) {
         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/50 transition-colors"
       >
         <ChevronRight className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", expanded && "rotate-90")} />
-        <Bot className="h-3.5 w-3.5 text-primary" />
-        <span className="text-sm font-medium text-primary">{data.name}</span>
+        <Bot className="h-3.5 w-3.5 text-brand" />
+        <span className="bg-brand/8 px-1.5 py-0.5 rounded text-brand text-sm font-semibold">{data.name}</span>
         <span className="text-xs text-muted-foreground flex-1 truncate text-left">{data.description}</span>
         <span className="flex items-center gap-1.5 shrink-0">
           {isRunning ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-brand" />
           ) : isComplete ? (
             <>
               <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
@@ -62,12 +64,14 @@ export function SubAgentCallPart({ data }: SubAgentCallPartProps) {
       <AnimatePresence>
         {expanded && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            variants={collapseVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
           >
-            <div className="px-3 pb-3 border-t">
+            <div className="px-3 pb-3 border-t relative">
+              {/* Connecting line for child events */}
+              <div className="absolute left-4 top-8 bottom-2 w-px bg-border" />
               <ChildEventsBody data={data} isRunning={isRunning} />
             </div>
           </motion.div>
@@ -151,17 +155,7 @@ function ChildEventsBody({ data, isRunning }: { data: SubAgentCallContent; isRun
 }
 
 function RunningAnimation() {
-  return (
-    <div className="flex items-center gap-1.5 py-3 px-2">
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          className="w-1.5 h-1.5 rounded-full bg-primary/50 animate-bounce"
-          style={{ animationDelay: `${i * 150}ms` }}
-        />
-      ))}
-    </div>
-  );
+  return <LoadingDots className="py-3 px-2" />;
 }
 
 function MiniToolCall({ name, args, result }: { name: string; args?: Record<string, unknown>; result?: any }) {
@@ -175,34 +169,38 @@ function MiniToolCall({ name, args, result }: { name: string; args?: Record<stri
         className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-muted/40 transition-colors"
       >
         <ChevronRight className={cn("h-2.5 w-2.5 transition-transform", expanded && "rotate-90")} />
-        <Wrench className="h-3 w-3 text-blue-500 shrink-0" />
+        <Wrench className="h-3 w-3 text-brand shrink-0" />
         <span className="font-medium truncate">{name}</span>
         {hasResult ? (
           <CheckCircle className="h-3 w-3 text-emerald-500 ml-auto shrink-0" />
         ) : (
-          <Loader2 className="h-3 w-3 animate-spin text-blue-500 ml-auto shrink-0" />
+          <Loader2 className="h-3 w-3 animate-spin text-brand ml-auto shrink-0" />
         )}
       </button>
-      {expanded && (
-        <div className="px-2 pb-2 border-t space-y-1">
-          {args && (
-            <div>
-              <span className="text-[10px] text-muted-foreground">参数</span>
-              <pre className="bg-muted/30 rounded p-1 overflow-x-auto text-[10px]">
-                {typeof args === 'string' ? args : JSON.stringify(args, null, 2)}
-              </pre>
+      <AnimatePresence>
+        {expanded && (
+          <motion.div variants={collapseVariants} initial="hidden" animate="visible" exit="exit">
+            <div className="px-2 pb-2 border-t space-y-1">
+              {args && (
+                <div>
+                  <span className="text-[10px] text-muted-foreground">参数</span>
+                  <pre className="bg-muted/30 rounded p-1 overflow-x-auto text-[10px]">
+                    {typeof args === 'string' ? args : JSON.stringify(args, null, 2)}
+                  </pre>
+                </div>
+              )}
+              {result && (
+                <div>
+                  <span className="text-[10px] text-muted-foreground">结果</span>
+                  <pre className="bg-muted/30 rounded p-1 overflow-x-auto text-[10px] max-h-24">
+                    {typeof result.result === 'string' ? result.result : JSON.stringify(result)}
+                  </pre>
+                </div>
+              )}
             </div>
-          )}
-          {result && (
-            <div>
-              <span className="text-[10px] text-muted-foreground">结果</span>
-              <pre className="bg-muted/30 rounded p-1 overflow-x-auto text-[10px] max-h-24">
-                {typeof result.result === 'string' ? result.result : JSON.stringify(result)}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

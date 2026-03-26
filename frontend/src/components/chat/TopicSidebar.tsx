@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { AnimatePresence, motion } from 'motion/react';
 import { Hash, Plus, X, ChevronUp, ChevronDown, Check, MessageSquare, Search, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { staggerContainer, listItem, collapseVariants } from '@/lib/motion';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -204,8 +205,8 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
           {currentSession && (
             <div className="px-2 py-4 space-y-3 mb-2">
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
-                  <MessageSquare className="h-6 w-6" />
+                <div className="h-10 w-10 rounded-lg bg-brand/8 flex items-center justify-center text-brand shrink-0">
+                  <MessageSquare className="h-5 w-5" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-semibold">话题列表</h3>
@@ -223,21 +224,23 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
             </p>
           )}
 
-          {currentSession &&
-            topics.map((topic) => {
+          {currentSession && (
+            <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="space-y-1">
+            {topics.map((topic) => {
               const t = topic as Topic | VirtualTopic;
               const isVirtual = (t as VirtualTopic).is_virtual === true;
               const isSelected = topic.id === currentTopicId;
               const isPreview = topic.id === previewTopicId && boundaryProgress > 0;
 
               return (
-                <div
+                <motion.div
                   key={topic.id}
+                  variants={listItem}
                   ref={(el) => { topicRefs.current[topic.id] = el; }}
                   className={cn(
-                    'group w-full rounded-md text-xs transition-colors hover:bg-accent/50',
-                    isSelected && 'bg-accent',
-                    isPreview && 'ring-2 ring-primary/50 bg-primary/10',
+                    'group w-full rounded-lg text-xs transition-colors duration-150 hover:bg-surface-hover',
+                    isSelected && 'bg-surface-hover',
+                    isPreview && 'ring-2 ring-brand/50 bg-brand/8',
                   )}
                   style={isPreview ? { opacity: 0.5 + (boundaryProgress / 200) } : undefined}
                 >
@@ -268,10 +271,10 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
                       >
                         <div className="flex items-center gap-2">
                           {isPreview && boundaryDirection === 'up' && (
-                            <ChevronUp className="h-3 w-3 text-primary animate-bounce shrink-0" />
+                            <ChevronUp className="h-3 w-3 text-brand animate-bounce shrink-0" />
                           )}
                           {isPreview && boundaryDirection === 'down' && (
-                            <ChevronDown className="h-3 w-3 text-primary animate-bounce shrink-0" />
+                            <ChevronDown className="h-3 w-3 text-brand animate-bounce shrink-0" />
                           )}
                           {isSelected && !isPreview && <Check className="h-3 w-3 shrink-0" />}
                           <span className="line-clamp-1 flex-1 truncate">
@@ -311,9 +314,11 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
                       </DropdownMenu>
                     </div>
                   )}
-                </div>
+                </motion.div>
               );
             })}
+            </motion.div>
+          )}
 
           {currentSession && topics.length === 0 && !isCreating && (
             <p className="py-4 text-center text-xs text-muted-foreground">
@@ -324,8 +329,15 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
           )}
 
           {/* 新建话题输入框 */}
+          <AnimatePresence>
           {currentSession && isCreating && (
-            <div className="space-y-2 p-2 border rounded-md">
+            <motion.div
+              variants={collapseVariants}
+              initial="hidden"
+              animate="visible"
+              exit="exit"
+              className="space-y-2 p-2 border rounded-md"
+            >
               <Input
                 placeholder="输入话题名称..."
                 value={newTopicName}
@@ -363,8 +375,9 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
                   <X className="h-3 w-3" />
                 </Button>
               </div>
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
         </div>
       </ScrollArea>
 

@@ -97,9 +97,9 @@ const statusConfig = {
   },
   in_progress: {
     icon: CircleDot,
-    color: 'text-blue-500',
-    bg: 'bg-blue-500/5',
-    border: 'border-blue-500/20',
+    color: 'text-brand',
+    bg: 'bg-brand/5',
+    border: 'border-brand/20',
   },
   completed: {
     icon: CheckCircle2,
@@ -123,7 +123,7 @@ function ProgressBar({ todos }: { todos: TodoItem[] }) {
         <span className="text-muted-foreground">
           {completed}/{total} 已完成
           {inProgress > 0 && (
-            <span className="text-blue-500 ml-1.5">· {inProgress} 进行中</span>
+            <span className="text-brand ml-1.5">· {inProgress} 进行中</span>
           )}
         </span>
         <span className="font-medium tabular-nums">{percent}%</span>
@@ -135,7 +135,7 @@ function ProgressBar({ todos }: { todos: TodoItem[] }) {
             background:
               percent === 100
                 ? 'linear-gradient(90deg, #10b981, #34d399)'
-                : 'linear-gradient(90deg, #3b82f6, #60a5fa)',
+                : 'linear-gradient(90deg, #6366f1, #818cf8)',
           }}
           initial={{ width: 0 }}
           animate={{ width: `${percent}%` }}
@@ -229,7 +229,7 @@ export function FloatingTodo({
           onClick={() => setCollapsed((v) => !v)}
           className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-muted/30 transition-colors"
         >
-          <ListTodo className="h-4 w-4 text-primary shrink-0" />
+          <ListTodo className="h-4 w-4 text-brand shrink-0" />
           <span className="text-sm font-medium">任务计划</span>
 
           {/* Compact progress when collapsed */}
@@ -310,7 +310,7 @@ export function TodoInlineHint({ todos, hasResult }: TodoInlineHintProps) {
 
   return (
     <div className="my-1.5 flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-muted/20 text-xs text-muted-foreground">
-      <ListTodo className="h-3.5 w-3.5 text-primary shrink-0" />
+      <ListTodo className="h-3.5 w-3.5 text-brand shrink-0" />
       <span>
         已更新任务计划
         <span className="mx-1">·</span>
@@ -318,7 +318,7 @@ export function TodoInlineHint({ todos, hasResult }: TodoInlineHintProps) {
         {inProgress > 0 && (
           <>
             <span className="mx-1">·</span>
-            <span className="text-blue-500 tabular-nums">{inProgress}</span> 进行中
+            <span className="text-brand tabular-nums">{inProgress}</span> 进行中
           </>
         )}
       </span>

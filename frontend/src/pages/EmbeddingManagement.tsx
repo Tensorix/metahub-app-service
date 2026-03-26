@@ -192,7 +192,7 @@ export default function EmbeddingManagement() {
                 <div
                   key={model.model_id}
                   className={`flex items-center justify-between p-4 border rounded-lg ${
-                    isActive ? "border-primary bg-primary/5" : ""
+                    isActive ? "border-brand bg-brand/5" : ""
                   }`}
                 >
                   <div className="flex-1">

@@ -5,7 +5,6 @@ import type { VirtualTopic } from '@/lib/virtualTopic';
 import { useChatStore } from '@/store/chat';
 import { useScrollBoundary } from '@/hooks/useScrollBoundary';
 import { useAIChat } from '@/hooks/useAIChat';
-import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { MessageInput } from '@/components/MessageInput';
 import { MessageList as SimpleMessageList } from '@/components/MessageList';
@@ -41,7 +40,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   const messages = useChatStore((state) => state.messages);
   const sessionMessages = useChatStore((state) => state.sessionMessages);
   const getCurrentSession = useChatStore((state) => state.getCurrentSession);
-  const getCurrentTopic = useChatStore((state) => state.getCurrentTopic);
+  // const getCurrentTopic = useChatStore((state) => state.getCurrentTopic);
   const getDisplayMode = useChatStore((state) => state.getDisplayMode);
   const getAllTopicsForSession = useChatStore((state) => state.getAllTopicsForSession);
   const sendMessage = useChatStore((state) => state.sendMessage);
@@ -68,7 +67,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
 
   // 直接调用函数，因为这些函数内部会从 store 获取最新状态
   const currentSession = getCurrentSession();
-  const currentTopic = getCurrentTopic();
+  // const currentTopic = getCurrentTopic();
   const displayMode = getDisplayMode();
   const allTopics = getAllTopicsForSession(currentSessionId);
 
@@ -239,9 +238,9 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   }, [isLoading, currentTopicId, currentSessionId, pagedMessages.length, continuousMessages.length]);
 
   return (
-    <Card className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col bg-background overflow-hidden">
       {/* Header */}
-      <div className="border-b px-4 py-3 shrink-0">
+      <div className="border-b border-border/50 px-4 py-3 shrink-0 bg-background/90 backdrop-blur-sm">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             {/* 移动端返回按钮 */}
@@ -256,7 +255,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
               </Button>
             )}
             <div className="flex-1 min-w-0">
-              <h2 className="text-lg font-semibold truncate">{headerTitle}</h2>
+              <h2 className="text-base font-semibold truncate">{headerTitle}</h2>
               {displayMode === 'paged' && currentSession && (
                 <div className="mt-1">
                   <TopicSelector />
@@ -373,7 +372,10 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
               {/* 顶部提示 */}
               {topHint && (
                 <div className="flex items-center justify-center py-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                  <div className="bg-muted/80 backdrop-blur-sm text-muted-foreground text-xs px-3 py-1 rounded-full shadow-sm flex items-center gap-1.5">
+                  <div className={cn(
+                    "backdrop-blur-sm text-xs px-3 py-1 rounded-full shadow-sm flex items-center gap-1.5",
+                    canSwitchPrev ? "bg-brand/8 text-brand border border-brand/20" : "bg-muted/80 text-muted-foreground"
+                  )}>
                     {canSwitchPrev && <ArrowUp className="h-3 w-3" />}
                     {topHint}
                   </div>
@@ -394,7 +396,10 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
               {/* 底部提示 */}
               {bottomHint && (
                 <div className="flex items-center justify-center py-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
-                   <div className="bg-muted/80 backdrop-blur-sm text-muted-foreground text-xs px-3 py-1 rounded-full shadow-sm flex items-center gap-1.5">
+                   <div className={cn(
+                     "backdrop-blur-sm text-xs px-3 py-1 rounded-full shadow-sm flex items-center gap-1.5",
+                     canSwitchNext ? "bg-brand/8 text-brand border border-brand/20" : "bg-muted/80 text-muted-foreground"
+                   )}>
                     {canSwitchNext && (bottomHint.includes("新建") ? <Plus className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
                     {bottomHint}
                   </div>
@@ -420,38 +425,15 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
           {/* 浮动话题切换器 - 固定在消息区域右侧（仅消息模式显示） */}
           {currentSession && displayMode === 'paged' && !fileExplorerOpen && (
             <div className={cn(
-              "absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2 z-20 transition-all duration-300 group/indicator",
-              "opacity-30 hover:opacity-100",
+              "absolute right-3 top-1/2 -translate-y-1/2 z-20 transition-all duration-300",
+              "opacity-50 hover:opacity-100",
             )}>
-              {/* 话题名称显示区域 - 仅hover时显示 */}
-              <div className="flex flex-col items-end gap-1 mr-1 opacity-0 group-hover/indicator:opacity-100 transition-opacity duration-200 pointer-events-none group-hover/indicator:pointer-events-auto">
-                {prevTopic && (
-                  <div 
-                    className="text-[10px] text-muted-foreground/70 cursor-pointer hover:text-primary transition-colors max-w-[120px] truncate text-right bg-background/60 backdrop-blur-sm rounded px-1.5 py-0.5"
-                    onClick={() => void navigateTopic('prev')}
-                  >
-                    ↑ {prevTopic.name || '未命名话题'}
-                  </div>
-                )}
-                <div className="text-xs font-medium text-primary max-w-[140px] truncate text-right bg-background/80 backdrop-blur-sm rounded px-2 py-0.5 shadow-sm border border-primary/20">
-                  {currentTopic?.name || '未命名话题'}
-                </div>
-                {nextTopic && (
-                  <div 
-                    className="text-[10px] text-muted-foreground/70 cursor-pointer hover:text-primary transition-colors max-w-[120px] truncate text-right bg-background/60 backdrop-blur-sm rounded px-1.5 py-0.5"
-                    onClick={() => void navigateTopic('next')}
-                  >
-                    ↓ {nextTopic.name || '未命名话题'}
-                  </div>
-                )}
-              </div>
-
-              <div className="bg-background/90 backdrop-blur-sm border border-border/50 rounded-full shadow-md p-1 flex flex-col gap-0.5 hover:shadow-lg transition-all duration-200">
+              <div className="backdrop-blur-md bg-background/80 border border-border/30 rounded-full shadow-md p-1 flex flex-col gap-0.5 hover:shadow-lg transition-all duration-200">
                 {isDesktop && (
                   <Button
                     size="icon"
                     variant="ghost"
-                    className="h-7 w-7 rounded-full hover:bg-muted"
+                    className="h-8 w-8 rounded-full hover:bg-muted"
                     onClick={() => setTopicSidebarCollapsed(!topicSidebarCollapsed)}
                     title={topicSidebarCollapsed ? "展开话题列表" : "折叠话题列表"}
                   >
@@ -461,7 +443,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-7 w-7 rounded-full hover:bg-muted"
+                  className="h-8 w-8 rounded-full hover:bg-muted"
                   disabled={!prevTopic}
                   onClick={() => void navigateTopic('prev')}
                   title="上一个话题（更早）"
@@ -471,7 +453,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-7 w-7 rounded-full hover:bg-muted"
+                  className="h-8 w-8 rounded-full hover:bg-muted"
                   disabled={!nextTopic}
                   onClick={() => void navigateTopic('next')}
                   title="下一个话题（更新）"
@@ -484,7 +466,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
 
         {/* 输入框 - 文件系统模式时隐藏 */}
         {!fileExplorerOpen && (
-        <div className="border-t px-4 py-3 space-y-3">
+        <div className="px-3 pb-3 pt-2 space-y-3">
           {currentSession?.type === 'ai' && pendingInterrupt && (
             <ToolApprovalCard
               actionRequests={pendingInterrupt.action_requests}
@@ -544,7 +526,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
         session={currentSession || undefined}
         onSubmit={handleUpdateSession}
       />
-    </Card>
+    </div>
   );
 }
 

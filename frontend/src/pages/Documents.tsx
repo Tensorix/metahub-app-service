@@ -341,7 +341,7 @@ export default function Documents() {
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           onClick={(e) => e.stopPropagation()}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-surface-hover"
                         >
                           <Settings className="w-4 h-4" />
                         </DropdownMenuTrigger>
@@ -426,7 +426,7 @@ export default function Documents() {
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             onClick={(e) => e.stopPropagation()}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-surface-hover"
                           >
                             <Settings className="w-4 h-4" />
                           </DropdownMenuTrigger>

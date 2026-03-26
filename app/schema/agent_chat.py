@@ -1,6 +1,6 @@
-"""
-Agent Chat schemas - Request and response models.
-"""
+"""Agent Chat schemas - Request and response models."""
+
+from __future__ import annotations
 
 from typing import Optional, Literal
 from uuid import UUID
@@ -33,12 +33,40 @@ class ChatResponse(BaseModel):
     session_id: UUID = Field(..., description="Session ID")
     topic_id: UUID = Field(..., description="Topic ID")
     message_id: UUID = Field(..., description="AI message ID")
+    metrics: Optional["ChatPerformanceMetrics"] = Field(
+        None,
+        description="Chat performance metrics",
+    )
+
+
+class ChatPerformanceMetrics(BaseModel):
+    """Chat performance metrics payload."""
+
+    first_token_latency_ms: Optional[int] = Field(None, description="First token latency in ms")
+    completion_duration_ms: Optional[int] = Field(None, description="Duration from first token to completion in ms")
+    total_duration_ms: int = Field(..., description="Total request duration in ms")
+    input_tokens: Optional[int] = Field(None, description="Input tokens")
+    output_tokens: Optional[int] = Field(None, description="Output tokens")
+    total_tokens: Optional[int] = Field(None, description="Total tokens")
+    output_tokens_per_second: Optional[float] = Field(None, description="Output token throughput")
+    input_token_source: Literal["reported", "estimated", "unavailable"] = Field(
+        ...,
+        description="Source for input token count",
+    )
+    output_token_source: Literal["reported", "estimated", "unavailable"] = Field(
+        ...,
+        description="Source for output token count",
+    )
+    total_token_source: Literal["reported", "estimated", "unavailable"] = Field(
+        ...,
+        description="Source for total token count",
+    )
 
 
 class StreamEvent(BaseModel):
     """SSE event model."""
 
-    event: Literal["message", "thinking", "operation_start", "operation_end", "done", "error", "interrupt"]
+    event: Literal["message", "thinking", "operation_start", "operation_end", "metrics", "done", "error", "interrupt"]
     data: dict
 
 
@@ -77,7 +105,7 @@ class WSIncomingMessage(BaseModel):
 class WSOutgoingMessage(BaseModel):
     """WebSocket outgoing message."""
 
-    type: Literal["chunk", "thinking", "operation_start", "operation_end", "done", "error", "stopped"]
+    type: Literal["chunk", "thinking", "operation_start", "operation_end", "metrics", "done", "error", "stopped"]
     content: Optional[str] = None
     op_id: Optional[str] = None
     op_type: Optional[Literal["tool", "subagent"]] = None
@@ -89,3 +117,4 @@ class WSOutgoingMessage(BaseModel):
     duration_ms: Optional[int] = None
     status: Optional[Literal["success", "error", "cancelled"]] = None
     message: Optional[str] = None
+    metrics: Optional[ChatPerformanceMetrics] = None

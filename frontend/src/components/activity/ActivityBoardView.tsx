@@ -93,7 +93,7 @@ function BoardColumn({ column, activities, onOpen, onDelete, onStatusChange, onC
         ref={setNodeRef}
         className={`
           flex-1 min-h-0 border border-t-0 rounded-b-xl transition-colors
-          ${isOver ? 'bg-primary/5 border-primary/30' : 'bg-muted/30'}
+          ${isOver ? 'bg-brand/5 border-brand/30' : 'bg-muted/30'}
         `}
       >
         <ScrollArea className="h-full">

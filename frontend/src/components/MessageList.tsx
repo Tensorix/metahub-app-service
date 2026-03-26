@@ -57,8 +57,8 @@ function MessageItem({ message, onDelete }: { message: Message; onDelete: (id: s
   return (
     <div className={cn("flex w-full gap-3", isUserSide ? "flex-row-reverse" : "flex-row")}>
       <div className={cn(
-        "flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full border",
-        isUserSide ? "bg-muted" : "bg-primary/10"
+        "flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg border",
+        isUserSide ? "bg-muted" : "bg-brand/8 text-brand"
       )}>
         {isUserSide ? (
           <User className="h-4 w-4" />

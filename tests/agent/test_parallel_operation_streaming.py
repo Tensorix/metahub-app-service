@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from app.router.v1.agent_chat import StreamingCollector
 from app.agent.deep_agent_service import DeepAgentService
@@ -58,6 +59,29 @@ def test_streaming_collector_handles_parallel_tools_out_of_order():
     assert set(tool_result_ops) == {"tool_a", "tool_b"}
 
 
+def test_streaming_collector_appends_metrics_part_last():
+    collector = StreamingCollector()
+    collector.add_text("hello")
+    collector.set_metrics(
+        {
+            "first_token_latency_ms": 100,
+            "completion_duration_ms": 200,
+            "total_duration_ms": 300,
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "total_tokens": 15,
+            "output_tokens_per_second": 25.0,
+            "input_token_source": "estimated",
+            "output_token_source": "estimated",
+            "total_token_source": "estimated",
+        }
+    )
+
+    parts = collector.to_parts_data()
+
+    assert parts[-1]["type"] == "metrics"
+
+
 @pytest.mark.asyncio
 async def test_deep_agent_service_emits_operation_events_with_op_id():
     class FakeChunk:
@@ -95,6 +119,20 @@ async def test_deep_agent_service_emits_operation_events_with_op_id():
                     "run_id": "msg_1",
                     "data": {"chunk": FakeChunk()},
                 },
+                {
+                    "event": "on_chat_model_end",
+                    "run_id": "msg_1",
+                    "data": {
+                        "output": AIMessage(
+                            content="hello",
+                            usage_metadata={
+                                "input_tokens": 20,
+                                "output_tokens": 10,
+                                "total_tokens": 30,
+                            },
+                        )
+                    },
+                },
             ]
             for event in events:
                 yield event
@@ -112,9 +150,15 @@ async def test_deep_agent_service_emits_operation_events_with_op_id():
     assert "operation_start" in names
     assert "operation_end" in names
     assert "message" in names
+    assert "metrics" in names
     assert "done" in names
 
     op_events = [e for e in output_events if e["event"] in {"operation_start", "operation_end"}]
     for event in op_events:
         assert event["data"].get("op_id")
         assert event["data"].get("op_type") in {"tool", "subagent"}
+
+    metrics_event = next(e for e in output_events if e["event"] == "metrics")
+    assert metrics_event["data"]["input_tokens"] == 20
+    assert metrics_event["data"]["output_tokens"] == 10
+    assert metrics_event["data"]["total_token_source"] == "reported"

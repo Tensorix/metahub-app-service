@@ -96,8 +96,8 @@ export function MessageInput({
       {/* Main input container */}
       <div
         className={cn(
-          'flex items-end gap-2 p-3 rounded-xl border bg-background transition-all duration-200',
-          isFocused && 'ring-2 ring-ring ring-offset-2 ring-offset-background border-transparent',
+          'flex items-end gap-2 p-3 rounded-xl border shadow-sm bg-background/80 backdrop-blur-sm transition-all duration-200',
+          isFocused && 'ring-1 ring-brand/30 border-brand/20 shadow-md',
           isDisabled && 'opacity-60'
         )}
       >
@@ -128,7 +128,7 @@ export function MessageInput({
               variant="destructive"
               size="sm"
               onClick={handleStop}
-              className="h-9 w-9 rounded-lg transition-all duration-200 hover:scale-105"
+              className="h-9 w-9 rounded-lg transition-all duration-200 hover:scale-105 ring-1 ring-red-500/30"
               aria-label="停止生成"
             >
               <Square className="h-4 w-4" />
@@ -141,7 +141,7 @@ export function MessageInput({
               disabled={!content.trim() || disabled || sending}
               className={cn(
                 'h-9 w-9 rounded-lg transition-all duration-200',
-                content.trim() && !disabled && !sending && 'hover:scale-105 shadow-sm'
+                content.trim() && !disabled && !sending && 'hover:scale-105 hover:bg-brand hover:text-brand-foreground shadow-sm'
               )}
               aria-label="发送消息"
             >

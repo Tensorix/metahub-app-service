@@ -8,15 +8,7 @@ import { Label } from '../components/ui/label';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { useAuthStore } from '../store/auth';
 import { ThemeToggle } from '../components/ThemeToggle';
-
-const fadeUp = {
-  hidden: { opacity: 0, y: 12 },
-  visible: (i: number) => ({
-    opacity: 1,
-    y: 0,
-    transition: { delay: i * 0.08, duration: 0.4, ease: [0.25, 0.4, 0.25, 1] as const },
-  }),
-};
+import { fadeUpIndexed as fadeUp } from '@/lib/motion';
 
 export function Login() {
   const navigate = useNavigate();

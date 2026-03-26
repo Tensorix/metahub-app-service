@@ -70,6 +70,9 @@ def parts_to_message_str(
         elif part_type == "json":
             segments.append("[JSON数据]")
 
+        elif part_type == "metrics":
+            continue
+
     return separator.join(segments)
 
 

@@ -14,25 +14,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { useAuthStore } from '../store/auth';
-
-/* ─── Stagger animation variants ─── */
-
-const container = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.06, delayChildren: 0.1 },
-  },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 8 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.35, ease: [0.25, 0.4, 0.25, 1] as const },
-  },
-};
+import { staggerContainer, fadeUp } from '@/lib/motion';
 
 /* ─── Quick-action definitions ─── */
 
@@ -76,13 +58,13 @@ export function Home() {
 
   return (
     <motion.div
-      variants={container}
+      variants={staggerContainer}
       initial="hidden"
       animate="visible"
       className="space-y-8 max-w-4xl"
     >
       {/* Greeting */}
-      <motion.div variants={item}>
+      <motion.div variants={fadeUp}>
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
           Hi, {user?.username}
         </h1>
@@ -92,7 +74,7 @@ export function Home() {
       </motion.div>
 
       {/* Quick actions */}
-      <motion.section variants={item} className="space-y-3">
+      <motion.section variants={fadeUp} className="space-y-3">
         <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
           快速开始
         </h2>
@@ -124,7 +106,7 @@ export function Home() {
       </motion.section>
 
       {/* Account info */}
-      <motion.section variants={item} className="space-y-3">
+      <motion.section variants={fadeUp} className="space-y-3">
         <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
           账户信息
         </h2>

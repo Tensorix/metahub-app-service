@@ -6,6 +6,7 @@ import type { MessagePart } from '@/lib/api';
 import { parseToolCallContent, parseToolResultContent } from '@/lib/api';
 import { TodoInlineHint, parseTodoArgs } from './TodoVisualization';
 import { CodeBlock } from './CodeBlock';
+import { collapseVariants } from '@/lib/motion';
 
 interface ToolCallPartProps {
   callPart: MessagePart;
@@ -38,10 +39,10 @@ export function ToolCallPart({ callPart, resultPart }: ToolCallPartProps) {
 
   return (
     <div className={cn(
-      "my-1.5 rounded-lg border overflow-hidden transition-colors",
-      isRunning && "border-blue-500/30 bg-blue-500/5",
-      !isRunning && isSuccess && "border-border bg-muted/30",
-      !isRunning && !isSuccess && "border-red-500/30 bg-red-500/5",
+      "my-1.5 rounded-lg overflow-hidden transition-colors",
+      isRunning && "border-l-2 border-l-brand border border-border/30 bg-brand/5 shadow-sm shadow-brand/5",
+      !isRunning && isSuccess && "border border-border/30 bg-muted/20",
+      !isRunning && !isSuccess && "border-l-2 border-l-red-500 border border-red-500/20 bg-red-500/5",
     )}>
       {/* Header */}
       <button
@@ -49,14 +50,16 @@ export function ToolCallPart({ callPart, resultPart }: ToolCallPartProps) {
         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/50 transition-colors"
       >
         <ChevronRight className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", expanded && "rotate-90")} />
-        <Wrench className="h-3.5 w-3.5 text-blue-500" />
+        <Wrench className="h-3.5 w-3.5 text-brand" />
         <span className="text-sm font-medium truncate">{callContent.name}</span>
         <span className="ml-auto flex items-center gap-1.5">
           {isRunning ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-brand" />
           ) : isSuccess ? (
             <>
-              <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
+              <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 400, damping: 15 }}>
+                <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
+              </motion.div>
               {resultContent.duration_ms != null && resultContent.duration_ms > 0 && (
                 <span className="text-[10px] tabular-nums text-muted-foreground">
                   {formatDuration(resultContent.duration_ms)}
@@ -73,10 +76,10 @@ export function ToolCallPart({ callPart, resultPart }: ToolCallPartProps) {
       <AnimatePresence>
         {expanded && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            variants={collapseVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
           >
             <div className="px-3 pb-3 border-t space-y-2">
               <div className="pt-2">

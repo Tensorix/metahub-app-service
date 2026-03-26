@@ -192,7 +192,7 @@ export function SubAgentSection({
           {mountedSubagents.map((sa) => (
             <div
               key={sa.agent_id}
-              className="border rounded-lg p-4 space-y-2 hover:border-primary/50 transition-colors"
+              className="border rounded-xl p-4 space-y-2 hover:border-brand/50 transition-colors duration-150"
             >
               {/* 头部：名称 + 操作按钮 */}
               <div className="flex items-start justify-between">

@@ -79,8 +79,8 @@ export function RelationLink({
 
   const baseClass = cn(
     'flex items-center gap-1.5 transition-colors',
-    variant === 'card' && 'px-2 py-1 rounded-md border bg-background hover:bg-accent/50 text-xs',
-    variant === 'compact' && 'px-1.5 py-0.5 rounded border bg-background hover:bg-accent/50 text-xs',
+    variant === 'card' && 'px-2 py-1 rounded-md border bg-background hover:bg-surface-hover text-xs',
+    variant === 'compact' && 'px-1.5 py-0.5 rounded border bg-background hover:bg-surface-hover text-xs',
     deleted && 'text-muted-foreground cursor-default',
     !deleted && 'cursor-pointer',
     className

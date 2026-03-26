@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { ShieldCheck, Check, X, Wrench } from 'lucide-react';
 import { motion } from 'motion/react';
 import { CodeBlock } from './CodeBlock';
+import { staggerContainer, listItem } from '@/lib/motion';
 
 interface ToolApprovalCardProps {
   actionRequests: Array<{ name: string; args: Record<string, unknown>; id?: string }>;
@@ -30,24 +31,28 @@ export function ToolApprovalCard({
           <p className="text-xs text-muted-foreground">{actionRequests.length} 个操作待确认</p>
         </div>
       </div>
-      <div className="space-y-2">
+      <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="space-y-2">
         {actionRequests.map((ar, idx) => (
-          <div key={ar.id ?? idx} className="rounded-lg border bg-background/80 p-3">
+          <motion.div key={ar.id ?? idx} variants={listItem} className="rounded-lg border bg-background/80 p-3">
             <div className="flex items-center gap-2">
-              <Wrench className="h-3.5 w-3.5 text-blue-500" />
+              <Wrench className="h-3.5 w-3.5 text-brand" />
               <span className="font-mono text-sm font-medium">{ar.name}</span>
             </div>
             <CodeBlock className="mt-2" content={JSON.stringify(ar.args, null, 2)} />
-          </div>
+          </motion.div>
         ))}
-      </div>
+      </motion.div>
       <div className="flex gap-2">
-        <Button size="sm" onClick={onApprove} className="gap-1.5">
-          <Check className="h-3.5 w-3.5" /> 全部批准
-        </Button>
-        <Button size="sm" variant="outline" onClick={onReject} className="gap-1.5">
-          <X className="h-3.5 w-3.5" /> 全部拒绝
-        </Button>
+        <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+          <Button size="sm" onClick={onApprove} className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white">
+            <Check className="h-3.5 w-3.5" /> 全部批准
+          </Button>
+        </motion.div>
+        <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+          <Button size="sm" variant="outline" onClick={onReject} className="gap-1.5 hover:bg-red-50 dark:hover:bg-red-950/20 hover:border-red-300">
+            <X className="h-3.5 w-3.5" /> 全部拒绝
+          </Button>
+        </motion.div>
       </div>
     </motion.div>
   );

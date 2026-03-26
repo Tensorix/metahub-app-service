@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -11,6 +12,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   Select,
   SelectContent,
@@ -33,6 +36,7 @@ import {
   fetchUpstreamModels,
   type ProvidersMap,
 } from '@/lib/systemConfigApi';
+import { collapseVariants } from '@/lib/motion';
 
 interface AgentDialogProps {
   open: boolean;
@@ -297,7 +301,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{agent ? '编辑 Agent' : '创建 Agent'}</DialogTitle>
           <DialogDescription>
@@ -305,50 +309,31 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
           </DialogDescription>
         </DialogHeader>
 
-        {/* Tabs */}
-        <div className="flex gap-2 border-b">
-          <button
-            type="button"
-            className={`px-4 py-2 ${activeTab === 'basic' ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground'}`}
-            onClick={() => setActiveTab('basic')}
-          >
-            基础配置
-          </button>
-          <button
-            type="button"
-            className={`px-4 py-2 ${activeTab === 'advanced' ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground'}`}
-            onClick={() => setActiveTab('advanced')}
-          >
-            高级功能
-          </button>
-          <button
-            type="button"
-            className={`px-4 py-2 ${activeTab === 'subagents' ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground'}`}
-            onClick={() => setActiveTab('subagents')}
-          >
-            子代理 ({mountedSubagents.length})
-          </button>
-          <button
-            type="button"
-            className={`px-4 py-2 ${activeTab === 'mcp' ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground'}`}
-            onClick={() => setActiveTab('mcp')}
-          >
-            MCP Servers ({mcpServers.length})
-          </button>
-          <button
-            type="button"
-            className={`px-4 py-2 ${activeTab === 'summarization' ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground'}`}
-            onClick={() => setActiveTab('summarization')}
-          >
-            对话摘要
-          </button>
-        </div>
-
         <form onSubmit={handleSubmit}>
-          <div className="grid gap-4 py-4">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+            <TabsList className="w-full rounded-none border-b bg-transparent p-0 h-auto">
+              <TabsTrigger value="basic" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent">
+                基础配置
+              </TabsTrigger>
+              <TabsTrigger value="advanced" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent">
+                高级功能
+              </TabsTrigger>
+              <TabsTrigger value="subagents" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent">
+                子代理 ({mountedSubagents.length})
+              </TabsTrigger>
+              <TabsTrigger value="mcp" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent">
+                MCP ({mcpServers.length})
+              </TabsTrigger>
+              <TabsTrigger value="summarization" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent">
+                对话摘要
+              </TabsTrigger>
+            </TabsList>
+
             {/* Basic Tab */}
-            {activeTab === 'basic' && (
-              <>
+            <TabsContent value="basic" className="space-y-4 py-4">
+              {/* Identity section */}
+              <div className="rounded-xl border bg-surface/50 p-4 space-y-4">
+                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">身份</h4>
                 <div className="grid gap-2">
                   <Label htmlFor="name">名称 *</Label>
                   <Input
@@ -372,18 +357,23 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                     当此 Agent 被其他 Agent 挂载为子代理时，父 Agent 根据此描述决定是否委派任务
                   </p>
                 </div>
+              </div>
 
-                <div className="grid gap-2">
-                  <Label htmlFor="system_prompt">系统提示词</Label>
-                  <textarea
-                    id="system_prompt"
-                    className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    value={formData.system_prompt}
-                    onChange={(e) => setFormData({ ...formData, system_prompt: e.target.value })}
-                    placeholder="输入系统提示词，定义 Agent 的行为和角色"
-                  />
-                </div>
+              {/* System Prompt section */}
+              <div className="rounded-xl border bg-surface/50 p-4 space-y-4">
+                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">系统提示词</h4>
+                <Textarea
+                  id="system_prompt"
+                  className="min-h-[120px]"
+                  value={formData.system_prompt}
+                  onChange={(e) => setFormData({ ...formData, system_prompt: e.target.value })}
+                  placeholder="输入系统提示词，定义 Agent 的行为和角色"
+                />
+              </div>
 
+              {/* Model Config section */}
+              <div className="rounded-xl border bg-surface/50 p-4 space-y-4">
+                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">模型配置</h4>
                 <div className="grid gap-2">
                   <Label>模型提供商</Label>
                   <Select
@@ -459,247 +449,251 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                     />
                   </div>
                 </div>
+              </div>
 
-                <div className="grid gap-2">
-                  <Label>工具</Label>
-                  <p className="text-xs text-muted-foreground">
-                    按组启用/禁用工具；组内可细粒度配置权限及是否需人工批准执行。
-                  </p>
-                  {toolsLoading ? (
-                    <div className="text-sm text-muted-foreground">加载工具列表...</div>
-                  ) : toolsError ? (
-                    <div className="text-sm text-destructive">
-                      加载工具失败: {toolsError}
-                    </div>
-                  ) : (
-                    <>
-                      {/* 失效工具提示 */}
-                      {getInvalidTools(formData.tools || []).length > 0 && (
-                        <div className="border border-destructive/50 rounded-lg p-3 space-y-2 bg-destructive/5">
-                          <span className="text-sm font-medium text-destructive">⚠️ 失效的工具</span>
-                          <div className="flex flex-wrap gap-2">
-                            {getInvalidTools(formData.tools || []).map((tool) => (
-                              <Badge key={tool} variant="destructive" className="cursor-pointer" onClick={() => toggleTool(tool)}>
-                                {tool} <X className="ml-1 h-3 w-3 inline" />
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {/* 按组显示：组级开关 + 组内工具权限 */}
-                      {categories.length > 0 ? (
-                        <div className="space-y-2 border rounded-lg divide-y">
-                          {categories.map((category) => {
-                            const checkedState = getCategoryCheckedState(category.category);
-                            const expanded = expandedCategories.has(category.category);
-                            const fullyEnabled = checkedState === true;
-                            return (
-                              <div key={category.category}>
-                                <div className="flex items-center gap-2 px-3 py-2 hover:bg-muted/50">
-                                  <button
-                                    type="button"
-                                    className="p-0.5 rounded hover:bg-muted"
-                                    onClick={() => toggleCategoryExpanded(category.category)}
-                                    aria-label={expanded ? '收起' : '展开'}
-                                  >
-                                    {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                                  </button>
-                                  <label className="flex items-center gap-2 flex-1 cursor-pointer">
-                                    <Checkbox
-                                      checked={checkedState}
-                                      onCheckedChange={() => toggleCategory(category.category)}
-                                    />
-                                    <span className="text-sm font-medium">{category.category}</span>
-                                    <span className="text-xs text-muted-foreground">({category.tools.length} 个工具)</span>
-                                  </label>
-                                </div>
-                                {expanded && (
-                                  <div className="px-6 py-2 space-y-2 bg-muted/20">
-                                    {category.tools.map((tool) => (
-                                      <div key={tool.name} className="flex items-center gap-3 py-1.5">
-                                        <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
-                                          <input
-                                            type="checkbox"
-                                            checked={isToolEnabled(tool.name)}
-                                            onChange={() => toggleTool(tool.name)}
-                                            className="rounded border-input shrink-0"
-                                          />
-                                          <span className="text-sm truncate" title={tool.description}>{tool.name}</span>
-                                        </label>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                          <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-                                          <span className="text-xs text-muted-foreground whitespace-nowrap">需人工批准</span>
-                                          <Switch
-                                            checked={isInterruptOn(tool.name)}
-                                            onCheckedChange={() => toggleInterruptOn(tool.name)}
-                                            disabled={!isToolEnabled(tool.name)}
-                                          />
-                                        </div>
-                                      </div>
-                                    ))}
-                                    {!fullyEnabled && (
-                                      <p className="text-xs text-muted-foreground py-2">可勾选上方工具以部分启用该组；或启用组以一键启用全部</p>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
+              {/* Tools section */}
+              <div className="rounded-xl border bg-surface/50 p-4 space-y-4">
+                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">工具</h4>
+                <p className="text-xs text-muted-foreground">
+                  按组启用/禁用工具；组内可细粒度配置权限及是否需人工批准执行。
+                </p>
+                {toolsLoading ? (
+                  <div className="text-sm text-muted-foreground">加载工具列表...</div>
+                ) : toolsError ? (
+                  <div className="text-sm text-destructive">
+                    加载工具失败: {toolsError}
+                  </div>
+                ) : (
+                  <>
+                    {/* 失效工具提示 */}
+                    {getInvalidTools(formData.tools || []).length > 0 && (
+                      <div className="border border-destructive/50 rounded-lg p-3 space-y-2 bg-destructive/5">
+                        <span className="text-sm font-medium text-destructive">失效的工具</span>
                         <div className="flex flex-wrap gap-2">
-                          {tools.map((tool) => (
-                            <Badge
-                              key={tool.name}
-                              variant={(formData.tools || []).includes(tool.name) ? 'default' : 'outline'}
-                              className="cursor-pointer hover:bg-primary/90"
-                              onClick={() => toggleTool(tool.name)}
-                              title={tool.description}
-                            >
-                              {tool.name}
-                              {(formData.tools || []).includes(tool.name) && <X className="ml-1 h-3 w-3" />}
+                          {getInvalidTools(formData.tools || []).map((tool) => (
+                            <Badge key={tool} variant="destructive" className="cursor-pointer" onClick={() => toggleTool(tool)}>
+                              {tool} <X className="ml-1 h-3 w-3 inline" />
                             </Badge>
                           ))}
                         </div>
-                      )}
-                    </>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    内置工具（文件系统、计划）会自动启用。
-                  </p>
-                </div>
-              </>
-            )}
-
-            {/* Advanced Tab */}
-            {activeTab === 'advanced' && (
-              <>
-                {/* Skills Section */}
-                <div className="grid gap-2">
-                  <Label>Skills（技能）</Label>
-                  
-                  {editingSkill ? (
-                    <div className="border rounded-lg p-4 space-y-3">
-                      <Input
-                        placeholder="文件名（如：research）"
-                        value={editingSkill.name}
-                        onChange={(e) => setEditingSkill({ ...editingSkill, name: e.target.value })}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        路径：{editingSkill.name ? `/skills/${editingSkill.name}/SKILL.md` : '/skills/<name>/SKILL.md'}
-                      </p>
-                      <textarea
-                        className="flex min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                        placeholder="# Skill Content&#10;&#10;描述这个技能的工作流程..."
-                        value={editingSkill.content}
-                        onChange={(e) => setEditingSkill({ ...editingSkill, content: e.target.value })}
-                      />
-                      <div className="flex gap-2">
-                        <Button type="button" size="sm" onClick={addSkill}>
-                          保存
-                        </Button>
-                        <Button type="button" size="sm" variant="outline" onClick={() => setEditingSkill(null)}>
-                          取消
-                        </Button>
                       </div>
-                    </div>
-                  ) : (
-                    <>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setEditingSkill({ name: '', content: '' })}
-                      >
-                        <Plus className="h-4 w-4 mr-2" />
-                        新建 Skill 文件
-                      </Button>
-                      <div className="space-y-2">
-                        {(formData.skills || []).map((skill, index) => (
-                          <div key={index} className="border rounded-lg p-3 flex justify-between items-start">
-                            <div className="flex-1">
-                              <p className="font-medium font-mono text-sm">/skills/{skill.name}/SKILL.md</p>
-                              <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{skill.content}</p>
+                    )}
+                    {/* 按组显示：组级开关 + 组内工具权限 */}
+                    {categories.length > 0 ? (
+                      <div className="space-y-2 border rounded-lg divide-y">
+                        {categories.map((category) => {
+                          const checkedState = getCategoryCheckedState(category.category);
+                          const expanded = expandedCategories.has(category.category);
+                          const fullyEnabled = checkedState === true;
+                          return (
+                            <div key={category.category}>
+                              <div className="flex items-center gap-2 px-3 py-2 hover:bg-muted/50">
+                                <button
+                                  type="button"
+                                  className="p-0.5 rounded hover:bg-muted"
+                                  onClick={() => toggleCategoryExpanded(category.category)}
+                                  aria-label={expanded ? '收起' : '展开'}
+                                >
+                                  {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                </button>
+                                <label className="flex items-center gap-2 flex-1 cursor-pointer">
+                                  <Checkbox
+                                    checked={checkedState}
+                                    onCheckedChange={() => toggleCategory(category.category)}
+                                  />
+                                  <span className="text-sm font-medium">{category.category}</span>
+                                  <span className="text-xs text-muted-foreground">({category.tools.length} 个工具)</span>
+                                </label>
+                              </div>
+                              <AnimatePresence>
+                                {expanded && (
+                                  <motion.div
+                                    variants={collapseVariants}
+                                    initial="hidden"
+                                    animate="visible"
+                                    exit="exit"
+                                  >
+                                    <div className="px-6 py-2 space-y-2 bg-muted/20">
+                                      {category.tools.map((tool) => (
+                                        <div key={tool.name} className="flex items-center gap-3 py-1.5">
+                                          <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
+                                            <Checkbox
+                                              checked={isToolEnabled(tool.name)}
+                                              onCheckedChange={() => toggleTool(tool.name)}
+                                            />
+                                            <span className="text-sm truncate" title={tool.description}>{tool.name}</span>
+                                          </label>
+                                          <div className="flex items-center gap-2 shrink-0">
+                                            <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                                            <span className="text-xs text-muted-foreground whitespace-nowrap">需人工批准</span>
+                                            <Switch
+                                              checked={isInterruptOn(tool.name)}
+                                              onCheckedChange={() => toggleInterruptOn(tool.name)}
+                                              disabled={!isToolEnabled(tool.name)}
+                                            />
+                                          </div>
+                                        </div>
+                                      ))}
+                                      {!fullyEnabled && (
+                                        <p className="text-xs text-muted-foreground py-2">可勾选上方工具以部分启用该组；或启用组以一键启用全部</p>
+                                      )}
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
                             </div>
-                            <div className="flex gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => setEditingSkill(skill)}
-                              >
-                                编辑
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => removeSkill(skill.name)}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {tools.map((tool) => (
+                          <Badge
+                            key={tool.name}
+                            variant={(formData.tools || []).includes(tool.name) ? 'default' : 'outline'}
+                            className="cursor-pointer hover:bg-brand/90"
+                            onClick={() => toggleTool(tool.name)}
+                            title={tool.description}
+                          >
+                            {tool.name}
+                            {(formData.tools || []).includes(tool.name) && <X className="ml-1 h-3 w-3" />}
+                          </Badge>
                         ))}
                       </div>
-                    </>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    使用文件系统风格编辑 skills，运行时会挂载到 /skills/*。
-                  </p>
-                </div>
+                    )}
+                  </>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  内置工具（文件系统、计划）会自动启用。
+                </p>
+              </div>
+            </TabsContent>
 
-                {/* AGENTS Memory Section */}
-                <div className="grid gap-2">
-                  <Label>记忆（AGENTS.md）</Label>
-                  <p className="text-xs text-muted-foreground font-mono">/AGENTS.md</p>
-                  <textarea
-                    className="flex min-h-[220px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                    placeholder="# AGENTS&#10;&#10;记录长期记忆、项目约束、偏好和规范..."
-                    value={getAgentsMemoryContent()}
-                    onChange={(e) => setAgentsMemoryContent(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    统一使用单文件 AGENTS.md 作为持久记忆。
-                  </p>
-                </div>
-              </>
-            )}
+            {/* Advanced Tab */}
+            <TabsContent value="advanced" className="space-y-4 py-4">
+              {/* Skills Section */}
+              <div className="rounded-xl border bg-surface/50 p-4 space-y-4">
+                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Skills（技能）</h4>
+
+                {editingSkill ? (
+                  <div className="border rounded-lg p-4 space-y-3">
+                    <Input
+                      placeholder="文件名（如：research）"
+                      value={editingSkill.name}
+                      onChange={(e) => setEditingSkill({ ...editingSkill, name: e.target.value })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      路径：{editingSkill.name ? `/skills/${editingSkill.name}/SKILL.md` : '/skills/<name>/SKILL.md'}
+                    </p>
+                    <Textarea
+                      className="min-h-[200px] font-mono"
+                      placeholder="# Skill Content&#10;&#10;描述这个技能的工作流程..."
+                      value={editingSkill.content}
+                      onChange={(e) => setEditingSkill({ ...editingSkill, content: e.target.value })}
+                    />
+                    <div className="flex gap-2">
+                      <Button type="button" size="sm" onClick={addSkill}>
+                        保存
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => setEditingSkill(null)}>
+                        取消
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditingSkill({ name: '', content: '' })}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      新建 Skill 文件
+                    </Button>
+                    <div className="space-y-2">
+                      {(formData.skills || []).map((skill, index) => (
+                        <div key={index} className="border rounded-lg p-3 flex justify-between items-start">
+                          <div className="flex-1">
+                            <p className="font-medium font-mono text-sm">/skills/{skill.name}/SKILL.md</p>
+                            <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{skill.content}</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setEditingSkill(skill)}
+                            >
+                              编辑
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => removeSkill(skill.name)}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  使用文件系统风格编辑 skills，运行时会挂载到 /skills/*。
+                </p>
+              </div>
+
+              {/* AGENTS Memory Section */}
+              <div className="rounded-xl border bg-surface/50 p-4 space-y-4">
+                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">记忆（AGENTS.md）</h4>
+                <p className="text-xs text-muted-foreground font-mono">/AGENTS.md</p>
+                <Textarea
+                  className="min-h-[220px] font-mono"
+                  placeholder="# AGENTS&#10;&#10;记录长期记忆、项目约束、偏好和规范..."
+                  value={getAgentsMemoryContent()}
+                  onChange={(e) => setAgentsMemoryContent(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  统一使用单文件 AGENTS.md 作为持久记忆。
+                </p>
+              </div>
+            </TabsContent>
 
             {/* SubAgents Tab */}
-            {activeTab === 'subagents' && (
+            <TabsContent value="subagents" className="py-4">
               <SubAgentSection
                 agentId={agent?.id}
                 mountedSubagents={mountedSubagents}
                 onMountedChange={setMountedSubagents}
               />
-            )}
+            </TabsContent>
 
             {/* MCP Servers Tab */}
-            {activeTab === 'mcp' && (
+            <TabsContent value="mcp" className="py-4">
               <MCPServerConfig
                 agentId={agent?.id}
                 servers={mcpServers}
                 onChange={setMcpServers}
               />
-            )}
+            </TabsContent>
 
             {/* Summarization Tab */}
-            {activeTab === 'summarization' && (
-              <>
+            <TabsContent value="summarization" className="space-y-4 py-4">
+              <div className="rounded-xl border bg-surface/50 p-4 space-y-4">
                 <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     id="summarization_enabled"
                     checked={formData.summarization?.enabled || false}
-                    onChange={(e) => setFormData({
+                    onCheckedChange={(checked) => setFormData({
                       ...formData,
                       summarization: {
                         ...formData.summarization,
-                        enabled: e.target.checked,
+                        enabled: !!checked,
                       },
                     })}
-                    className="h-4 w-4"
                   />
                   <Label htmlFor="summarization_enabled">启用对话摘要</Label>
                 </div>
@@ -707,90 +701,98 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                   当对话消息数超过阈值时，自动生成摘要并压缩历史，降低 token 成本
                 </p>
 
-                {formData.summarization?.enabled && (
-                  <>
-                    <div className="grid grid-cols-2 gap-4">
+                <AnimatePresence>
+                  {formData.summarization?.enabled && (
+                    <motion.div
+                      variants={collapseVariants}
+                      initial="hidden"
+                      animate="visible"
+                      exit="exit"
+                      className="space-y-4"
+                    >
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="grid gap-2">
+                          <Label htmlFor="max_messages">触发摘要的消息数</Label>
+                          <Input
+                            id="max_messages"
+                            type="number"
+                            min="10"
+                            value={formData.summarization?.max_messages || 50}
+                            onChange={(e) => setFormData({
+                              ...formData,
+                              summarization: {
+                                ...formData.summarization,
+                                enabled: true,
+                                max_messages: parseInt(e.target.value),
+                              },
+                            })}
+                          />
+                        </div>
+
+                        <div className="grid gap-2">
+                          <Label htmlFor="keep_last_n">保留最近消息数</Label>
+                          <Input
+                            id="keep_last_n"
+                            type="number"
+                            min="5"
+                            value={formData.summarization?.keep_last_n || 20}
+                            onChange={(e) => setFormData({
+                              ...formData,
+                              summarization: {
+                                ...formData.summarization,
+                                enabled: true,
+                                keep_last_n: parseInt(e.target.value),
+                              },
+                            })}
+                          />
+                        </div>
+                      </div>
+
                       <div className="grid gap-2">
-                        <Label htmlFor="max_messages">触发摘要的消息数</Label>
-                        <Input
-                          id="max_messages"
-                          type="number"
-                          min="10"
-                          value={formData.summarization?.max_messages || 50}
+                        <Label htmlFor="summary_prompt">摘要提示词（可选）</Label>
+                        <Textarea
+                          id="summary_prompt"
+                          className="min-h-[80px]"
+                          value={formData.summarization?.summary_prompt || ''}
                           onChange={(e) => setFormData({
                             ...formData,
                             summarization: {
                               ...formData.summarization,
                               enabled: true,
-                              max_messages: parseInt(e.target.value),
+                              summary_prompt: e.target.value,
                             },
                           })}
+                          placeholder="简要总结对话要点，保留关键信息。"
                         />
                       </div>
 
                       <div className="grid gap-2">
-                        <Label htmlFor="keep_last_n">保留最近消息数</Label>
+                        <Label htmlFor="summary_model">摘要模型（可选）</Label>
                         <Input
-                          id="keep_last_n"
-                          type="number"
-                          min="5"
-                          value={formData.summarization?.keep_last_n || 20}
+                          id="summary_model"
+                          value={formData.summarization?.model || ''}
                           onChange={(e) => setFormData({
                             ...formData,
                             summarization: {
                               ...formData.summarization,
                               enabled: true,
-                              keep_last_n: parseInt(e.target.value),
+                              model: e.target.value,
                             },
                           })}
+                          placeholder="gpt-4o-mini（留空使用主模型）"
                         />
+                        <p className="text-xs text-muted-foreground">
+                          可以使用更便宜的模型生成摘要
+                        </p>
                       </div>
-                    </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </TabsContent>
+          </Tabs>
 
-                    <div className="grid gap-2">
-                      <Label htmlFor="summary_prompt">摘要提示词（可选）</Label>
-                      <textarea
-                        id="summary_prompt"
-                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        value={formData.summarization?.summary_prompt || ''}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          summarization: {
-                            ...formData.summarization,
-                            enabled: true,
-                            summary_prompt: e.target.value,
-                          },
-                        })}
-                        placeholder="简要总结对话要点，保留关键信息。"
-                      />
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label htmlFor="summary_model">摘要模型（可选）</Label>
-                      <Input
-                        id="summary_model"
-                        value={formData.summarization?.model || ''}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          summarization: {
-                            ...formData.summarization,
-                            enabled: true,
-                            model: e.target.value,
-                          },
-                        })}
-                        placeholder="gpt-4o-mini（留空使用主模型）"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        可以使用更便宜的模型生成摘要
-                      </p>
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </div>
-
-          <DialogFooter>
+          <DialogFooter className="mt-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               取消
             </Button>

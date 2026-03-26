@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any, AsyncGenerator, Optional
 from uuid import UUID
@@ -19,6 +20,7 @@ from app.agent.runtime import (
     StreamEventTranslator,
 )
 from app.agent.runtime.common import unwrap_exception
+from app.utils.chat_metrics import extract_usage_metadata
 
 from loguru import logger
 
@@ -155,6 +157,49 @@ class DeepAgentService:
                 return msg.content
         return ""
 
+    @staticmethod
+    def _serialize_input_for_metrics(input_data: dict[str, Any]) -> str:
+        messages = input_data.get("messages", [])
+        lines: list[str] = []
+        for message in messages:
+            role = message.get("role", "unknown")
+            content = message.get("content", "")
+            if isinstance(content, str):
+                lines.append(f"{role}: {content}")
+                continue
+            try:
+                serialized = json.dumps(content, ensure_ascii=False)
+            except (TypeError, ValueError):
+                serialized = str(content)
+            lines.append(f"{role}: {serialized}")
+        return "\n".join(lines)
+
+    async def prepare_metrics_context(
+        self,
+        message: str,
+        thread_id: str,
+        user_id: Optional[UUID] = None,
+        session_id: Optional[UUID] = None,
+    ) -> dict[str, str]:
+        context = InvocationContext(
+            thread_id=thread_id,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        input_data = await self._build_message_input(message, context)
+        system_prompt = self.config.get("system_prompt") or self._builder._build_default_system_prompt()
+        return {
+            "estimated_input_text": "\n\n".join(
+                filter(None, [system_prompt, self._serialize_input_for_metrics(input_data)])
+            ),
+            "model_name": str(self.config.get("model") or ""),
+            "provider": str(
+                self.config.get("_resolved_sdk")
+                or self.config.get("model_provider")
+                or ""
+            ),
+        }
+
     async def _stream_request(
         self,
         *,
@@ -200,6 +245,43 @@ class DeepAgentService:
             input_data = await self._build_message_input(message, context)
             response = await agent.ainvoke(input_data, config=cfg)
             return self._extract_last_ai_message(response)
+
+    async def chat_with_metrics(
+        self,
+        message: str,
+        thread_id: str,
+        user_id: Optional[UUID] = None,
+        session_id: Optional[UUID] = None,
+    ) -> dict[str, Any]:
+        context = InvocationContext(
+            thread_id=thread_id,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
+        with context.bind_tool_context():
+            agent, cfg = await self._prepare_invocation(context)
+            input_data = await self._build_message_input(message, context)
+            response = await agent.ainvoke(input_data, config=cfg)
+            return {
+                "message": self._extract_last_ai_message(response),
+                "usage_metadata": extract_usage_metadata(response),
+                "estimated_input_text": "\n\n".join(
+                    filter(
+                        None,
+                        [
+                            self.config.get("system_prompt") or self._builder._build_default_system_prompt(),
+                            self._serialize_input_for_metrics(input_data),
+                        ],
+                    )
+                ),
+                "model_name": str(self.config.get("model") or ""),
+                "provider": str(
+                    self.config.get("_resolved_sdk")
+                    or self.config.get("model_provider")
+                    or ""
+                ),
+            }
 
     async def chat_stream(
         self,

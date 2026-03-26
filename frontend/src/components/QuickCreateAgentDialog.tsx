@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { motion } from 'motion/react';
 import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
@@ -7,11 +8,13 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { X, Info } from 'lucide-react';
 import { agentManagementApi } from '@/lib/agentManagementApi';
 import type { AgentCreate } from '@/lib/agentManagementApi';
 import { useTools } from '@/hooks/useTools';
 import { useToast } from '@/hooks/use-toast';
+import { fadeUp } from '@/lib/motion';
 
 interface QuickCreateAgentDialogProps {
   open: boolean;
@@ -122,10 +125,9 @@ export function QuickCreateAgentDialog({
 
           <div className="grid gap-2">
             <Label htmlFor="qc-prompt">系统提示词</Label>
-            <textarea
+            <Textarea
               id="qc-prompt"
-              className="flex min-h-[80px] w-full rounded-md border border-input
-                         bg-background px-3 py-2 text-sm"
+              className="min-h-[80px]"
               value={form.system_prompt || ''}
               onChange={(e) => setForm({ ...form, system_prompt: e.target.value })}
               placeholder="你是一个..."
@@ -177,13 +179,13 @@ export function QuickCreateAgentDialog({
             </div>
           </div>
 
-          <div className="flex items-start gap-2 p-3 bg-muted/50 rounded-lg">
+          <motion.div variants={fadeUp} initial="hidden" animate="visible" className="flex items-start gap-2 p-3 bg-brand/8 rounded-lg">
             <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <p className="text-xs text-muted-foreground">
               创建后将自动挂载为当前 Agent 的子代理。你可以稍后在 Agent 列表中编辑此
               Agent，配置 MCP Server、Skills、Memory 等高级功能。
             </p>
-          </div>
+          </motion.div>
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

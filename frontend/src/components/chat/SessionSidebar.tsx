@@ -7,7 +7,9 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SessionDialog } from '@/components/SessionDialog';
 import { cn } from '@/lib/utils';
+import { motion } from 'motion/react';
 import { MessageSquare, Search, Upload, Archive, Trash2, MoreVertical } from 'lucide-react';
+import { staggerContainer, listItem } from '@/lib/motion';
 import { SessionImportDialog, BatchExportDialog } from '@/components/session-transfer';
 import {
   AlertDialog,
@@ -181,16 +183,19 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
           {sessionsLoading && (
             <div className="space-y-2">
               {[1, 2, 3].map(i => (
-                <Skeleton key={i} className="h-16 w-full rounded-md" />
+                <Skeleton key={i} className="h-16 w-full rounded-lg" />
               ))}
             </div>
           )}
-          {!sessionsLoading && filteredSessions.map((session) => (
-            <div
+          {!sessionsLoading && (
+          <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="space-y-1">
+          {filteredSessions.map((session) => (
+            <motion.div
               key={session.id}
+              variants={listItem}
               className={cn(
-                'group relative w-full rounded-md transition-colors hover:bg-accent',
-                currentSessionId === session.id && 'bg-accent',
+                'group relative w-full rounded-lg transition-colors duration-150 hover:bg-surface-hover',
+                currentSessionId === session.id && 'bg-surface-hover',
               )}
             >
               <button
@@ -235,7 +240,7 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
                   >
                     <DropdownMenu>
                       <DropdownMenuTrigger
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-sm font-medium transition-colors duration-150 hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                       >
                         <MoreVertical className="h-3 w-3" />
                       </DropdownMenuTrigger>
@@ -255,8 +260,10 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
                   </div>
                 </div>
               </button>
-            </div>
+            </motion.div>
           ))}
+          </motion.div>
+          )}
 
           {!sessionsLoading && filteredSessions.length === 0 && sessions.length > 0 && (
             <p className="py-6 text-center text-xs text-muted-foreground">

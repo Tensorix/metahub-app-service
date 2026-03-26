@@ -59,7 +59,7 @@ export function URLCell({ value, field: _field, onSave }: URLCellProps) {
                 href={str}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-primary hover:underline truncate block"
+                className="text-brand hover:underline truncate block"
                 onClick={(e) => e.stopPropagation()}
               >
                 {str}

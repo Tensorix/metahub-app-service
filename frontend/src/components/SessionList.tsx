@@ -2,15 +2,16 @@ import type { Session, Topic } from '@/lib/api';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { 
-  MessageSquare, 
-  MoreVertical, 
-  Trash2, 
-  Edit, 
+import {
+  MessageSquare,
+  MoreVertical,
+  Trash2,
+  Edit,
   ChevronRight,
   ChevronDown,
   Plus
 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { staggerContainer, listItem, collapseVariants } from '@/lib/motion';
 
 interface SessionListProps {
   sessions: Session[];
@@ -82,19 +84,19 @@ export function SessionList({
   };
 
   return (
-    <div className="space-y-2">
+    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="space-y-2">
       {sessions.map((session) => {
         const isExpanded = expandedSessions.has(session.id);
         const sessionTopics = topics[session.id] || [];
         const isSelected = selectedSessionId === session.id;
 
         return (
-          <div key={session.id} className="space-y-1">
+          <motion.div key={session.id} variants={listItem} className="space-y-1">
             <Card
               className={cn(
                 'p-3 cursor-pointer transition-all hover:shadow-md border',
                 isSelected
-                  ? 'border-primary bg-primary/5 shadow-sm'
+                  ? 'border-brand bg-brand/5 shadow-sm'
                   : 'border-border hover:border-primary/50'
               )}
               onClick={() => onSessionSelect(session.id)}
@@ -189,12 +191,19 @@ export function SessionList({
             </Card>
 
             {/* 话题列表 - 样式与文件系统一致 */}
+            <AnimatePresence>
             {isExpanded && sessionTopics.length > 0 && (
-              <div className="ml-8 space-y-0.5">
+              <motion.div
+                variants={collapseVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="ml-8 space-y-0.5"
+              >
                 {sessionTopics.map((topic) => (
                   <div
                     key={topic.id}
-                    className="flex items-center gap-2 px-2 py-1 cursor-pointer hover:bg-accent rounded-sm group"
+                    className="flex items-center gap-2 px-2 py-1 cursor-pointer hover:bg-surface-hover rounded-sm group transition-colors duration-150"
                     onClick={(e) => {
                       e.stopPropagation();
                       onSessionSelect(session.id);
@@ -233,11 +242,12 @@ export function SessionList({
                     </div>
                   </div>
                 ))}
-              </div>
+              </motion.div>
             )}
-          </div>
+            </AnimatePresence>
+          </motion.div>
         );
       })}
-    </div>
+    </motion.div>
   );
 }

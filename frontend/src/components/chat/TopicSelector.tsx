@@ -96,8 +96,8 @@ export function TopicSelector() {
                     key={topic.id}
                     className={cn(
                       'flex items-center justify-between px-2 py-1.5',
-                      isSelected && 'bg-accent',
-                      isPreview && 'ring-2 ring-primary/50 bg-primary/10',
+                      isSelected && 'bg-surface-hover',
+                      isPreview && 'ring-2 ring-brand/50 bg-brand/8',
                     )}
                     style={isPreview ? { opacity: 0.5 + (boundaryProgress / 200) } : undefined}
                     onClick={() => {
@@ -106,10 +106,10 @@ export function TopicSelector() {
                   >
                     <div className="flex items-center gap-2 flex-1 min-w-0">
                       {isPreview && boundaryDirection === 'up' && (
-                        <ChevronUp className="h-3 w-3 text-primary animate-bounce shrink-0" />
+                        <ChevronUp className="h-3 w-3 text-brand animate-bounce shrink-0" />
                       )}
                       {isPreview && boundaryDirection === 'down' && (
-                        <ChevronDown className="h-3 w-3 text-primary animate-bounce shrink-0" />
+                        <ChevronDown className="h-3 w-3 text-brand animate-bounce shrink-0" />
                       )}
                       {isSelected && !isPreview && <Check className="h-3 w-3 shrink-0" />}
                       <span className="line-clamp-1 text-xs">

@@ -482,8 +482,8 @@ const ActivityDialog = ({ open, onOpenChange, activity, defaultStatus, onSuccess
                       <button
                         key={s.id}
                         type="button"
-                        className={`w-full px-3 py-2 text-left text-sm rounded-md flex items-center gap-2 transition-colors ${
-                          linked ? 'bg-primary/10 text-primary' : 'hover:bg-muted'
+                        className={`w-full px-3 py-2 text-left text-sm rounded-md flex items-center gap-2 transition-colors duration-150 ${
+                          linked ? 'bg-brand/8 text-brand' : 'hover:bg-muted'
                         }`}
                         onClick={() => linked ? removeRelation('session', s.id) : addRelation({ type: 'session', id: s.id })}
                       >
@@ -509,8 +509,8 @@ const ActivityDialog = ({ open, onOpenChange, activity, defaultStatus, onSuccess
                       <button
                         key={t.id}
                         type="button"
-                        className={`w-full px-3 py-2 text-left text-sm rounded-md flex items-center gap-2 transition-colors ${
-                          linked ? 'bg-primary/10 text-primary' : 'hover:bg-muted'
+                        className={`w-full px-3 py-2 text-left text-sm rounded-md flex items-center gap-2 transition-colors duration-150 ${
+                          linked ? 'bg-brand/8 text-brand' : 'hover:bg-muted'
                         }`}
                         onClick={() => linked ? removeRelation('topic', t.id) : addRelation({ type: 'topic', id: t.id })}
                       >
@@ -537,8 +537,8 @@ const ActivityDialog = ({ open, onOpenChange, activity, defaultStatus, onSuccess
                       <button
                         key={n.id}
                         type="button"
-                        className={`w-full px-3 py-2 text-left text-sm rounded-md flex items-center gap-2 transition-colors ${
-                          linked ? 'bg-primary/10 text-primary' : 'hover:bg-muted'
+                        className={`w-full px-3 py-2 text-left text-sm rounded-md flex items-center gap-2 transition-colors duration-150 ${
+                          linked ? 'bg-brand/8 text-brand' : 'hover:bg-muted'
                         }`}
                         onClick={() => linked ? removeRelation('node', n.id) : addRelation({ type: 'node', id: n.id })}
                       >

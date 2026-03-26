@@ -26,7 +26,6 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Plus,
-  Loader2,
   GripVertical,
   GripHorizontal,
   Trash2,
@@ -39,6 +38,7 @@ import {
 } from 'lucide-react';
 import { useDebouncedCallback } from 'use-debounce';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { knowledgeApi } from '@/lib/knowledgeApi';
 import type { KnowledgeNode, DatasetRow, FieldDefinition } from '@/lib/knowledgeApi';
@@ -578,8 +578,10 @@ export function DatasetView({ node, onUpdate, showBackButton, onBack }: DatasetV
 
       <div ref={tableContainerRef} className="flex-1 overflow-auto">
         {loading ? (
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          <div className="p-4 space-y-3">
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-10 w-full rounded-md" />
+            ))}
           </div>
         ) : (
           <DndContext
@@ -610,7 +612,7 @@ export function DatasetView({ node, onUpdate, showBackButton, onBack }: DatasetV
                             key="resize"
                             onMouseDown={header.getResizeHandler()}
                             onTouchStart={header.getResizeHandler()}
-                            className="absolute right-0 top-0 h-full w-1.5 -mr-0.5 cursor-col-resize touch-none hover:bg-primary/30 active:bg-primary/40 rounded"
+                            className="absolute right-0 top-0 h-full w-1.5 -mr-0.5 cursor-col-resize touch-none hover:bg-brand/20 active:bg-brand/40 rounded transition-colors"
                             style={{ userSelect: 'none' }}
                             aria-label="调节列宽"
                           />

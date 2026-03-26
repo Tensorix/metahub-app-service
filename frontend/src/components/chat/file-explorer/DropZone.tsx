@@ -81,7 +81,7 @@ export function DropZone({
     >
       {children}
       {isActive && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-lg pointer-events-none">
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-brand/8 border-2 border-dashed border-brand rounded-lg pointer-events-none">
           <div className="bg-background/95 px-6 py-4 rounded-lg shadow-lg text-center">
             <p className="font-medium">松开以上传文件</p>
             {(dropTargetDir ?? defaultTargetDir) && (

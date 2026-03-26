@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getApiBaseUrl } from '@/config/env';
+import type { ChatPerformanceMetrics } from '@/types/agent';
 
 const API_BASE_URL = getApiBaseUrl();
 
@@ -255,7 +256,8 @@ export type MessagePartType =
   | 'tool_result'
   | 'error'
   | 'thinking'
-  | 'subagent_call';
+  | 'subagent_call'
+  | 'metrics';
 
 export interface MessagePart {
   id: string;
@@ -317,6 +319,8 @@ export interface ThinkingContent {
   timestamp?: string;
 }
 
+export type MetricsPartContent = ChatPerformanceMetrics;
+
 // ========== 类型守卫函数 ==========
 
 export function isToolCallPart(part: MessagePart): boolean {
@@ -337,6 +341,10 @@ export function isThinkingPart(part: MessagePart): boolean {
 
 export function isTextPart(part: MessagePart): boolean {
   return part.type === 'text';
+}
+
+export function isMetricsPart(part: MessagePart): boolean {
+  return part.type === 'metrics';
 }
 
 // ========== Part 内容解析函数 ==========
@@ -380,6 +388,15 @@ export function parseErrorContent(part: MessagePart): ErrorContent | null {
   if (part.type !== 'error') return null;
   try {
     return JSON.parse(part.content) as ErrorContent;
+  } catch {
+    return null;
+  }
+}
+
+export function parseMetricsContent(part: MessagePart): MetricsPartContent | null {
+  if (part.type !== 'metrics') return null;
+  try {
+    return JSON.parse(part.content) as MetricsPartContent;
   } catch {
     return null;
   }

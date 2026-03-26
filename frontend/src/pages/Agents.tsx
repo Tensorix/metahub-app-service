@@ -12,26 +12,7 @@ import type { Agent, AgentCreate, AgentUpdate } from '@/lib/agentManagementApi';
 import { useToast } from '@/hooks/use-toast';
 import { usePageTitle } from '@/contexts/PageTitleContext';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
-
-/* ─── Animation variants ─── */
-
-const listContainer = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.04 },
-  },
-};
-
-const listItem = {
-  hidden: { opacity: 0, y: 6 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.3, ease: [0.25, 0.4, 0.25, 1] as const },
-  },
-  exit: { opacity: 0, scale: 0.96, transition: { duration: 0.2 } },
-};
+import { staggerContainer as listContainer, listItem } from '@/lib/motion';
 
 /* ─── Component ─── */
 

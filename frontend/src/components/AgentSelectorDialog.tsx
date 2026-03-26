@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { motion } from 'motion/react';
 import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
@@ -7,9 +8,11 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Search, Bot, Server, CheckCircle2 } from 'lucide-react';
 import { agentManagementApi } from '@/lib/agentManagementApi';
 import type { Agent } from '@/lib/agentManagementApi';
+import { staggerContainer, listItem } from '@/lib/motion';
 
 interface AgentSelectorDialogProps {
   open: boolean;
@@ -117,8 +120,20 @@ export function AgentSelectorDialog({
         {/* Agent 列表 */}
         <div className="flex-1 overflow-y-auto space-y-1 min-h-[200px] max-h-[300px]">
           {loading ? (
-            <div className="flex items-center justify-center h-32">
-              <span className="text-sm text-muted-foreground">加载中...</span>
+            <div className="space-y-2">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="p-3 rounded-lg border space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-4 w-4 rounded" />
+                    <Skeleton className="h-4 w-24" />
+                  </div>
+                  <Skeleton className="h-3 w-48 ml-6" />
+                  <div className="flex gap-2 ml-6">
+                    <Skeleton className="h-5 w-16 rounded-full" />
+                    <Skeleton className="h-5 w-12 rounded-full" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : agents.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-32 text-center">
@@ -131,14 +146,16 @@ export function AgentSelectorDialog({
               </p>
             </div>
           ) : (
-            agents.map((agent) => (
-              <button
+            <motion.div variants={staggerContainer} initial="hidden" animate="visible">
+            {agents.map((agent) => (
+              <motion.button
                 key={agent.id}
+                variants={listItem}
                 type="button"
-                className={`w-full text-left p-3 rounded-lg border transition-colors
+                className={`w-full text-left p-3 rounded-lg border transition-all duration-150 mb-1
                   ${selectedId === agent.id
-                    ? 'border-primary bg-primary/5'
-                    : 'border-transparent hover:bg-muted/50'
+                    ? 'border-brand ring-2 ring-brand/30 bg-brand/5'
+                    : 'border-transparent hover:bg-surface-hover'
                   }`}
                 onClick={() => setSelectedId(agent.id)}
               >
@@ -148,7 +165,7 @@ export function AgentSelectorDialog({
                       <Bot className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">{agent.name}</span>
                       {selectedId === agent.id && (
-                        <CheckCircle2 className="h-4 w-4 text-primary" />
+                        <CheckCircle2 className="h-4 w-4 text-brand" />
                       )}
                     </div>
                     {agent.description && (
@@ -179,8 +196,9 @@ export function AgentSelectorDialog({
                     </div>
                   </div>
                 </div>
-              </button>
-            ))
+              </motion.button>
+            ))}
+            </motion.div>
           )}
         </div>
 

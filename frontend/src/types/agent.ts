@@ -8,9 +8,23 @@ export type ChatEventType =
   | 'thinking'
   | 'operation_start'
   | 'operation_end'
+  | 'metrics'
   | 'done'
   | 'error'
   | 'interrupt';
+
+export interface ChatPerformanceMetrics {
+  first_token_latency_ms: number | null;
+  completion_duration_ms: number | null;
+  total_duration_ms: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  output_tokens_per_second: number | null;
+  input_token_source: 'reported' | 'estimated' | 'unavailable';
+  output_token_source: 'reported' | 'estimated' | 'unavailable';
+  total_token_source: 'reported' | 'estimated' | 'unavailable';
+}
 
 export interface ChatEventInterrupt {
   event: 'interrupt';
@@ -63,6 +77,11 @@ export interface ChatEventOperationEnd {
   };
 }
 
+export interface ChatEventMetrics {
+  event: 'metrics';
+  data: ChatPerformanceMetrics;
+}
+
 export interface ChatEventDone {
   event: 'done';
   data: {
@@ -83,6 +102,7 @@ export type ChatEvent =
   | ChatEventThinking
   | ChatEventOperationStart
   | ChatEventOperationEnd
+  | ChatEventMetrics
   | ChatEventDone
   | ChatEventError
   | ChatEventInterrupt;
@@ -99,6 +119,7 @@ export interface ChatResponse {
   session_id: string;
   topic_id: string;
   message_id: string;
+  metrics?: ChatPerformanceMetrics;
 }
 
 // WebSocket message types
@@ -142,6 +163,12 @@ export interface WSIncomingOperationEnd {
 
 export interface WSIncomingDone {
   type: 'done';
+  status?: 'complete' | 'cancelled' | 'interrupt';
+}
+
+export interface WSIncomingMetrics {
+  type: 'metrics';
+  metrics: ChatPerformanceMetrics;
 }
 
 export interface WSIncomingError {
@@ -158,6 +185,7 @@ export type WSIncomingMessage =
   | WSIncomingThinking
   | WSIncomingOperationStart
   | WSIncomingOperationEnd
+  | WSIncomingMetrics
   | WSIncomingDone
   | WSIncomingError
   | WSIncomingStopped;

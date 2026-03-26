@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Search, FileText, Table2, ChevronDown, X, ChevronUp } from 'lucide-react';
+import { motion } from 'motion/react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -15,6 +16,7 @@ import type { SearchHit, SearchMode } from '@/lib/knowledgeApi';
 import { useToast } from '@/hooks/use-toast';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { cn } from '@/lib/utils';
+import { staggerContainer, listItem, fadeUp } from '@/lib/motion';
 
 interface KnowledgeSearchPanelProps {
   folderIds?: string[];
@@ -106,7 +108,7 @@ export function KnowledgeSearchPanel({
           type="button"
           onClick={() => setExpanded(true)}
           className={cn(
-            'flex items-center gap-2 shadow-lg bg-card border hover:bg-accent/50 transition-colors',
+            'flex items-center gap-2 shadow-lg bg-card border hover:bg-surface-hover transition-colors',
             isMobile ? 'mx-4 mb-4 px-4 py-3 rounded-xl' : 'px-4 py-3 rounded-full'
           )}
           title="搜索知识库"
@@ -235,20 +237,21 @@ export function KnowledgeSearchPanel({
       </div>
 
       {hits.length > 0 ? (
-        <div className="space-y-2">
+        <motion.div variants={fadeUp} initial="hidden" animate="visible" className="space-y-2">
           <p className="text-sm text-muted-foreground">
             共 {total} 条结果
           </p>
-          <div className={cn('overflow-y-auto space-y-2', isMobile ? 'max-h-[50vh]' : 'max-h-[320px]')}>
+          <motion.div variants={staggerContainer} initial="hidden" animate="visible" className={cn('overflow-y-auto space-y-2', isMobile ? 'max-h-[50vh]' : 'max-h-[320px]')}>
             {hits.map((hit, idx) => {
               const isExpanded = expandedId === String(idx);
               return (
-                <div
+                <motion.div
                   key={hit.chunk_id ?? hit.node_id ?? hit.row_id ?? idx}
+                  variants={listItem}
                   className="border rounded-md overflow-hidden"
                 >
                   <div
-                    className="p-3 cursor-pointer hover:bg-accent/50 transition-colors"
+                    className="p-3 cursor-pointer hover:bg-surface-hover transition-colors"
                     onClick={() => {
                       if (hit.node_id && onSelectNode) onSelectNode(hit.node_id);
                     }}
@@ -302,7 +305,7 @@ export function KnowledgeSearchPanel({
                       <div className="mt-2">
                         <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                           <div
-                            className="h-full bg-primary transition-all"
+                            className="h-full bg-brand transition-all"
                             style={{ width: `${Math.min((hit.score ?? 0) * 100, 100)}%` }}
                           />
                         </div>
@@ -320,11 +323,11 @@ export function KnowledgeSearchPanel({
                       )}
                     </div>
                   )}
-                </div>
+                </motion.div>
               );
             })}
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       ) : null}
         </div>
       )}

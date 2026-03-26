@@ -8,6 +8,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from app.agent.runtime.common import safe_serialize, sanitize_tool_input
+from app.utils.chat_metrics import extract_usage_metadata
 
 
 class StreamEventTranslator:
@@ -88,6 +89,22 @@ class StreamEventTranslator:
                 return [{"event": "message", "data": {"content": chunk.content}}]
             return []
 
+        if event_type == "on_chat_model_end":
+            usage = extract_usage_metadata(event_data.get("output"))
+            if usage:
+                return [
+                    {
+                        "event": "metrics",
+                        "data": {
+                            **usage,
+                            "input_token_source": "reported",
+                            "output_token_source": "reported",
+                            "total_token_source": "reported",
+                        },
+                    }
+                ]
+            return []
+
         if event_type == "on_tool_start":
             return [
                 {
@@ -128,6 +145,23 @@ class StreamEventTranslator:
         """Translate a subagent internal event into a transport event with parent_op_id."""
         event_type = event.get("event")
         event_data = event.get("data", {})
+
+        if event_type == "on_chat_model_end":
+            usage = extract_usage_metadata(event_data.get("output"))
+            if usage:
+                return [
+                    {
+                        "event": "metrics",
+                        "data": {
+                            **usage,
+                            "input_token_source": "reported",
+                            "output_token_source": "reported",
+                            "total_token_source": "reported",
+                            "parent_op_id": parent_op_id,
+                        },
+                    }
+                ]
+            return []
 
         if event_type == "on_chat_model_stream":
             chunk = event_data.get("chunk")

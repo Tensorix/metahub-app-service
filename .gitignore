@@ -15,3 +15,5 @@ wheels/
 
 # User uploads
 uploads/
+
+.claude

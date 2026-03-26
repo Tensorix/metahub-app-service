@@ -29,6 +29,7 @@ export interface ProcessResult {
     error?: string;
     done?: boolean;
     doneStatus?: string;
+    metrics?: import('@/types/agent').ChatPerformanceMetrics;
   };
 }
 
@@ -284,6 +285,30 @@ export function processStreamEvent(
         review_configs: event.data.review_configs || [],
       };
       return { message, state, effects };
+    }
+
+    // ----- metrics -----
+    case 'metrics': {
+      effects.metrics = event.data;
+      const updated = updateMessageParts(message, (parts) => {
+        const metricsPartId = `${message.id}-metrics`;
+        const nextPart: MessagePart = {
+          id: metricsPartId,
+          message_id: message.id,
+          type: 'metrics',
+          content: JSON.stringify(event.data),
+          metadata: { timestamp: new Date().toISOString() },
+          created_at: new Date().toISOString(),
+        };
+        const idx = findPartById(parts, metricsPartId);
+        if (idx === -1) {
+          parts.push(nextPart);
+        } else {
+          parts[idx] = { ...parts[idx], content: nextPart.content, metadata: nextPart.metadata };
+        }
+        return parts;
+      });
+      return { message: updated, state, effects };
     }
 
     // ----- error -----

@@ -20,7 +20,7 @@ export function ActivityEmptyState({ onCreate }: ActivityEmptyStateProps) {
         transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
         className="rounded-2xl bg-gradient-to-br from-primary/10 to-primary/5 p-8 mb-6"
       >
-        <ListTodo className="h-14 w-14 text-primary/60" strokeWidth={1.5} />
+        <ListTodo className="h-14 w-14 text-brand/60" strokeWidth={1.5} />
       </motion.div>
 
       <h3 className="text-xl font-semibold mb-2">开始管理您的活动</h3>

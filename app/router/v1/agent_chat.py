@@ -36,6 +36,11 @@ from app.service.session import TopicService, MessageService
 from app.service.auth import TokenService
 from app.constants.message import MessagePartType
 from app.utils.message_utils import parts_to_message_str
+from app.utils.chat_metrics import (
+    add_usage_summaries,
+    build_chat_performance_metrics,
+    normalize_usage_metadata,
+)
 
 
 router = APIRouter()
@@ -63,6 +68,7 @@ class StreamingCollector:
     tool_results: List[StreamingPart] = field(default_factory=list)
     errors: List[StreamingPart] = field(default_factory=list)
     subagent_calls: List[StreamingPart] = field(default_factory=list)
+    metrics_part: Optional[StreamingPart] = None
     _active_operations: dict = field(default_factory=dict)  # op_id → operation info
     _subagent_child_events: dict = field(default_factory=dict)  # op_id → list of child events
 
@@ -214,7 +220,12 @@ class StreamingCollector:
 
     def get_full_text(self) -> str:
         """获取完整文本"""
-        return "".join(self.text_chunks)
+        committed = "".join(
+            part.content.get("text", "")
+            for part in self.text_parts
+            if isinstance(part.content, dict)
+        )
+        return committed + "".join(self.text_chunks)
 
     def get_full_thinking(self) -> str:
         """获取完整思考内容"""
@@ -229,7 +240,20 @@ class StreamingCollector:
             self.tool_calls or
             self.tool_results or
             self.subagent_calls or
+            self.metrics_part or
             self.errors
+        )
+
+    def set_metrics(self, metrics: dict, timestamp: Optional[datetime] = None):
+        """Attach a metrics part to the message tail."""
+        if not metrics:
+            return
+        ts = timestamp or datetime.now(timezone.utc)
+        self.metrics_part = StreamingPart(
+            type=MessagePartType.METRICS,
+            content=metrics,
+            timestamp=ts,
+            metadata={"timestamp": ts.isoformat()},
         )
 
     def to_parts_data(self) -> List[dict]:
@@ -285,6 +309,13 @@ class StreamingCollector:
                     "content": json.dumps(part.content),
                     "metadata_": part.metadata,
                 })
+
+        if self.metrics_part is not None:
+            parts.append({
+                "type": MessagePartType.METRICS,
+                "content": json.dumps(self.metrics_part.content),
+                "metadata_": self.metrics_part.metadata,
+            })
 
         # 添加错误（如果有）
         for err in self.errors:
@@ -466,6 +497,13 @@ async def _save_message(
     return await _save_message_with_parts(db, user_id, topic_id, role, parts_data)
 
 
+def _build_resume_estimated_input(decisions: list[dict]) -> str:
+    try:
+        return json.dumps({"resume": {"decisions": decisions}}, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(decisions)
+
+
 @router.post("/sessions/{session_id}/chat")
 async def chat_with_agent(
     session_id: UUID,
@@ -525,16 +563,44 @@ async def chat_with_agent(
     if not request.stream:
         # Non-streaming response
         logger.info("Non-streaming mode")
-        response_text = await agent_service.chat(
+        request_started_at = time.perf_counter()
+        response_payload = await agent_service.chat_with_metrics(
             request.message,
             thread_id=thread_id,
             user_id=current_user.id,
             session_id=session_id,
         )
+        completed_at = time.perf_counter()
+        response_text = response_payload["message"]
+        metrics = build_chat_performance_metrics(
+            request_started_at=request_started_at,
+            completed_at=completed_at,
+            first_token_at=None,
+            reported_usage=response_payload.get("usage_metadata"),
+            estimated_input_text=response_payload.get("estimated_input_text", ""),
+            estimated_output_text=response_text,
+            model_name=response_payload.get("model_name") or None,
+            provider=response_payload.get("provider") or None,
+        )
 
         # Save AI message
-        ai_message = await _save_message(
-            db, current_user.id, topic.id, "assistant", response_text
+        ai_message = await _save_message_with_parts(
+            db,
+            current_user.id,
+            topic.id,
+            "assistant",
+            [
+                {
+                    "type": MessagePartType.TEXT,
+                    "content": response_text,
+                    "metadata_": {"timestamp": datetime.now(timezone.utc).isoformat()},
+                },
+                {
+                    "type": MessagePartType.METRICS,
+                    "content": json.dumps(metrics),
+                    "metadata_": {"timestamp": datetime.now(timezone.utc).isoformat()},
+                },
+            ],
         )
 
         return ChatResponse(
@@ -542,6 +608,7 @@ async def chat_with_agent(
             session_id=session_id,
             topic_id=topic.id,
             message_id=ai_message.id,
+            metrics=metrics,
         )
 
     # Streaming response - need to create new db session for async generator
@@ -553,6 +620,16 @@ async def chat_with_agent(
         
         logger = logging.getLogger(__name__)
         task_key = f"{session_id}:{topic.id}"
+        metrics_context = await agent_service.prepare_metrics_context(
+            request.message,
+            thread_id=thread_id,
+            user_id=current_user.id,
+            session_id=session_id,
+        )
+        request_started_at = time.perf_counter()
+        first_token_at: Optional[float] = None
+        reported_usage = None
+        final_status = "complete"
         
         # 使用 StreamingCollector 收集事件
         collector = StreamingCollector()
@@ -589,6 +666,17 @@ async def chat_with_agent(
                 # Route events — child events go to subagent collector
                 parent_op_id = event_data.get("parent_op_id")
 
+                if event_type == "metrics":
+                    reported_usage = add_usage_summaries(
+                        reported_usage,
+                        normalize_usage_metadata(event_data),
+                    )
+                    continue
+
+                if event_type == "done":
+                    final_status = event_data.get("status", "complete")
+                    continue
+
                 if parent_op_id:
                     # Subagent child event — accumulate for DB persistence
                     collector.add_subagent_child_event(parent_op_id, {
@@ -598,6 +686,8 @@ async def chat_with_agent(
 
                 elif event_type == "message":
                     content = event_data.get("content", "")
+                    if content and first_token_at is None:
+                        first_token_at = time.perf_counter()
                     collector.add_text(content)
 
                 elif event_type == "thinking":
@@ -628,6 +718,7 @@ async def chat_with_agent(
 
                 elif event_type == "error":
                     error_msg = event_data.get("error", "Unknown error")
+                    final_status = "error"
                     collector.add_error(error_msg, context="streaming")
 
                 # Yield SSE event - must be a dict with 'data' key for sse-starlette
@@ -646,6 +737,21 @@ async def chat_with_agent(
                 }
 
             logger.info(f"Chat stream completed for {task_key}, saving message")
+
+            metrics_payload = None
+            if final_status == "complete":
+                completed_at = time.perf_counter()
+                metrics_payload = build_chat_performance_metrics(
+                    request_started_at=request_started_at,
+                    completed_at=completed_at,
+                    first_token_at=first_token_at,
+                    reported_usage=reported_usage,
+                    estimated_input_text=metrics_context.get("estimated_input_text", ""),
+                    estimated_output_text=collector.get_full_text(),
+                    model_name=metrics_context.get("model_name") or None,
+                    provider=metrics_context.get("provider") or None,
+                )
+                collector.set_metrics(metrics_payload)
 
             # 保存完整的 AI 消息（包含所有 Parts）
             if collector.has_content():
@@ -669,10 +775,15 @@ async def chat_with_agent(
                 )
                 logger.info(f"Message saved with {len(parts_data)} parts for {task_key}")
 
-            # 发送 done 事件
+            if metrics_payload is not None:
+                yield {
+                    "event": "metrics",
+                    "data": json.dumps(metrics_payload),
+                }
+
             yield {
                 "event": "done",
-                "data": json.dumps({"status": "complete"}),
+                "data": json.dumps({"status": final_status}),
             }
 
         except asyncio.CancelledError:
@@ -764,9 +875,16 @@ async def chat_resume(
     thread_id = f"topic_{topic.id}"
 
     async def generate_resume_events():
+        from app.db.session import SessionLocal
+
         db_stream = SessionLocal()
         collector = StreamingCollector()
         task_key = f"{session_id}:{request.topic_id}"
+        request_started_at = time.perf_counter()
+        first_token_at: Optional[float] = None
+        reported_usage = None
+        final_status = "complete"
+        estimated_input_text = _build_resume_estimated_input(request.decisions)
 
         try:
             async for event in agent_service.chat_resume(
@@ -780,13 +898,27 @@ async def chat_resume(
 
                 parent_op_id = event_data.get("parent_op_id")
 
+                if event_type == "metrics":
+                    reported_usage = add_usage_summaries(
+                        reported_usage,
+                        normalize_usage_metadata(event_data),
+                    )
+                    continue
+
+                if event_type == "done":
+                    final_status = event_data.get("status", "complete")
+                    continue
+
                 if parent_op_id:
                     collector.add_subagent_child_event(parent_op_id, {
                         "type": event_type,
                         **{k: v for k, v in event_data.items() if k != "parent_op_id"},
                     })
                 elif event_type == "message":
-                    collector.add_text(event_data.get("content", ""))
+                    content = event_data.get("content", "")
+                    if content and first_token_at is None:
+                        first_token_at = time.perf_counter()
+                    collector.add_text(content)
                 elif event_type == "operation_start":
                     collector.add_operation_start(
                         op_id=event_data.get("op_id", ""),
@@ -805,8 +937,25 @@ async def chat_resume(
                         success=event_data.get("success", True),
                         ended_at=event_data.get("ended_at"),
                     )
+                elif event_type == "error":
+                    final_status = "error"
 
                 yield {"event": event_type, "data": json.dumps(event_data)}
+
+            metrics_payload = None
+            if final_status == "complete":
+                completed_at = time.perf_counter()
+                metrics_payload = build_chat_performance_metrics(
+                    request_started_at=request_started_at,
+                    completed_at=completed_at,
+                    first_token_at=first_token_at,
+                    reported_usage=reported_usage,
+                    estimated_input_text=estimated_input_text,
+                    estimated_output_text=collector.get_full_text(),
+                    model_name=agent_config.get("model") or None,
+                    provider=agent_config.get("_resolved_sdk") or agent_config.get("model_provider") or None,
+                )
+                collector.set_metrics(metrics_payload)
 
             if collector.has_content():
                 parts_data = collector.to_parts_data()
@@ -818,7 +967,9 @@ async def chat_resume(
                     parts_data,
                 )
 
-            yield {"event": "done", "data": json.dumps({"status": "complete"})}
+            if metrics_payload is not None:
+                yield {"event": "metrics", "data": json.dumps(metrics_payload)}
+            yield {"event": "done", "data": json.dumps({"status": final_status})}
         except Exception as e:
             logger.error(f"Resume stream error for {task_key}: {e}", exc_info=True)
             yield {"event": "error", "data": json.dumps({"error": str(e)})}
@@ -936,12 +1087,22 @@ async def chat_websocket(
                 
                 # 使用 StreamingCollector
                 collector = StreamingCollector()
+                metrics_context = await agent_service.prepare_metrics_context(
+                    msg.content,
+                    thread_id=thread_id,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
 
                 async def stream_to_ws():
                     nonlocal collector
                     try:
                         import logging
                         logger = logging.getLogger(__name__)
+                        request_started_at = time.perf_counter()
+                        first_token_at: Optional[float] = None
+                        reported_usage = None
+                        final_status = "complete"
 
                         async for event in agent_service.chat_stream(
                             msg.content,
@@ -960,8 +1121,21 @@ async def chat_websocket(
                                     f"event_loop_ms={event_loop_ms}"
                                 )
 
+                            if event_type == "metrics":
+                                reported_usage = add_usage_summaries(
+                                    reported_usage,
+                                    normalize_usage_metadata(event_data),
+                                )
+                                continue
+
+                            if event_type == "done":
+                                final_status = event_data.get("status", "complete")
+                                continue
+
                             if event_type == "message":
                                 content = event_data.get("content", "")
+                                if content and first_token_at is None:
+                                    first_token_at = time.perf_counter()
                                 collector.add_text(content)
                                 await websocket.send_json({
                                     "type": "chunk",
@@ -1023,11 +1197,27 @@ async def chat_websocket(
 
                             elif event_type == "error":
                                 error_msg = event_data.get("error", "")
+                                final_status = "error"
                                 collector.add_error(error_msg)
                                 await websocket.send_json({
                                     "type": "error",
                                     "message": error_msg,
                                 })
+
+                        metrics_payload = None
+                        if final_status == "complete":
+                            completed_at = time.perf_counter()
+                            metrics_payload = build_chat_performance_metrics(
+                                request_started_at=request_started_at,
+                                completed_at=completed_at,
+                                first_token_at=first_token_at,
+                                reported_usage=reported_usage,
+                                estimated_input_text=metrics_context.get("estimated_input_text", ""),
+                                estimated_output_text=collector.get_full_text(),
+                                model_name=metrics_context.get("model_name") or None,
+                                provider=metrics_context.get("provider") or None,
+                            )
+                            collector.set_metrics(metrics_payload)
 
                         # 保存完整消息
                         if collector.has_content():
@@ -1036,6 +1226,13 @@ async def chat_websocket(
                                 db, user_id, topic.id,
                                 "assistant", parts_data
                             )
+
+                        if metrics_payload is not None:
+                            await websocket.send_json({
+                                "type": "metrics",
+                                "metrics": metrics_payload,
+                            })
+                        await websocket.send_json({"type": "done", "status": final_status})
 
                     except asyncio.CancelledError:
                         # 关闭所有未完成操作

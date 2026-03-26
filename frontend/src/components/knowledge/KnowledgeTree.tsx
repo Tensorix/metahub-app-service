@@ -25,9 +25,11 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
+import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { collapseVariants } from '@/lib/motion';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -212,10 +214,10 @@ function TreeNode({
       {...listeners}
       className={cn(
         'group flex items-center gap-1 px-2 py-1 rounded-md cursor-pointer text-sm select-none',
-        'hover:bg-accent/50 transition-colors',
+        'hover:bg-surface-hover transition-colors',
         'touch-none', // 防止移动端滚动干扰拖拽
         isSelected && 'bg-accent text-accent-foreground',
-        isOver && 'bg-primary/10 ring-2 ring-primary/20',
+        isOver && 'bg-brand/8 ring-2 ring-brand/20',
         (isNodeDragging || isDragging) && 'opacity-50'
       )}
       style={{ 
@@ -296,24 +298,35 @@ function TreeNode({
         </ContextMenu>
       )}
 
-      {isFolder && isExpanded && node.children?.map((child) => (
-            <TreeNode
-              key={child.id}
-              node={child}
-              depth={depth + 1}
-              selectedId={selectedId}
-              expandedIds={expandedIds}
-              toggleExpand={toggleExpand}
-              onSelect={onSelect}
-              onCreate={onCreate}
-              onRename={onRename}
-              onDelete={onDelete}
-              onToggleVector={onToggleVector}
-              onOpenFolderSettings={onOpenFolderSettings}
-              isMobile={isMobile}
-              isDragging={isDragging}
-            />
-      ))}
+      <AnimatePresence>
+        {isFolder && isExpanded && (
+          <motion.div
+            variants={collapseVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+          >
+            {node.children?.map((child) => (
+              <TreeNode
+                key={child.id}
+                node={child}
+                depth={depth + 1}
+                selectedId={selectedId}
+                expandedIds={expandedIds}
+                toggleExpand={toggleExpand}
+                onSelect={onSelect}
+                onCreate={onCreate}
+                onRename={onRename}
+                onDelete={onDelete}
+                onToggleVector={onToggleVector}
+                onOpenFolderSettings={onOpenFolderSettings}
+                isMobile={isMobile}
+                isDragging={isDragging}
+              />
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
@@ -548,7 +561,7 @@ function RootDropZone({ children, fullHeight = false }: { children: React.ReactN
       className={cn(
         'transition-colors',
         fullHeight && 'flex-1 overflow-hidden',
-        isOver && (fullHeight ? 'bg-primary/5 ring-2 ring-primary/20 ring-inset' : 'bg-primary/10 border-primary/50')
+        isOver && (fullHeight ? 'bg-brand/5 ring-2 ring-brand/20 ring-inset' : 'bg-brand/8 border-brand/50')
       )}
     >
       {children}

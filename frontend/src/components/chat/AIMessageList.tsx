@@ -6,32 +6,22 @@
  */
 
 import { useMemo } from 'react';
+import { motion } from 'motion/react';
 import { useChatStore } from '@/store/chat';
 import { StreamingMessage } from './StreamingMessage';
 import { ThinkingPart } from './ThinkingPart';
 import { ToolCallPart } from './ToolCallPart';
 import { SubAgentCallPart } from './SubAgentCallPart';
 import { ErrorPart } from './ErrorPart';
+import { MetricsPart } from './MetricsPart';
 import { RegenerateButton } from './RegenerateButton';
 import { FloatingTodo } from './TodoVisualization';
+import { LoadingDots } from './LoadingDots';
 import { cn } from '@/lib/utils';
 import { Bot, User } from 'lucide-react';
 import type { Message, MessagePart, SubAgentCallContent } from '@/lib/api';
 import { parseToolCallContent, parseToolResultContent } from '@/lib/api';
-
-function LoadingDots() {
-  return (
-    <div className="flex items-center gap-1.5 py-2 px-4 rounded-lg bg-muted w-fit">
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          className="w-1.5 h-1.5 rounded-full bg-primary/50 animate-bounce"
-          style={{ animationDelay: `${i * 150}ms` }}
-        />
-      ))}
-    </div>
-  );
-}
+import { staggerContainer, listItem, slideInLeft, slideInRight, fadeUp } from '@/lib/motion';
 
 export function AIMessageList({ className }: { className?: string }) {
   const {
@@ -47,25 +37,45 @@ export function AIMessageList({ className }: { className?: string }) {
   const messageList = topicKey ? (messages[topicKey] || []) : [];
 
   return (
-    <div className={cn("flex-1 overflow-y-auto p-4 space-y-4", className)}>
-      <FloatingTodo messages={messageList} isStreaming={storeIsStreaming} />
+    <div className={cn("flex-1 overflow-y-auto p-4", className)}>
+      <div className="max-w-3xl mx-auto space-y-4">
+        <FloatingTodo messages={messageList} isStreaming={storeIsStreaming} />
 
-      {messageList.map((message) => (
-        <MessageItem
-          key={message.id}
-          message={message}
-          isStreaming={message.id === streamingMessageId}
-          isThinking={isThinking}
-        />
-      ))}
+        <motion.div
+          variants={staggerContainer}
+          initial="hidden"
+          animate="visible"
+        >
+          {messageList.map((message) => (
+            <motion.div key={message.id} variants={listItem} className="mb-4 last:mb-0">
+              <MessageItem
+                message={message}
+                isStreaming={message.id === streamingMessageId}
+                isThinking={isThinking}
+              />
+            </motion.div>
+          ))}
+        </motion.div>
 
-      {messageList.length === 0 && (
-        <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
-          <Bot className="h-12 w-12 mb-4" />
-          <p className="text-lg font-medium">Start a conversation</p>
-          <p className="text-sm">Ask me anything!</p>
-        </div>
-      )}
+        {messageList.length === 0 && (
+          <motion.div
+            variants={staggerContainer}
+            initial="hidden"
+            animate="visible"
+            className="flex flex-col items-center justify-center h-full text-center text-muted-foreground"
+          >
+            <motion.div
+              variants={fadeUp}
+              animate={{ y: [0, -5, 0] }}
+              transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+            >
+              <Bot className="h-12 w-12 mb-4" />
+            </motion.div>
+            <motion.p variants={fadeUp} className="text-lg font-medium">开始对话</motion.p>
+            <motion.p variants={fadeUp} className="text-sm">随时向我提问</motion.p>
+          </motion.div>
+        )}
+      </div>
     </div>
   );
 }
@@ -85,7 +95,7 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
     if (!isAssistant) return [];
 
     const result: Array<{
-      type: 'thinking' | 'tool_pair' | 'tool_result_orphan' | 'subagent_call' | 'text' | 'error';
+      type: 'thinking' | 'tool_pair' | 'tool_result_orphan' | 'subagent_call' | 'text' | 'error' | 'metrics';
       data: any;
     }> = [];
 
@@ -151,6 +161,10 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
         case 'error':
           result.push({ type: 'error', data: part });
           break;
+
+        case 'metrics':
+          result.push({ type: 'metrics', data: part });
+          break;
       }
     }
 
@@ -175,19 +189,19 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
       .join('');
 
     return (
-      <div className="flex gap-3 flex-row-reverse">
-        <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full border bg-muted">
+      <motion.div variants={slideInRight} initial="hidden" animate="visible" className="flex gap-3 flex-row-reverse">
+        <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg bg-brand/8 text-brand">
           <User className="h-4 w-4" />
         </div>
         <div className="flex flex-col max-w-[80%] items-end">
           <div className="text-xs text-muted-foreground px-1 mb-1 text-right">
             {senderName}
           </div>
-          <div className="rounded-lg px-4 py-2 bg-primary text-primary-foreground">
+          <div className="rounded-2xl rounded-tr-md px-4 py-2.5 bg-primary text-primary-foreground">
             <p className="whitespace-pre-wrap">{textContent}</p>
           </div>
         </div>
-      </div>
+      </motion.div>
     );
   }
 
@@ -197,15 +211,19 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
     const showLoadingDots = isStreaming && organizedParts.length === 0;
 
     return (
-      <div className="flex gap-3">
-        <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full border bg-primary/10">
+      <motion.div variants={slideInLeft} initial="hidden" animate="visible" className="group flex gap-3">
+        <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg bg-brand/8 text-brand">
           <Bot className="h-4 w-4" />
         </div>
 
         <div className="flex-1 min-w-0 space-y-2">
           <span className="text-xs text-muted-foreground">{senderName}</span>
 
-          {showLoadingDots && <LoadingDots />}
+          {showLoadingDots && (
+            <div className="rounded-2xl rounded-tl-md px-4 py-3 bg-surface w-fit">
+              <LoadingDots size="md" />
+            </div>
+          )}
 
           {organizedParts.map((item, index) => {
             switch (item.type) {
@@ -247,7 +265,7 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
 
               case 'text':
                 return (
-                  <div key={`text-${index}`} className="rounded-lg px-4 py-2 bg-muted">
+                  <div key={`text-${index}`} className="rounded-2xl rounded-tl-md px-4 py-3 bg-surface">
                     <StreamingMessage
                       content={item.data.content}
                       isStreaming={isStreaming}
@@ -258,18 +276,21 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
               case 'error':
                 return <ErrorPart key={`error-${index}`} part={item.data} />;
 
+              case 'metrics':
+                return <MetricsPart key={`metrics-${index}`} part={item.data} />;
+
               default:
                 return null;
             }
           })}
 
           {!isStreaming && hasTextContent && (
-            <div className="flex gap-1 mt-1">
+            <div className="flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
               <RegenerateButton messageId={message.id} />
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
     );
   }
 

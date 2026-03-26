@@ -174,9 +174,9 @@ export function FileTreeNode({
           ref={setRef}
           {...(canModify && !showInlineRename ? { ...attributes, ...listeners } : {})}
           className={cn(
-            'flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-accent rounded-sm group',
+            'flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-surface-hover rounded-sm group',
             isSelected && 'bg-accent',
-            isOver && node.isDir && 'ring-1 ring-primary/50 bg-primary/5'
+            isOver && node.isDir && 'ring-1 ring-brand/50 bg-brand/5'
           )}
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
           onClick={() => {
