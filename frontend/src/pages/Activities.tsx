@@ -18,7 +18,7 @@ import { ActivityEmptyState } from '@/components/activity/ActivityEmptyState';
 import { usePageTitle } from '@/contexts/PageTitleContext';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 
-// ──────────────────────────────────────────── component
+/* ─── Component ─── */
 
 const Activities = () => {
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -32,18 +32,15 @@ const Activities = () => {
   const { setTitle, setActions } = usePageTitle();
   const { isMobile } = useBreakpoints();
 
-  // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<Activity['status'] | 'focus' | null>(null);
-  const [filters, setFilters] = useState<ActivityListQuery>({
-    page: 1,
-    size: 100,
-  });
+  const [filters, setFilters] = useState<ActivityListQuery>({ page: 1, size: 100 });
 
-  // ──────── Setup page title and actions
+  /* ─── Mobile page title ─── */
+
   useEffect(() => {
     if (isMobile) {
-      setTitle('活动管理');
+      setTitle('活动');
       setActions([
         {
           key: 'create',
@@ -56,18 +53,14 @@ const Activities = () => {
       setTitle(null);
       setActions([]);
     }
-
-    return () => {
-      setTitle(null);
-      setActions([]);
-    };
+    return () => { setTitle(null); setActions([]); };
   }, [isMobile, setTitle, setActions]);
 
-  // ──────── Data loading
+  /* ─── Data loading ─── */
+
   const loadActivities = useCallback(async () => {
     setLoading(true);
     try {
-      // 如果是 focus 模式，使用专门的 focus 接口
       if (statusFilter === 'focus') {
         const focusActivities = await activityApi.getFocusActivities();
         setActivities(focusActivities || []);
@@ -75,8 +68,7 @@ const Activities = () => {
         const response = await activityApi.getActivities({ ...filters, page: 1, size: 100 });
         setActivities(response.items || []);
       }
-    } catch (error) {
-      console.error('加载活动失败:', error);
+    } catch {
       setActivities([]);
       toast({ title: '加载失败', description: '无法加载活动列表', variant: 'destructive' });
     } finally {
@@ -84,11 +76,10 @@ const Activities = () => {
     }
   }, [filters, statusFilter, toast]);
 
-  useEffect(() => {
-    loadActivities();
-  }, [loadActivities]);
+  useEffect(() => { loadActivities(); }, [loadActivities]);
 
-  // ──────── Handlers
+  /* ─── Handlers ─── */
+
   const handleCreate = useCallback((status?: Activity['status']) => {
     setEditingActivity(null);
     setDefaultStatus(status);
@@ -113,7 +104,6 @@ const Activities = () => {
   }, [toast]);
 
   const handleStatusChange = useCallback(async (activity: Activity, newStatus: Activity['status']) => {
-    // Optimistic update
     setActivities((prev) =>
       prev.map((a) => (a.id === activity.id ? { ...a, status: newStatus } : a))
     );
@@ -126,7 +116,6 @@ const Activities = () => {
   }, [toast, loadActivities]);
 
   const handleReorder = useCallback(async (orderedIds: string[]) => {
-    // Optimistic update: assign new sort_order based on array index
     setActivities((prev) => {
       const orderMap = new Map(orderedIds.map((id, idx) => [id, idx]));
       return prev.map((a) => ({
@@ -142,37 +131,44 @@ const Activities = () => {
     }
   }, [toast, loadActivities]);
 
-  // ──────── Filtered data
+  const clearAllFilters = useCallback(() => {
+    setFilters({ page: 1, size: 100 });
+    setStatusFilter(null);
+    setSearchQuery('');
+  }, []);
+
+  /* ─── Filtered data ─── */
+
   const filteredActivities = useMemo(() => {
     return activities.filter((a) => {
       if (a.is_deleted) return false;
       if (searchQuery && !a.name.toLowerCase().includes(searchQuery.toLowerCase().trim())) return false;
-      // focus 模式已经在后端过滤了，这里不需要再过滤
       if (statusFilter && statusFilter !== 'focus' && a.status !== statusFilter) return false;
       return true;
     });
   }, [activities, searchQuery, statusFilter]);
 
-  // Active filter count
   const activeFilterCount = [filters.type, filters.priority_min, statusFilter].filter(Boolean).length;
+
+  /* ─── Render ─── */
 
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex flex-col h-full overflow-hidden">
-        {/* ──────── Header */}
+        {/* Desktop header */}
         {!isMobile && (
-          <div className="flex-shrink-0 px-6 pt-6 pb-2">
+          <div className="shrink-0 px-6 pt-6 pb-2">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h1 className="text-2xl font-bold tracking-tight">活动管理</h1>
+                <h1 className="text-2xl font-semibold tracking-tight">活动</h1>
                 <p className="text-sm text-muted-foreground mt-0.5">
-                  {loading ? '加载中...' : `共 ${filteredActivities.length} 项活动`}
+                  {loading ? '加载中...' : `共 ${filteredActivities.length} 项`}
                 </p>
               </div>
 
               <div className="flex items-center gap-2">
                 {/* View toggle */}
-                <div className="flex items-center border rounded-lg p-0.5 bg-muted/50">
+                <div className="flex items-center border rounded-lg p-0.5 bg-muted/40">
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -201,14 +197,13 @@ const Activities = () => {
                   </Tooltip>
                 </div>
 
-                <Button onClick={() => handleCreate()} className="gap-2 rounded-lg">
+                <Button onClick={() => handleCreate()} className="gap-2">
                   <Plus className="w-4 h-4" />
                   <span className="hidden sm:inline">新建活动</span>
                 </Button>
               </div>
             </div>
 
-            {/* Stats bar */}
             <ActivityStatsBar
               activities={activities}
               onFilterStatus={setStatusFilter}
@@ -217,9 +212,9 @@ const Activities = () => {
           </div>
         )}
 
-        {/* Mobile stats bar */}
+        {/* Mobile stats */}
         {isMobile && (
-          <div className="flex-shrink-0 px-4 pt-2 pb-2">
+          <div className="shrink-0 px-4 pt-2 pb-2">
             <ActivityStatsBar
               activities={activities}
               onFilterStatus={setStatusFilter}
@@ -228,35 +223,33 @@ const Activities = () => {
           </div>
         )}
 
-        {/* ──────── Filter bar */}
-        <div className="flex-shrink-0 px-6 py-3">
+        {/* Filter bar */}
+        <div className="shrink-0 px-6 py-3">
           <div className="flex items-center gap-2">
-            {/* Search */}
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
               <Input
                 placeholder="搜索活动..."
-                className="pl-9 h-9 rounded-lg bg-muted/40 border-0 focus-visible:bg-background focus-visible:ring-1"
+                className="pl-9 h-9 bg-muted/40 border-0 focus-visible:bg-background focus-visible:ring-1"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-muted"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted cursor-pointer"
                 >
-                  <X className="w-3 h-3 text-muted-foreground" />
+                  <X className="w-3.5 h-3.5 text-muted-foreground" />
                 </button>
               )}
             </div>
 
-            {/* Filter toggle */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant={showFilters ? 'default' : 'outline'}
                   size="sm"
-                  className="h-9 gap-1.5 rounded-lg"
+                  className="h-9 gap-1.5"
                   onClick={() => setShowFilters(!showFilters)}
                 >
                   <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -287,7 +280,7 @@ const Activities = () => {
                     value={filters.type || 'all'}
                     onValueChange={(v) => setFilters({ ...filters, type: v === 'all' ? undefined : v })}
                   >
-                    <SelectTrigger className="w-[130px] h-8 text-xs rounded-lg">
+                    <SelectTrigger className="w-[130px] h-8 text-xs">
                       <SelectValue placeholder="全部类型" />
                     </SelectTrigger>
                     <SelectContent>
@@ -306,7 +299,7 @@ const Activities = () => {
                       setFilters({ ...filters, priority_min: v === 'all' ? undefined : parseInt(v) })
                     }
                   >
-                    <SelectTrigger className="w-[140px] h-8 text-xs rounded-lg">
+                    <SelectTrigger className="w-[140px] h-8 text-xs">
                       <SelectValue placeholder="全部优先级" />
                     </SelectTrigger>
                     <SelectContent>
@@ -321,7 +314,7 @@ const Activities = () => {
                     value={filters.archived ? 'archived' : 'active'}
                     onValueChange={(v) => setFilters({ ...filters, archived: v === 'archived' })}
                   >
-                    <SelectTrigger className="w-[130px] h-8 text-xs rounded-lg">
+                    <SelectTrigger className="w-[130px] h-8 text-xs">
                       <SelectValue placeholder="活动状态" />
                     </SelectTrigger>
                     <SelectContent>
@@ -330,17 +323,12 @@ const Activities = () => {
                     </SelectContent>
                   </Select>
 
-                  {/* Clear all filters */}
                   {activeFilterCount > 0 && (
                     <Button
                       variant="ghost"
                       size="sm"
                       className="h-8 text-xs text-muted-foreground"
-                      onClick={() => {
-                        setFilters({ page: 1, size: 100 });
-                        setStatusFilter(null);
-                        setSearchQuery('');
-                      }}
+                      onClick={clearAllFilters}
                     >
                       <X className="w-3 h-3 mr-1" />
                       清除筛选
@@ -352,7 +340,7 @@ const Activities = () => {
           </AnimatePresence>
         </div>
 
-        {/* ──────── Content */}
+        {/* Content */}
         <div className="flex-1 px-6 pb-6 overflow-hidden">
           {loading ? (
             <LoadingSkeleton viewMode={isMobile ? 'list' : viewMode} />
@@ -364,17 +352,15 @@ const Activities = () => {
               animate={{ opacity: 1 }}
               className="flex flex-col items-center justify-center h-full"
             >
-              <Search className="w-10 h-10 text-muted-foreground/30 mb-4" />
-              <p className="text-muted-foreground text-sm">没有匹配的活动</p>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted mb-4">
+                <Search className="w-5 h-5 text-muted-foreground/40" />
+              </div>
+              <p className="text-sm text-muted-foreground">没有匹配的活动</p>
               <Button
                 variant="link"
                 size="sm"
                 className="mt-2"
-                onClick={() => {
-                  setSearchQuery('');
-                  setStatusFilter(null);
-                  setFilters({ page: 1, size: 100 });
-                }}
+                onClick={clearAllFilters}
               >
                 清除所有筛选
               </Button>
@@ -399,7 +385,7 @@ const Activities = () => {
           )}
         </div>
 
-        {/* ──────── Dialog */}
+        {/* Dialog */}
         <ActivityDialog
           open={dialogOpen}
           onOpenChange={setDialogOpen}
@@ -412,17 +398,17 @@ const Activities = () => {
   );
 };
 
-// ──────── Loading skeleton
+/* ─── Loading skeleton ─── */
 
 function LoadingSkeleton({ viewMode }: { viewMode: 'board' | 'list' }) {
   if (viewMode === 'board') {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 h-full">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 h-full">
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="flex flex-col gap-2">
-            <Skeleton className="h-12 w-full rounded-xl" />
+            <Skeleton className="h-10 w-full rounded-lg" />
             {Array.from({ length: 3 }).map((_, j) => (
-              <Skeleton key={j} className="h-24 w-full rounded-lg" />
+              <Skeleton key={j} className="h-20 w-full rounded-lg" />
             ))}
           </div>
         ))}
@@ -433,7 +419,7 @@ function LoadingSkeleton({ viewMode }: { viewMode: 'board' | 'list' }) {
   return (
     <div className="space-y-2">
       {Array.from({ length: 6 }).map((_, i) => (
-        <Skeleton key={i} className="h-20 w-full rounded-lg" />
+        <Skeleton key={i} className="h-16 w-full rounded-lg" />
       ))}
     </div>
   );

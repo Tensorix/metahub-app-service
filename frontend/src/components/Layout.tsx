@@ -7,13 +7,18 @@ import { cn } from '@/lib/utils';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { PageTitleProvider, usePageTitle } from '@/contexts/PageTitleContext';
 
+/* ─── Full-bleed pages (no container padding) ─── */
+const FULL_BLEED_PATHS = ['/knowledge', '/agents', '/activities'];
+
 function LayoutContent() {
   const { isMobile } = useBreakpoints();
   const { title, actions } = usePageTitle();
   const location = useLocation();
-  const isKnowledge = location.pathname.includes('/knowledge');
-  const isAgents = location.pathname.includes('/agents');
-  const isActivities = location.pathname.includes('/activities');
+
+  const isFullBleed = FULL_BLEED_PATHS.some((p) =>
+    location.pathname === p || location.pathname.startsWith(p + '/')
+  );
+
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -28,24 +33,24 @@ function LayoutContent() {
         mobileOpen={mobileMenuOpen}
         onMobileOpenChange={setMobileMenuOpen}
       />
+
       <main className="flex-1 flex flex-col overflow-hidden min-w-0">
-        {/* 移动端顶部导航栏 */}
+        {/* Mobile top bar */}
         {isMobile && (
-          <div className="flex h-14 items-center border-b px-4 shrink-0 bg-background">
+          <div className="flex h-13 items-center gap-3 border-b px-4 shrink-0 bg-background">
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               onClick={() => setMobileMenuOpen(true)}
-              className="mr-2 shrink-0"
+              className="shrink-0"
             >
               <Menu className="h-5 w-5" />
             </Button>
-            <h1 className="text-lg font-semibold truncate flex-1 min-w-0">
+            <h1 className="text-base font-semibold truncate flex-1 min-w-0">
               {title || 'MetaHub'}
             </h1>
-            {/* 顶栏操作按钮 */}
             {actions.length > 0 && (
-              <div className="flex items-center gap-2 ml-2 shrink-0">
+              <div className="flex items-center gap-1.5 shrink-0">
                 {actions.map((action) => (
                   <Button
                     key={action.key}
@@ -62,13 +67,15 @@ function LayoutContent() {
             )}
           </div>
         )}
-        <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+
+        {/* Page content */}
+        <div className="flex-1 flex flex-col min-h-0 overflow-y-auto scrollbar-thin">
           <div
             className={cn(
               'flex-1 flex flex-col min-h-0',
-              isKnowledge || isAgents || isActivities
+              isFullBleed
                 ? 'p-0 w-full'
-                : 'container mx-auto p-4 md:p-6 max-w-7xl'
+                : 'container mx-auto px-4 py-6 md:px-6 lg:px-8 max-w-7xl'
             )}
           >
             <Outlet />

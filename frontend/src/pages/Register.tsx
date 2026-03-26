@@ -1,13 +1,23 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { motion } from 'motion/react';
+import { Loader2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '../components/ui/card';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { useAuthStore } from '../store/auth';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { isPasswordStrengthCheckEnabled } from '@/config/env';
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 12 },
+  visible: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: i * 0.08, duration: 0.4, ease: [0.25, 0.4, 0.25, 1] as const },
+  }),
+};
 
 export function Register() {
   const navigate = useNavigate();
@@ -22,14 +32,10 @@ export function Register() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 从配置读取密码强度检查设置
   const enablePasswordStrengthCheck = isPasswordStrengthCheckEnabled();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
   const validateForm = () => {
@@ -48,7 +54,6 @@ export function Register() {
       return false;
     }
 
-    // 密码强度检查（可通过配置控制）
     if (enablePasswordStrengthCheck) {
       const hasUpperCase = /[A-Z]/.test(formData.password);
       const hasLowerCase = /[a-z]/.test(formData.password);
@@ -73,12 +78,9 @@ export function Register() {
     e.preventDefault();
     setError('');
 
-    if (!validateForm()) {
-      return;
-    }
+    if (!validateForm()) return;
 
     setLoading(true);
-
     try {
       await register(
         formData.username,
@@ -95,26 +97,44 @@ export function Register() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div className="absolute top-4 right-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-background p-4">
+      {/* Decorative background */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -top-1/4 -right-1/4 h-[600px] w-[600px] rounded-full bg-brand/[0.04] blur-3xl" />
+        <div className="absolute -bottom-1/4 -left-1/4 h-[500px] w-[500px] rounded-full bg-brand/[0.03] blur-3xl" />
+      </div>
+
+      <div className="absolute top-5 right-5">
         <ThemeToggle />
       </div>
-      
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center">创建账户</CardTitle>
-          <CardDescription className="text-center">
-            填写以下信息以注册新账户
-          </CardDescription>
-        </CardHeader>
-        <form onSubmit={handleSubmit}>
-          <CardContent className="space-y-4">
+
+      <motion.div
+        initial="hidden"
+        animate="visible"
+        className="relative w-full max-w-sm"
+      >
+        {/* Brand */}
+        <motion.div custom={0} variants={fadeUp} className="mb-8 text-center">
+          <div className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-foreground text-background">
+            <span className="text-lg font-bold tracking-tight">M</span>
+          </div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            创建账户
+          </h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            填写以下信息以注册 MetaHub
+          </p>
+        </motion.div>
+
+        {/* Form */}
+        <motion.form custom={1} variants={fadeUp} onSubmit={handleSubmit}>
+          <div className="space-y-4">
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
-            
+
             <div className="space-y-2">
               <Label htmlFor="username">用户名 *</Label>
               <Input
@@ -126,9 +146,11 @@ export function Register() {
                 onChange={handleChange}
                 required
                 disabled={loading}
+                autoComplete="username"
+                className="h-11"
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="email">邮箱</Label>
               <Input
@@ -139,9 +161,11 @@ export function Register() {
                 value={formData.email}
                 onChange={handleChange}
                 disabled={loading}
+                autoComplete="email"
+                className="h-11"
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="phone">手机号</Label>
               <Input
@@ -152,9 +176,11 @@ export function Register() {
                 value={formData.phone}
                 onChange={handleChange}
                 disabled={loading}
+                autoComplete="tel"
+                className="h-11"
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="password">密码 *</Label>
               <Input
@@ -163,16 +189,18 @@ export function Register() {
                 type="password"
                 placeholder={
                   enablePasswordStrengthCheck
-                    ? "至少 8 位，包含大小写字母、数字和特殊字符"
-                    : "至少 8 个字符"
+                    ? '至少 8 位，包含大小写字母、数字和特殊字符'
+                    : '至少 8 个字符'
                 }
                 value={formData.password}
                 onChange={handleChange}
                 required
                 disabled={loading}
+                autoComplete="new-password"
+                className="h-11"
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="confirmPassword">确认密码 *</Label>
               <Input
@@ -184,24 +212,42 @@ export function Register() {
                 onChange={handleChange}
                 required
                 disabled={loading}
+                autoComplete="new-password"
+                className="h-11"
               />
             </div>
-          </CardContent>
-          
-          <CardFooter className="flex flex-col space-y-4">
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? '注册中...' : '注册'}
+
+            <Button
+              type="submit"
+              className="h-11 w-full"
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  注册中...
+                </>
+              ) : (
+                '注册'
+              )}
             </Button>
-            
-            <div className="text-sm text-center text-muted-foreground">
-              已有账户？{' '}
-              <Link to="/login" className="text-primary hover:underline">
-                立即登录
-              </Link>
-            </div>
-          </CardFooter>
-        </form>
-      </Card>
+          </div>
+        </motion.form>
+
+        <motion.p
+          custom={2}
+          variants={fadeUp}
+          className="mt-6 text-center text-sm text-muted-foreground"
+        >
+          已有账户？{' '}
+          <Link
+            to="/login"
+            className="font-medium text-foreground underline-offset-4 hover:underline"
+          >
+            立即登录
+          </Link>
+        </motion.p>
+      </motion.div>
     </div>
   );
 }
