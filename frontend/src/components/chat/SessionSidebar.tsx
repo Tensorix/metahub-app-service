@@ -8,9 +8,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { SessionDialog } from '@/components/SessionDialog';
 import { cn } from '@/lib/utils';
 import { motion } from 'motion/react';
-import { MessageSquare, Search, Upload, Archive, Trash2, MoreVertical } from 'lucide-react';
+import { Menu, MessageSquare, Search, Upload, Archive, Trash2, MoreVertical } from 'lucide-react';
 import { staggerContainer, listItem } from '@/lib/motion';
 import { SessionImportDialog, BatchExportDialog } from '@/components/session-transfer';
+import { usePageTitle } from '@/contexts/PageTitleContext';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -111,46 +112,55 @@ export function SessionSidebar({ onSessionSelect }: SessionSidebarProps) {
     }
   };
 
+  const { openSidebar } = usePageTitle();
+
   return (
     <div className="flex h-full flex-col">
-      {/* 移动端隐藏标题栏，因为已经在顶栏显示 */}
-      {!isMobile && (
-        <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
-          <div className="flex items-center gap-2">
-            <MessageSquare className="h-4 w-4" />
-            <span className="font-semibold">会话</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <SessionImportDialog
-              trigger={
-                <Button size="sm" variant="ghost" title="导入会话">
-                  <Upload className="h-4 w-4" />
-                </Button>
-              }
-              onSuccess={(ids) => {
-                void loadSessions();
-                if (ids.length === 1) {
-                  void selectSession(ids[0]);
-                }
-              }}
-            />
-            <BatchExportDialog
-              trigger={
-                <Button size="sm" variant="ghost" title="批量导出">
-                  <Archive className="h-4 w-4" />
-                </Button>
-              }
-            />
+      <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
+        <div className="flex items-center gap-2">
+          {isMobile && (
             <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowCreateDialog(true)}
+              variant="ghost"
+              size="icon-sm"
+              onClick={openSidebar}
+              className="shrink-0"
             >
-              新建
+              <Menu className="h-5 w-5" />
             </Button>
-          </div>
+          )}
+          <MessageSquare className="h-4 w-4" />
+          <span className="font-semibold">会话</span>
         </div>
-      )}
+        <div className="flex items-center gap-1">
+          <SessionImportDialog
+            trigger={
+              <Button size="sm" variant="ghost" title="导入会话">
+                <Upload className="h-4 w-4" />
+              </Button>
+            }
+            onSuccess={(ids) => {
+              void loadSessions();
+              if (ids.length === 1) {
+                void selectSession(ids[0]);
+              }
+            }}
+          />
+          <BatchExportDialog
+            trigger={
+              <Button size="sm" variant="ghost" title="批量导出">
+                <Archive className="h-4 w-4" />
+              </Button>
+            }
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowCreateDialog(true)}
+          >
+            新建
+          </Button>
+        </div>
+      </div>
 
       <div className="border-b px-3 py-2 space-y-2">
         <div className="relative">

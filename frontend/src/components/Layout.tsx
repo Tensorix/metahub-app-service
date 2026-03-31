@@ -1,5 +1,5 @@
 import { Outlet, useLocation } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Menu } from 'lucide-react';
 import { Sidebar, SIDEBAR_DEFAULT_WIDTH } from './Sidebar';
 import { Button } from './ui/button';
@@ -8,11 +8,11 @@ import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { PageTitleProvider, usePageTitle } from '@/contexts/PageTitleContext';
 
 /* ─── Full-bleed pages (no container padding) ─── */
-const FULL_BLEED_PATHS = ['/knowledge', '/agents', '/activities'];
+const FULL_BLEED_PATHS = ['/knowledge', '/agents', '/activities', '/sessions'];
 
 function LayoutContent() {
   const { isMobile } = useBreakpoints();
-  const { title, actions } = usePageTitle();
+  const { title, actions, hideTopBar, registerOpenSidebar } = usePageTitle();
   const location = useLocation();
 
   const isFullBleed = FULL_BLEED_PATHS.some((p) =>
@@ -22,6 +22,10 @@ function LayoutContent() {
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    registerOpenSidebar(() => setMobileMenuOpen(true));
+  }, [registerOpenSidebar]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -35,8 +39,8 @@ function LayoutContent() {
       />
 
       <main className="flex-1 flex flex-col overflow-hidden min-w-0">
-        {/* Mobile top bar */}
-        {isMobile && (
+        {/* Mobile top bar — hidden when child page takes control */}
+        {isMobile && !hideTopBar && (
           <div className="flex h-13 items-center gap-3 border-b px-4 shrink-0 bg-background">
             <Button
               variant="ghost"
