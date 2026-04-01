@@ -44,18 +44,15 @@ interface ProviderFormData {
   name: string;
   api_base_url: string;
   api_key: string;
-  sdk: string;
+  provider_type: string;
 }
 
-const SDK_OPTIONS = [
+const PROVIDER_TYPE_OPTIONS = [
   { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'google-genai', label: 'Google GenAI' },
-  { value: 'bedrock', label: 'AWS Bedrock' },
-  { value: 'azure-openai', label: 'Azure OpenAI' },
+  { value: 'openrouter', label: 'OpenRouter' },
 ] as const;
 
-const EMPTY_FORM: ProviderFormData = { id: '', name: '', api_base_url: '', api_key: '', sdk: 'openai' };
+const EMPTY_FORM: ProviderFormData = { id: '', name: '', api_base_url: '', api_key: '', provider_type: 'openai' };
 
 export function ProviderSettings() {
   const { toast } = useToast();
@@ -102,7 +99,7 @@ export function ProviderSettings() {
       name: prov.name,
       api_base_url: prov.api_base_url,
       api_key: '', // Don't prefill masked key
-      sdk: prov.sdk || 'openai',
+      provider_type: prov.provider_type || 'openai',
     });
     setDialogOpen(true);
   };
@@ -125,17 +122,12 @@ export function ProviderSettings() {
       name: form.name.trim() || form.id.trim(),
       api_base_url: form.api_base_url.trim(),
       api_key: form.api_key.trim() || null,
-      sdk: form.sdk || 'openai',
+      provider_type: form.provider_type || 'openai',
     };
 
-    // If editing and key left blank, keep existing (server has the real key)
+    // Server preserves existing key when api_key is null / masked.
     if (isEditing && !form.api_key.trim()) {
-      // Preserve the existing api_key from server by not including it
-      // The backend already stores the real key — we just don't overwrite with empty
-      const existing = providers[editingId!];
-      if (existing?.api_key) {
-        newEntry.api_key = existing.api_key;
-      }
+      newEntry.api_key = null;
     }
 
     // If renaming ID, remove old key
@@ -252,9 +244,9 @@ export function ProviderSettings() {
                       <span className="text-xs text-muted-foreground font-mono">
                         {id}
                       </span>
-                      {prov.sdk && (
+                      {prov.provider_type && (
                         <Badge variant="secondary" className="text-xs">
-                          {prov.sdk}
+                          {prov.provider_type}
                         </Badge>
                       )}
                     </div>
@@ -340,16 +332,16 @@ export function ProviderSettings() {
               />
             </div>
             <div className="space-y-2">
-              <Label>SDK 类型</Label>
+              <Label>Provider 类型</Label>
               <Select
-                value={form.sdk}
-                onValueChange={(value) => setForm({ ...form, sdk: value })}
+                value={form.provider_type}
+                onValueChange={(value) => setForm({ ...form, provider_type: value })}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="选择 SDK 类型" />
+                  <SelectValue placeholder="选择 Provider 类型" />
                 </SelectTrigger>
                 <SelectContent>
-                  {SDK_OPTIONS.map((opt) => (
+                  {PROVIDER_TYPE_OPTIONS.map((opt) => (
                     <SelectItem key={opt.value} value={opt.value}>
                       {opt.label}
                     </SelectItem>
@@ -357,7 +349,7 @@ export function ProviderSettings() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                LangChain 使用的 SDK 类型，决定如何调用此服务商的 API
+                服务端使用的 Provider 类型，决定实例化哪个 LangChain provider 包
               </p>
             </div>
             <div className="space-y-2">

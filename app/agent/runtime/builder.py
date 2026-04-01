@@ -8,10 +8,10 @@ from uuid import uuid4
 
 from deepagents import SubAgent, create_deep_agent
 from deepagents.backends import CompositeBackend, StoreBackend
-from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres import AsyncPostgresStore
 
+from app.agent.llm_factory import build_chat_model
 from app.config import config
 
 logger = logging.getLogger(__name__)
@@ -62,21 +62,18 @@ class AgentBuilder:
 
     def _apply_generation_params(self, target: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         if cfg.get("temperature") is not None:
-            target["temperature"] = cfg["temperature"]
+            target["temperature"] = float(cfg["temperature"])
         if cfg.get("max_tokens") is not None:
-            target["max_tokens"] = cfg["max_tokens"]
+            target["max_tokens"] = int(cfg["max_tokens"])
         return target
 
     def _get_model_string(self) -> str:
-        model = self.config.get("model") or config.AGENT_DEFAULT_MODEL
-        if ":" in model:
-            return model
-        sdk = self.config.get("_resolved_sdk") or self.config.get("model_provider") or config.AGENT_DEFAULT_PROVIDER
-        return f"{sdk}:{model}"
+        model, provider_type = self._get_effective_model_and_provider_type(self.config)
+        return f"{provider_type}:{model}"
 
     def _get_model_kwargs_for_provider(
         self,
-        sdk: str,
+        provider_type: str,
         cfg: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         cfg = cfg or self.config
@@ -89,30 +86,58 @@ class AgentBuilder:
         if resolved_url:
             kwargs["base_url"] = resolved_url
 
-        parent_sdk = self.config.get("_resolved_sdk") or self.config.get("model_provider") or config.AGENT_DEFAULT_PROVIDER
-        if not kwargs and cfg is not self.config and sdk == parent_sdk:
+        parent_provider_type = self._get_provider_type(self.config)
+        if not kwargs and cfg is not self.config and provider_type == parent_provider_type:
             if self.config.get("_resolved_api_key"):
                 kwargs["api_key"] = self.config["_resolved_api_key"]
             if self.config.get("_resolved_base_url"):
                 kwargs["base_url"] = self.config["_resolved_base_url"]
 
-        if sdk == "openai":
+        if provider_type == "openai":
             if "api_key" not in kwargs and config.OPENAI_API_KEY:
                 kwargs["api_key"] = config.OPENAI_API_KEY
             if "base_url" not in kwargs and config.OPENAI_BASE_URL:
                 kwargs["base_url"] = config.OPENAI_BASE_URL
-        elif sdk == "anthropic":
-            if "api_key" not in kwargs and getattr(config, "ANTHROPIC_API_KEY", None):
-                kwargs["api_key"] = config.ANTHROPIC_API_KEY
-        elif sdk == "google":
-            if "api_key" not in kwargs and getattr(config, "GOOGLE_API_KEY", None):
-                kwargs["api_key"] = config.GOOGLE_API_KEY
 
         return self._apply_generation_params(kwargs, cfg)
 
     def _get_model_kwargs(self) -> dict[str, Any]:
-        sdk = self.config.get("_resolved_sdk") or self.config.get("model_provider") or config.AGENT_DEFAULT_PROVIDER
-        return self._get_model_kwargs_for_provider(sdk, self.config)
+        provider_type = self._get_provider_type(self.config)
+        return self._get_model_kwargs_for_provider(provider_type, self.config)
+
+    @staticmethod
+    def _split_prefixed_model(model: str) -> tuple[Optional[str], str]:
+        if ":" not in model:
+            return None, model
+        provider_type, resolved_model = model.split(":", 1)
+        if not provider_type or not resolved_model:
+            return None, model
+        return provider_type, resolved_model
+
+    def _get_provider_type(self, cfg: Optional[dict[str, Any]] = None) -> str:
+        cfg = cfg or self.config
+        model = cfg.get("model")
+        if isinstance(model, str):
+            prefixed_provider_type, _ = self._split_prefixed_model(model)
+            if prefixed_provider_type:
+                return prefixed_provider_type
+        return (
+            cfg.get("_resolved_provider_type")
+            or cfg.get("model_provider")
+            or config.AGENT_DEFAULT_PROVIDER
+        )
+
+    def _get_effective_model_and_provider_type(
+        self,
+        cfg: Optional[dict[str, Any]] = None,
+    ) -> tuple[str, str]:
+        cfg = cfg or self.config
+        model = cfg.get("model") or config.AGENT_DEFAULT_MODEL
+        if isinstance(model, str):
+            prefixed_provider_type, resolved_model = self._split_prefixed_model(model)
+            if prefixed_provider_type:
+                return resolved_model, prefixed_provider_type
+        return model, self._get_provider_type(cfg)
 
     def _get_tools(self) -> list:
         from app.agent.tools import ToolRegistry
@@ -190,17 +215,16 @@ class AgentBuilder:
 
     def _build_subagent_model(self, sa_config: dict[str, Any]):
         model_name = sa_config.get("model")
-        model_provider = sa_config.get("model_provider")
         if not model_name:
             return None
 
-        if not model_provider:
-            return model_name
-
-        sdk = sa_config.get("_resolved_sdk") or model_provider
-        model_string = model_name if ":" in model_name else f"{sdk}:{model_name}"
-        model_kwargs = self._get_model_kwargs_for_provider(sdk, sa_config)
-        return init_chat_model(model_string, **model_kwargs)
+        model_name, provider_type = self._get_effective_model_and_provider_type(sa_config)
+        model_kwargs = self._get_model_kwargs_for_provider(provider_type, sa_config)
+        return build_chat_model(
+            provider_type=provider_type,
+            model=model_name,
+            **model_kwargs,
+        )
 
     async def _build_subagents(self) -> list:
         subagent_records = self.config.get("subagents") or []
@@ -228,8 +252,12 @@ class AgentBuilder:
         return subagents
 
     async def build(self):
-        model_string = self._get_model_string()
-        model = init_chat_model(model_string, **self._get_model_kwargs())
+        model_name, provider_type = self._get_effective_model_and_provider_type(self.config)
+        model = build_chat_model(
+            provider_type=provider_type,
+            model=model_name,
+            **self._get_model_kwargs(),
+        )
         builtin_tools = self._get_tools()
         mcp_tools = await self._get_mcp_tools()
         all_tools = self._merge_tools(builtin_tools, mcp_tools)
@@ -257,8 +285,9 @@ class AgentBuilder:
             agent_kwargs["skills"] = skills_paths
 
         logger.info(
-            "Creating deep agent: model=%s, tools=%s builtin + %s mcp, subagents=%s, mounted_files=%s",
-            model_string,
+            "Creating deep agent: provider_type=%s, model=%s, tools=%s builtin + %s mcp, subagents=%s, mounted_files=%s",
+            provider_type,
+            model_name,
             len(builtin_tools),
             len(mcp_tools),
             len(subagents),

@@ -154,7 +154,24 @@ class DeepAgentService:
         messages = response.get("messages", [])
         for msg in reversed(messages):
             if isinstance(msg, AIMessage) or getattr(msg, "type", None) == "ai":
-                return msg.content
+                content = getattr(msg, "content", "")
+                if isinstance(content, str):
+                    return content
+                return str(content)
+        return ""
+
+    @staticmethod
+    def _extract_last_ai_message_from_state(state: Any) -> str:
+        if not state or not getattr(state, "values", None):
+            return ""
+
+        messages = state.values.get("messages", [])
+        for msg in reversed(messages):
+            if isinstance(msg, AIMessage) or getattr(msg, "type", None) == "ai":
+                content = getattr(msg, "content", "")
+                if isinstance(content, str):
+                    return content
+                return str(content)
         return ""
 
     @staticmethod
@@ -194,7 +211,7 @@ class DeepAgentService:
             ),
             "model_name": str(self.config.get("model") or ""),
             "provider": str(
-                self.config.get("_resolved_sdk")
+                self.config.get("_resolved_provider_type")
                 or self.config.get("model_provider")
                 or ""
             ),
@@ -209,10 +226,24 @@ class DeepAgentService:
         emit_interrupt: bool = False,
     ) -> AsyncGenerator[dict[str, Any], None]:
         translator = StreamEventTranslator(logger)
+        emitted_visible_message = False
 
         async for event in agent.astream_events(input_data, config=cfg, version="v2"):
             for translated in translator.translate_event(event):
+                if translated.get("event") == "message":
+                    data = translated.get("data", {})
+                    if isinstance(data, dict) and data.get("content") and not data.get("parent_op_id"):
+                        emitted_visible_message = True
                 yield translated
+
+        if not emitted_visible_message:
+            try:
+                state = await agent.aget_state(cfg)
+                fallback_text = self._extract_last_ai_message_from_state(state)
+                if fallback_text:
+                    yield {"event": "message", "data": {"content": fallback_text}}
+            except Exception as exc:
+                logger.debug("Final state fallback extraction failed: %s", exc)
 
         if emit_interrupt:
             try:
@@ -244,7 +275,11 @@ class DeepAgentService:
             agent, cfg = await self._prepare_invocation(context)
             input_data = await self._build_message_input(message, context)
             response = await agent.ainvoke(input_data, config=cfg)
-            return self._extract_last_ai_message(response)
+            final_text = self._extract_last_ai_message(response)
+            if final_text:
+                return final_text
+            state = await agent.aget_state(cfg)
+            return self._extract_last_ai_message_from_state(state)
 
     async def chat_with_metrics(
         self,
@@ -263,8 +298,12 @@ class DeepAgentService:
             agent, cfg = await self._prepare_invocation(context)
             input_data = await self._build_message_input(message, context)
             response = await agent.ainvoke(input_data, config=cfg)
+            final_text = self._extract_last_ai_message(response)
+            if not final_text:
+                state = await agent.aget_state(cfg)
+                final_text = self._extract_last_ai_message_from_state(state)
             return {
-                "message": self._extract_last_ai_message(response),
+                "message": final_text,
                 "usage_metadata": extract_usage_metadata(response),
                 "estimated_input_text": "\n\n".join(
                     filter(
@@ -277,7 +316,7 @@ class DeepAgentService:
                 ),
                 "model_name": str(self.config.get("model") or ""),
                 "provider": str(
-                    self.config.get("_resolved_sdk")
+                    self.config.get("_resolved_provider_type")
                     or self.config.get("model_provider")
                     or ""
                 ),

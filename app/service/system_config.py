@@ -1,6 +1,6 @@
 """Service layer for SystemConfig CRUD and upstream model proxy."""
 
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from loguru import logger
@@ -41,6 +41,38 @@ def upsert_config(
     return row
 
 
+def normalize_provider_registry(
+    incoming: dict[str, Any],
+    existing: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Normalize provider registry payload before persistence.
+
+    Preserve existing API keys when the client sends a masked value or null.
+    """
+    normalized: dict[str, Any] = {}
+    existing = existing or {}
+
+    for provider_id, raw_config in incoming.items():
+        if not isinstance(raw_config, dict):
+            normalized[provider_id] = raw_config
+            continue
+
+        current = dict(raw_config)
+        previous = existing.get(provider_id)
+        previous_key = previous.get("api_key") if isinstance(previous, dict) else None
+        incoming_key = current.get("api_key")
+
+        if incoming_key is None or (
+            isinstance(incoming_key, str)
+            and incoming_key.startswith("****")
+        ):
+            current["api_key"] = previous_key
+
+        normalized[provider_id] = current
+
+    return normalized
+
+
 # ---------------------------------------------------------------------------
 # Provider registry
 # ---------------------------------------------------------------------------
@@ -50,6 +82,7 @@ _DEFAULT_PROVIDERS: dict[str, dict] = {
         "name": "OpenAI",
         "api_base_url": "https://api.openai.com/v1",
         "api_key": None,
+        "provider_type": "openai",
     }
 }
 
@@ -66,17 +99,18 @@ def get_providers(db: Session) -> dict[str, ProviderConfig]:
 
 
 def resolve_provider(db: Session, provider_id: str) -> tuple[str, str, str]:
-    """Resolve (api_base_url, api_key, sdk) for a provider_id.
+    """Resolve (api_base_url, api_key, provider_type) for a provider_id.
 
     Reads exclusively from the provider registry in DB.
     Returns ("", "", "") if the provider_id is not registered.
-    ``sdk`` is the LangChain-compatible provider type (e.g. "openai").
+    ``provider_type`` is the LangChain-compatible provider type
+    (e.g. "openai", "openrouter").
     """
     providers = get_providers(db)
     prov = providers.get(provider_id)
 
     if prov:
-        return prov.api_base_url, prov.api_key or "", prov.sdk
+        return prov.api_base_url, prov.api_key or "", prov.provider_type
 
     return "", "", ""
 
@@ -136,13 +170,14 @@ def get_agent_default_config(db: Optional[Session] = None) -> AgentDefaultConfig
 async def fetch_upstream_models(
     base_url: str,
     api_key: Optional[str] = None,
+    provider_type: str = "openai",
 ) -> list[UpstreamModel]:
     """Fetch model list from an OpenAI-compatible /models endpoint."""
     url = f"{base_url.rstrip('/')}/models"
     headers: dict[str, str] = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    elif config.OPENAI_API_KEY:
+    elif provider_type == "openai" and config.OPENAI_API_KEY:
         headers["Authorization"] = f"Bearer {config.OPENAI_API_KEY}"
 
     async with httpx.AsyncClient(timeout=15.0) as client:

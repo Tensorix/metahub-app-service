@@ -17,6 +17,8 @@ class StreamEventTranslator:
     def __init__(self, logger: Optional[logging.Logger] = None) -> None:
         self.logger = logger or logging.getLogger(__name__)
         self._active_subagent_op_ids: set[str] = set()
+        self._streamed_text_ops: set[str] = set()
+        self._streamed_thinking_ops: set[str] = set()
 
     def _normalize_op_id(self, event: dict[str, Any]) -> str:
         op_id = event.get("run_id")
@@ -85,14 +87,22 @@ class StreamEventTranslator:
         # --- Top-level events ---
         if event_type == "on_chat_model_stream":
             chunk = event_data.get("chunk")
-            if chunk and hasattr(chunk, "content") and chunk.content:
-                return [{"event": "message", "data": {"content": chunk.content}}]
-            return []
+            payload = self._translate_chat_model_stream_chunk(chunk, op_id=op_id)
+            return payload
 
         if event_type == "on_chat_model_end":
+            payload: list[dict[str, Any]] = []
+            if op_id not in self._streamed_thinking_ops:
+                fallback_thinking = self._extract_reasoning_from_chat_output(event_data.get("output"))
+                if fallback_thinking:
+                    payload.append({"event": "thinking", "data": {"content": fallback_thinking}})
+            if op_id not in self._streamed_text_ops:
+                fallback_text = self._extract_text_from_chat_output(event_data.get("output"))
+                if fallback_text:
+                    payload.append({"event": "message", "data": {"content": fallback_text}})
             usage = extract_usage_metadata(event_data.get("output"))
             if usage:
-                return [
+                payload.append(
                     {
                         "event": "metrics",
                         "data": {
@@ -102,8 +112,10 @@ class StreamEventTranslator:
                             "total_token_source": "reported",
                         },
                     }
-                ]
-            return []
+                )
+            self._streamed_text_ops.discard(op_id)
+            self._streamed_thinking_ops.discard(op_id)
+            return payload
 
         if event_type == "on_tool_start":
             return [
@@ -145,11 +157,37 @@ class StreamEventTranslator:
         """Translate a subagent internal event into a transport event with parent_op_id."""
         event_type = event.get("event")
         event_data = event.get("data", {})
+        op_id = self._normalize_op_id(event)
 
         if event_type == "on_chat_model_end":
+            payload: list[dict[str, Any]] = []
+            if op_id not in self._streamed_thinking_ops:
+                fallback_thinking = self._extract_reasoning_from_chat_output(event_data.get("output"))
+                if fallback_thinking:
+                    payload.append(
+                        {
+                            "event": "thinking",
+                            "data": {
+                                "content": fallback_thinking,
+                                "parent_op_id": parent_op_id,
+                            },
+                        }
+                    )
+            if op_id not in self._streamed_text_ops:
+                fallback_text = self._extract_text_from_chat_output(event_data.get("output"))
+                if fallback_text:
+                    payload.append(
+                        {
+                            "event": "message",
+                            "data": {
+                                "content": fallback_text,
+                                "parent_op_id": parent_op_id,
+                            },
+                        }
+                    )
             usage = extract_usage_metadata(event_data.get("output"))
             if usage:
-                return [
+                payload.append(
                     {
                         "event": "metrics",
                         "data": {
@@ -160,29 +198,26 @@ class StreamEventTranslator:
                             "parent_op_id": parent_op_id,
                         },
                     }
-                ]
-            return []
+                )
+            self._streamed_text_ops.discard(op_id)
+            self._streamed_thinking_ops.discard(op_id)
+            return payload
 
         if event_type == "on_chat_model_stream":
             chunk = event_data.get("chunk")
-            if chunk and hasattr(chunk, "content") and chunk.content:
-                return [
-                    {
-                        "event": "message",
-                        "data": {
-                            "content": chunk.content,
-                            "parent_op_id": parent_op_id,
-                        },
-                    }
-                ]
-            return []
+            payload = self._translate_chat_model_stream_chunk(
+                chunk,
+                op_id=op_id,
+                parent_op_id=parent_op_id,
+            )
+            return payload
 
         if event_type == "on_tool_start":
             return [
                 {
                     "event": "operation_start",
                     "data": {
-                        "op_id": self._normalize_op_id(event),
+                        "op_id": op_id,
                         "op_type": "tool",
                         "name": event.get("name", "unknown"),
                         "args": sanitize_tool_input(event_data.get("input", {})),
@@ -197,7 +232,7 @@ class StreamEventTranslator:
                 {
                     "event": "operation_end",
                     "data": {
-                        "op_id": self._normalize_op_id(event),
+                        "op_id": op_id,
                         "op_type": "tool",
                         "name": event.get("name", "unknown"),
                         "result": safe_serialize(event_data.get("output", "")),
@@ -209,6 +244,123 @@ class StreamEventTranslator:
             ]
 
         return []
+
+    @staticmethod
+    def _extract_text_from_chat_output(output: Any) -> str:
+        """Extract human-readable text from a chat model end payload."""
+        if output is None:
+            return ""
+
+        generations = getattr(output, "generations", None)
+        if generations:
+            texts: list[str] = []
+            for generation_group in generations:
+                for generation in generation_group or []:
+                    message = getattr(generation, "message", None)
+                    if message is None:
+                        continue
+                    content = getattr(message, "content", "")
+                    if isinstance(content, str) and content:
+                        texts.append(content)
+            return "".join(texts)
+
+        messages = getattr(output, "messages", None)
+        if messages:
+            texts = [
+                getattr(message, "content", "")
+                for message in messages
+                if isinstance(getattr(message, "content", None), str) and getattr(message, "content", "")
+            ]
+            return "".join(texts)
+
+        content = getattr(output, "content", None)
+        if isinstance(content, str):
+            return content
+
+        return ""
+
+    def _translate_chat_model_stream_chunk(
+        self,
+        chunk: Any,
+        *,
+        op_id: str,
+        parent_op_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if not chunk:
+            return []
+
+        payload: list[dict[str, Any]] = []
+        reasoning = self._extract_reasoning_from_chunk(chunk)
+        if reasoning:
+            self._streamed_thinking_ops.add(op_id)
+            data: dict[str, Any] = {"content": reasoning}
+            if parent_op_id:
+                data["parent_op_id"] = parent_op_id
+            payload.append({"event": "thinking", "data": data})
+
+        content = getattr(chunk, "content", None)
+        if content:
+            self._streamed_text_ops.add(op_id)
+            data = {"content": content}
+            if parent_op_id:
+                data["parent_op_id"] = parent_op_id
+            payload.append({"event": "message", "data": data})
+
+        return payload
+
+    @staticmethod
+    def _extract_reasoning_from_chunk(chunk: Any) -> str:
+        if chunk is None:
+            return ""
+
+        additional_kwargs = getattr(chunk, "additional_kwargs", None)
+        if isinstance(additional_kwargs, dict):
+            reasoning = additional_kwargs.get("reasoning_content")
+            if isinstance(reasoning, str):
+                return reasoning
+
+        return ""
+
+    @staticmethod
+    def _extract_reasoning_from_chat_output(output: Any) -> str:
+        if output is None:
+            return ""
+
+        generations = getattr(output, "generations", None)
+        if generations:
+            segments: list[str] = []
+            for generation_group in generations:
+                for generation in generation_group or []:
+                    message = getattr(generation, "message", None)
+                    if message is None:
+                        continue
+                    additional_kwargs = getattr(message, "additional_kwargs", None)
+                    if not isinstance(additional_kwargs, dict):
+                        continue
+                    reasoning = additional_kwargs.get("reasoning_content")
+                    if isinstance(reasoning, str) and reasoning:
+                        segments.append(reasoning)
+            return "".join(segments)
+
+        messages = getattr(output, "messages", None)
+        if messages:
+            segments = []
+            for message in messages:
+                additional_kwargs = getattr(message, "additional_kwargs", None)
+                if not isinstance(additional_kwargs, dict):
+                    continue
+                reasoning = additional_kwargs.get("reasoning_content")
+                if isinstance(reasoning, str) and reasoning:
+                    segments.append(reasoning)
+            return "".join(segments)
+
+        additional_kwargs = getattr(output, "additional_kwargs", None)
+        if isinstance(additional_kwargs, dict):
+            reasoning = additional_kwargs.get("reasoning_content")
+            if isinstance(reasoning, str):
+                return reasoning
+
+        return ""
 
     @staticmethod
     def extract_interrupt_payload(state: Any) -> Optional[dict[str, Any]]:

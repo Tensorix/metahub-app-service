@@ -242,7 +242,7 @@ def get_active_embedding_service(
         from app.service.system_config import get_embedding_config, resolve_provider
         sc = get_embedding_config(db)
         if sc and sc.model_name:
-            api_base_url, _api_key, _sdk = resolve_provider(db, sc.provider)
+            api_base_url, _api_key, _provider_type = resolve_provider(db, sc.provider)
             model_config = EmbeddingModelConfig(
                 model_id=f"sys-{sc.provider}-{sc.model_name}",
                 provider=sc.provider,

@@ -233,13 +233,13 @@ class AgentFactory:
         if db and model_provider:
             try:
                 from app.service.system_config import resolve_provider
-                base_url, api_key, sdk = resolve_provider(db, model_provider)
+                base_url, api_key, provider_type = resolve_provider(db, model_provider)
                 if base_url:
                     agent_config["_resolved_base_url"] = base_url
                 if api_key:
                     agent_config["_resolved_api_key"] = api_key
-                if sdk:
-                    agent_config["_resolved_sdk"] = sdk
+                if provider_type:
+                    agent_config["_resolved_provider_type"] = provider_type
             except Exception:
                 pass  # Fall through to env defaults
 
@@ -310,13 +310,13 @@ class AgentFactory:
         if db and child.model_provider:
             try:
                 from app.service.system_config import resolve_provider
-                base_url, api_key, sdk = resolve_provider(db, child.model_provider)
+                base_url, api_key, provider_type = resolve_provider(db, child.model_provider)
                 if base_url:
                     config["_resolved_base_url"] = base_url
                 if api_key:
                     config["_resolved_api_key"] = api_key
-                if sdk:
-                    config["_resolved_sdk"] = sdk
+                if provider_type:
+                    config["_resolved_provider_type"] = provider_type
             except Exception:
                 pass
 

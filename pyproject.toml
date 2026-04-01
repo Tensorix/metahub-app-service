@@ -20,6 +20,7 @@ dependencies = [
     "uvicorn>=0.38.0",
     "langchain>=0.3.0",
     "langchain-openai>=0.2.0",
+    "langchain-openrouter>=0.2.1",
     "langchain-core>=0.3.0",
     "langgraph>=0.2.0",
     "langgraph-checkpoint-postgres>=0.2.0",

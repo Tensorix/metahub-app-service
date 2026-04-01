@@ -6,6 +6,7 @@ Verifies that the new implementation using create_deep_agent works correctly.
 
 import pytest
 from uuid import uuid4
+from types import SimpleNamespace
 
 from app.agent.deep_agent_service import DeepAgentService
 from app.agent.factory import AgentFactory
@@ -148,6 +149,19 @@ class TestDeepAgentsMigration:
         assert "message" in params
         assert "thread_id" in params
         assert "user_id" in params
+
+    def test_extract_last_ai_message_from_state(self):
+        service = DeepAgentService({})
+        state = SimpleNamespace(
+            values={
+                "messages": [
+                    SimpleNamespace(type="human", content="hello"),
+                    SimpleNamespace(type="ai", content="final answer"),
+                ]
+            }
+        )
+
+        assert service._extract_last_ai_message_from_state(state) == "final answer"
 
 
 class TestBuiltInTools:

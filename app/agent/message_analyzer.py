@@ -2,11 +2,11 @@
 from datetime import datetime, timezone
 from typing import Optional
 from pydantic import BaseModel, Field
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from loguru import logger
 
+from app.agent.llm_factory import build_chat_model
 from app.config import config
 
 
@@ -29,15 +29,17 @@ class MessageAnalyzer:
         self,
         model_name: Optional[str] = None,
         provider: Optional[str] = None,
+        provider_type: Optional[str] = None,
         api_base_url: Optional[str] = None,
         api_key: Optional[str] = None,
     ):
         """初始化 LangChain LLM"""
-        self.llm = ChatOpenAI(
+        self.llm = build_chat_model(
+            provider_type=provider_type or "openai",
             model=model_name or "gpt-4o-mini",
             temperature=0.1,
-            openai_api_key=api_key or config.OPENAI_API_KEY,
-            openai_api_base=api_base_url or config.OPENAI_BASE_URL,
+            api_key=api_key or config.OPENAI_API_KEY,
+            base_url=api_base_url or config.OPENAI_BASE_URL,
         )
         
         # 定义输出解析器
@@ -167,10 +169,11 @@ def get_message_analyzer(db=None) -> MessageAnalyzer:
                     resolve_provider,
                 )
                 cfg = get_message_analyzer_config(db)
-                api_base_url, api_key, _sdk = resolve_provider(db, cfg.provider)
+                api_base_url, api_key, provider_type = resolve_provider(db, cfg.provider)
                 kwargs = dict(
                     model_name=cfg.model_name,
                     provider=cfg.provider,
+                    provider_type=provider_type or "openai",
                     api_base_url=api_base_url,
                     api_key=api_key,
                 )

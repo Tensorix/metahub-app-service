@@ -43,7 +43,13 @@ def update_system_config(
     _user=Depends(get_current_user),
 ):
     """Upsert a system config. Triggers side-effects for known keys."""
-    row = svc.upsert_config(db, key, body.value, body.description)
+    value = body.value
+    if key == "providers":
+        existing = svc.get_config(db, key)
+        existing_value = existing.value if existing else {}
+        value = svc.normalize_provider_registry(value, existing_value)
+
+    row = svc.upsert_config(db, key, value, body.description)
 
     # Side-effects for specific keys
     if key == "message_analyzer":
@@ -87,9 +93,10 @@ async def proxy_fetch_models(
     """
     base_url = body.base_url
     api_key = body.api_key
+    provider_type = "openai"
 
     if body.provider_id:
-        resolved_url, resolved_key, _sdk = svc.resolve_provider(db, body.provider_id)
+        resolved_url, resolved_key, provider_type = svc.resolve_provider(db, body.provider_id)
         base_url = base_url or resolved_url
         api_key = api_key or resolved_key
 
@@ -97,7 +104,7 @@ async def proxy_fetch_models(
         raise HTTPException(400, "Must provide provider_id or base_url")
 
     try:
-        models = await svc.fetch_upstream_models(base_url, api_key)
+        models = await svc.fetch_upstream_models(base_url, api_key, provider_type=provider_type or "openai")
         return FetchModelsResponse(models=models)
     except Exception as e:
         raise HTTPException(502, f"Failed to fetch models: {e}")

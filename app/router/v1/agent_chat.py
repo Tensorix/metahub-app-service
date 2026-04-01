@@ -953,7 +953,7 @@ async def chat_resume(
                     estimated_input_text=estimated_input_text,
                     estimated_output_text=collector.get_full_text(),
                     model_name=agent_config.get("model") or None,
-                    provider=agent_config.get("_resolved_sdk") or agent_config.get("model_provider") or None,
+                    provider=agent_config.get("_resolved_provider_type") or agent_config.get("model_provider") or None,
                 )
                 collector.set_metrics(metrics_payload)
 
