@@ -240,7 +240,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   return (
     <div className="flex h-full flex-col bg-background overflow-hidden">
       {/* Header */}
-      <div className="border-b border-border/50 px-4 py-3 shrink-0 bg-background/90 backdrop-blur-sm">
+      <div className="border-b border-border/50 px-4 py-3 shrink-0 bg-background/90">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             {/* 移动端返回按钮 */}

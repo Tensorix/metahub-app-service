@@ -134,7 +134,7 @@ export function ChatLayout({ className, initialSessionId, initialTopicId }: Chat
     return (
       <div className={cn('flex h-full', className)}>
         {mobileView === 'sessions' ? (
-          <div className="flex-1 border rounded-lg bg-background">
+          <div className="flex-1 border bg-background">
             <SessionSidebar onSessionSelect={handleSessionSelect} />
           </div>
         ) : (
@@ -170,10 +170,10 @@ export function ChatLayout({ className, initialSessionId, initialTopicId }: Chat
   // 平板布局：隐藏话题侧边栏，使用抽屉
   if (isTablet && !isDesktop) {
     return (
-      <div className={cn('flex h-full', className)}>
+      <div className={cn('flex h-full bg-[#ebebeb]', className)}>
         {/* 左侧：会话列表 - 可调整宽度 */}
         <div
-          className="shrink-0 border rounded-lg bg-background overflow-hidden"
+          className="shrink-0 bg-background rounded-lg overflow-hidden"
           style={{ width: sessionSidebarWidth }}
         >
           <SessionSidebar />
@@ -186,7 +186,7 @@ export function ChatLayout({ className, initialSessionId, initialTopicId }: Chat
         />
 
         {/* 中间：消息区域 */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 bg-background rounded-lg overflow-hidden">
           <MessageArea />
         </div>
 
@@ -216,10 +216,10 @@ export function ChatLayout({ className, initialSessionId, initialTopicId }: Chat
 
   // 桌面布局：两栏（会话列表 + 消息区域，话题列表在消息区域内）
   return (
-    <div className={cn('flex h-full', className)}>
+    <div className={cn('flex h-full bg-[#ebebeb]', className)}>
       {/* 左侧：会话列表 - 可调整宽度 */}
       <div
-        className="shrink-0 overflow-hidden border bg-background"
+        className="shrink-0 overflow-hidden bg-background rounded-lg"
         style={{ width: sessionSidebarWidth }}
       >
         <SessionSidebar />
@@ -232,7 +232,7 @@ export function ChatLayout({ className, initialSessionId, initialTopicId }: Chat
       />
 
       {/* 右侧：消息区域（内含话题列表） */}
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 bg-background rounded-lg overflow-hidden">
         <MessageArea />
       </div>
     </div>
