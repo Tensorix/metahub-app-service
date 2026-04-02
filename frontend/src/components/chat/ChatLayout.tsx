@@ -219,7 +219,7 @@ export function ChatLayout({ className, initialSessionId, initialTopicId }: Chat
     <div className={cn('flex h-full', className)}>
       {/* 左侧：会话列表 - 可调整宽度 */}
       <div
-        className="shrink-0 overflow-hidden border rounded-lg bg-background"
+        className="shrink-0 overflow-hidden border bg-background"
         style={{ width: sessionSidebarWidth }}
       >
         <SessionSidebar />
