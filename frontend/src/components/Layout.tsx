@@ -62,12 +62,8 @@ function LayoutContent() {
         />
       )}
 
-      <CardStyleContainer
-        sides={['top','right', 'bottom']}
-        size={8}
-        className="flex-1 min-w-0"
-      >
-        <main className="flex-1 flex flex-col overflow-hidden min-w-0 bg-background rounded-lg h-full">
+      {isMobile ? (
+        <main className="flex-1 flex flex-col overflow-hidden min-w-0">
           {/* Mobile top bar — hidden when child page takes control */}
           {isMobile && !hideTopBar && (
             <div className="flex h-13 items-center gap-3 border-b px-4 shrink-0 bg-background">
@@ -115,7 +111,29 @@ function LayoutContent() {
             </div>
           </div>
         </main>
-      </CardStyleContainer>
+      ) : (
+        <CardStyleContainer
+          sides={['top', 'right', 'bottom']}
+          size={8}
+          className="flex-1 min-w-0"
+        >
+          <main className="flex-1 flex flex-col overflow-hidden min-w-0 bg-background rounded-lg h-full">
+            {/* Page content */}
+            <div className="flex-1 flex flex-col min-h-0 overflow-y-auto scrollbar-thin">
+              <div
+                className={cn(
+                  'flex-1 flex flex-col min-h-0',
+                  isFullBleed
+                    ? 'p-0 w-full'
+                    : 'container mx-auto px-4 py-6 md:px-6 lg:px-8 max-w-7xl'
+                )}
+              >
+                <Outlet />
+              </div>
+            </div>
+          </main>
+        </CardStyleContainer>
+      )}
     </div>
   );
 }
