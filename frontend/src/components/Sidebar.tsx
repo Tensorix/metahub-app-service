@@ -19,6 +19,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { useCallback } from 'react';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { ResizableHandle } from './ui/resizable';
+import { CardStyleContainer } from './ui/card-style-container';
 import {
   Tooltip,
   TooltipContent,
@@ -294,16 +295,23 @@ export function Sidebar({
 
   return (
     <TooltipProvider delayDuration={0}>
-      <div className="relative flex h-full shrink-0 border-r bg-sidebar">
-        {sidebarContent}
-        {!collapsed && (
-          <ResizableHandle
-            direction="horizontal"
-            onResize={handleResize}
-            className="-mr-1"
-          />
-        )}
-      </div>
+      <CardStyleContainer
+        sides={['top', 'right', 'bottom']}
+        size={8}
+        className="bg-[#ebebeb]"
+      >
+        {/* 避免边缘有白线 */}
+        <div className="relative flex h-full shrink-0 border-r bg-sidebar rounded-r-lg">
+          {sidebarContent}
+          {!collapsed && (
+            <ResizableHandle
+              direction="horizontal"
+              onResize={handleResize}
+              className="-mr-1"
+            />
+          )}
+        </div>
+      </CardStyleContainer>
     </TooltipProvider>
   );
 }
