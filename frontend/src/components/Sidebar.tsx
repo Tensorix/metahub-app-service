@@ -16,9 +16,7 @@ import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { useAuthStore } from '../store/auth';
 import { ThemeToggle } from './ThemeToggle';
-import { useCallback } from 'react';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
-import { ResizableHandle } from './ui/resizable';
 import { CardStyleContainer } from './ui/card-style-container';
 import {
   Tooltip,
@@ -30,11 +28,11 @@ import {
 interface SidebarProps {
   className?: string;
   sidebarWidth: number;
-  onWidthChange: (width: number) => void;
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
   mobileOpen: boolean;
   onMobileOpenChange: (open: boolean) => void;
+  isResizing?: boolean;
 }
 
 /* ─── Navigation items ─── */
@@ -68,11 +66,11 @@ export const SIDEBAR_MAX_WIDTH = MAX_WIDTH;
 export function Sidebar({
   className,
   sidebarWidth,
-  onWidthChange,
   collapsed,
   onCollapsedChange,
   mobileOpen,
   onMobileOpenChange,
+  isResizing = false,
 }: SidebarProps) {
   const location = useLocation();
   const { logout, user } = useAuthStore();
@@ -81,14 +79,6 @@ export function Sidebar({
   const handleLogout = async () => {
     await logout();
   };
-
-  const handleResize = useCallback(
-    (delta: number) => {
-      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, sidebarWidth + delta));
-      onWidthChange(newWidth);
-    },
-    [sidebarWidth, onWidthChange]
-  );
 
   const handleNavClick = () => {
     if (isMobile) onMobileOpenChange(false);
@@ -150,7 +140,8 @@ export function Sidebar({
   const sidebarContent = (
     <aside
       className={cn(
-        'flex h-full flex-col overflow-hidden transition-[width] duration-200 ease-out',
+        'flex h-full flex-col overflow-hidden',
+        isResizing ? 'transition-none' : 'transition-[width] duration-200 ease-out',
         className
       )}
       style={{ width: isMobile ? '100%' : currentWidth }}
@@ -296,20 +287,13 @@ export function Sidebar({
   return (
     <TooltipProvider delayDuration={0}>
       <CardStyleContainer
-        sides={['top', 'right', 'bottom']}
+        sides={['top','right', 'bottom']}
         size={8}
         className="bg-[#ebebeb]"
       >
         {/* 避免边缘有白线 */}
         <div className="relative flex h-full shrink-0 border-r bg-sidebar rounded-r-lg">
           {sidebarContent}
-          {!collapsed && (
-            <ResizableHandle
-              direction="horizontal"
-              onResize={handleResize}
-              className="-mr-1"
-            />
-          )}
         </div>
       </CardStyleContainer>
     </TooltipProvider>

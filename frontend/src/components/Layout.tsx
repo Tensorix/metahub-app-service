@@ -1,11 +1,17 @@
 import { Outlet, useLocation } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Menu } from 'lucide-react';
-import { Sidebar, SIDEBAR_DEFAULT_WIDTH } from './Sidebar';
+import {
+  Sidebar,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+} from './Sidebar';
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { PageTitleProvider, usePageTitle } from '@/contexts/PageTitleContext';
+import { ResizableHandle } from './ui/resizable';
 
 /* ─── Full-bleed pages (no container padding) ─── */
 const FULL_BLEED_PATHS = ['/knowledge', '/agents', '/activities', '/sessions'];
@@ -22,6 +28,13 @@ function LayoutContent() {
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isSidebarResizing, setIsSidebarResizing] = useState(false);
+
+  const handleSidebarResize = useCallback((delta: number) => {
+    setSidebarWidth((prev) =>
+      Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, prev + delta))
+    );
+  }, []);
 
   useEffect(() => {
     registerOpenSidebar(() => setMobileMenuOpen(true));
@@ -31,12 +44,22 @@ function LayoutContent() {
     <div className="flex h-screen overflow-hidden bg-background">
       <Sidebar
         sidebarWidth={sidebarWidth}
-        onWidthChange={setSidebarWidth}
         collapsed={sidebarCollapsed}
         onCollapsedChange={setSidebarCollapsed}
         mobileOpen={mobileMenuOpen}
         onMobileOpenChange={setMobileMenuOpen}
+        isResizing={isSidebarResizing}
       />
+
+      {!isMobile && !sidebarCollapsed && (
+        <ResizableHandle
+          direction="horizontal"
+          onResize={handleSidebarResize}
+          onDragStart={() => setIsSidebarResizing(true)}
+          onDragEnd={() => setIsSidebarResizing(false)}
+          className="bg-[#ebebeb]"
+        />
+      )}
 
       <main className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Mobile top bar — hidden when child page takes control */}
