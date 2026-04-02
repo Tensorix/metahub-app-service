@@ -44,6 +44,15 @@ export const staggerContainer: Variants = {
   },
 };
 
+/** Sidebar-optimized stagger: tighter timing for compact items */
+export const sidebarStagger: Variants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.03, delayChildren: 0.02 },
+  },
+};
+
 /* ─── List items ─── */
 
 /** List/grid item with exit scale */
