@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { PageTitleProvider, usePageTitle } from '@/contexts/PageTitleContext';
 import { ResizableHandle } from './ui/resizable';
+import { CardStyleContainer } from './ui/card-style-container';
 
 /* ─── Full-bleed pages (no container padding) ─── */
 const FULL_BLEED_PATHS = ['/knowledge', '/agents', '/activities', '/sessions'];
@@ -61,54 +62,60 @@ function LayoutContent() {
         />
       )}
 
-      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
-        {/* Mobile top bar — hidden when child page takes control */}
-        {isMobile && !hideTopBar && (
-          <div className="flex h-13 items-center gap-3 border-b px-4 shrink-0 bg-background">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setMobileMenuOpen(true)}
-              className="shrink-0"
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
-            <h1 className="text-base font-semibold truncate flex-1 min-w-0">
-              {title || 'MetaHub'}
-            </h1>
-            {actions.length > 0 && (
-              <div className="flex items-center gap-1.5 shrink-0">
-                {actions.map((action) => (
-                  <Button
-                    key={action.key}
-                    variant={action.variant || 'default'}
-                    size="sm"
-                    onClick={action.onClick}
-                    className="gap-1.5"
-                  >
-                    {action.icon}
-                    <span className="hidden sm:inline">{action.label}</span>
-                  </Button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+      <CardStyleContainer
+        sides={['top','right', 'bottom']}
+        size={8}
+        className="flex-1 min-w-0"
+      >
+        <main className="flex-1 flex flex-col overflow-hidden min-w-0 bg-background rounded-lg h-full">
+          {/* Mobile top bar — hidden when child page takes control */}
+          {isMobile && !hideTopBar && (
+            <div className="flex h-13 items-center gap-3 border-b px-4 shrink-0 bg-background">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setMobileMenuOpen(true)}
+                className="shrink-0"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+              <h1 className="text-base font-semibold truncate flex-1 min-w-0">
+                {title || 'MetaHub'}
+              </h1>
+              {actions.length > 0 && (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {actions.map((action) => (
+                    <Button
+                      key={action.key}
+                      variant={action.variant || 'default'}
+                      size="sm"
+                      onClick={action.onClick}
+                      className="gap-1.5"
+                    >
+                      {action.icon}
+                      <span className="hidden sm:inline">{action.label}</span>
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
-        {/* Page content */}
-        <div className="flex-1 flex flex-col min-h-0 overflow-y-auto scrollbar-thin">
-          <div
-            className={cn(
-              'flex-1 flex flex-col min-h-0',
-              isFullBleed
-                ? 'p-0 w-full'
-                : 'container mx-auto px-4 py-6 md:px-6 lg:px-8 max-w-7xl'
-            )}
-          >
-            <Outlet />
+          {/* Page content */}
+          <div className="flex-1 flex flex-col min-h-0 overflow-y-auto scrollbar-thin">
+            <div
+              className={cn(
+                'flex-1 flex flex-col min-h-0',
+                isFullBleed
+                  ? 'p-0 w-full'
+                  : 'container mx-auto px-4 py-6 md:px-6 lg:px-8 max-w-7xl'
+              )}
+            >
+              <Outlet />
+            </div>
           </div>
-        </div>
-      </main>
+        </main>
+      </CardStyleContainer>
     </div>
   );
 }
