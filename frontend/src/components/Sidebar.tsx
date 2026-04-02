@@ -289,7 +289,6 @@ export function Sidebar({
       <CardStyleContainer
         sides={['top','right', 'bottom']}
         size={8}
-        className="bg-[#ebebeb]"
       >
         {/* 避免边缘有白线 */}
         <div className="relative flex h-full shrink-0 border-r bg-sidebar rounded-r-lg">

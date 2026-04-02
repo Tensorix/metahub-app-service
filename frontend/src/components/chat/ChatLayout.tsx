@@ -170,7 +170,7 @@ export function ChatLayout({ className, initialSessionId, initialTopicId }: Chat
   // 平板布局：隐藏话题侧边栏，使用抽屉
   if (isTablet && !isDesktop) {
     return (
-      <div className={cn('flex h-full bg-[#ebebeb]', className)}>
+      <div className={cn('flex h-full bg-[#ebebeb] dark:bg-muted', className)}>
         {/* 左侧：会话列表 - 可调整宽度 */}
         <div
           className="shrink-0 bg-background rounded-lg overflow-hidden"
@@ -216,7 +216,7 @@ export function ChatLayout({ className, initialSessionId, initialTopicId }: Chat
 
   // 桌面布局：两栏（会话列表 + 消息区域，话题列表在消息区域内）
   return (
-    <div className={cn('flex h-full bg-[#ebebeb]', className)}>
+    <div className={cn('flex h-full bg-[#ebebeb] dark:bg-muted', className)}>
       {/* 左侧：会话列表 - 可调整宽度 */}
       <div
         className="shrink-0 overflow-hidden bg-background rounded-lg"

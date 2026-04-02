@@ -32,7 +32,7 @@ export function CardStyleContainer({
 
   return (
     <div
-      className={cn('bg-[#ebebeb]', className)}
+      className={cn('bg-[#ebebeb] dark:bg-muted', className)}
       style={{ ...paddingStyle, ...style }}
       {...props}
     >
