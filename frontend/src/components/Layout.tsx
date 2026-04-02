@@ -57,7 +57,7 @@ function LayoutContent() {
           onResize={handleSidebarResize}
           onDragStart={() => setIsSidebarResizing(true)}
           onDragEnd={() => setIsSidebarResizing(false)}
-          className="bg-[#ebebeb]"
+          className="-ml-2 z-10 bg-[#ebebeb]"
         />
       )}
 
