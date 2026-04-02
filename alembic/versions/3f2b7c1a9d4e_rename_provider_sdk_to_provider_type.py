@@ -6,6 +6,7 @@ Create Date: 2026-03-31 10:00:00
 
 """
 
+import json
 from typing import Sequence, Union
 
 from alembic import op
@@ -52,8 +53,11 @@ def upgrade() -> None:
 
     for row in rows:
         conn.execute(
-            sa.text("UPDATE system_config SET value = :value WHERE key = :key"),
-            {"key": row["key"], "value": _convert_payload(row["value"], direction="upgrade")},
+            sa.text("UPDATE system_config SET value = CAST(:value AS jsonb) WHERE key = :key"),
+            {
+                "key": row["key"],
+                "value": json.dumps(_convert_payload(row["value"], direction="upgrade")),
+            },
         )
 
 
@@ -65,6 +69,9 @@ def downgrade() -> None:
 
     for row in rows:
         conn.execute(
-            sa.text("UPDATE system_config SET value = :value WHERE key = :key"),
-            {"key": row["key"], "value": _convert_payload(row["value"], direction="downgrade")},
+            sa.text("UPDATE system_config SET value = CAST(:value AS jsonb) WHERE key = :key"),
+            {
+                "key": row["key"],
+                "value": json.dumps(_convert_payload(row["value"], direction="downgrade")),
+            },
         )
