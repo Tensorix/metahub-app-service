@@ -37,6 +37,7 @@ class SessionResponse(SessionBase):
     updated_at: datetime = Field(..., description="更新时间")
     is_deleted: bool = Field(..., description="是否删除")
     unread_count: int = Field(0, description="未读消息数")
+    last_activity_at: Optional[datetime] = Field(None, description="最后一条消息时间")
 
 
 class SessionListQuery(BaseModel):

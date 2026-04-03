@@ -188,6 +188,7 @@ export interface Session {
   updated_at: string;
   is_deleted: boolean;
   unread_count: number;
+  last_activity_at?: string;
 }
 
 export interface SessionCreate {

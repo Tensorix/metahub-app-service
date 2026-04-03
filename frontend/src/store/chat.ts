@@ -168,12 +168,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   selectSession: async (sessionId: string) => {
-    const { topics, loadTopics, loadMessages } = get();
+    const { topics, loadTopics, loadMessages, sessions } = get();
 
     set({
       currentSessionId: sessionId,
       currentTopicId: null,
     });
+
+    // Auto-mark session as read (optimistic + fire-and-forget)
+    const target = sessions.find((s) => s.id === sessionId);
+    if (target && target.unread_count > 0) {
+      set((state) => ({
+        sessions: state.sessions.map((s) =>
+          s.id === sessionId ? { ...s, unread_count: 0 } : s,
+        ),
+      }));
+      sessionApi.markSessionRead(sessionId).catch(() => {});
+    }
 
     if (!topics[sessionId]) {
       await loadTopics(sessionId);

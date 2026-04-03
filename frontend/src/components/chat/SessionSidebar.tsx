@@ -498,11 +498,9 @@ function SessionItem({ session, isSelected, onSelect, onEdit, onDelete }: Sessio
             >
               {session.name || '未命名会话'}
             </span>
-            {session.last_visited_at && (
-              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                {formatRelativeTime(session.last_visited_at)}
-              </span>
-            )}
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+              {formatRelativeTime(session.last_activity_at ?? session.created_at)}
+            </span>
           </div>
 
           {/* Line 2: source + unread count */}

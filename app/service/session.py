@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, update, case
 
 from app.db.model.session import Session as SessionModel
 from app.db.model.topic import Topic
@@ -63,7 +63,16 @@ class SessionService:
         
         total = q.count()
         offset = (query.page - 1) * query.size
-        sessions = q.order_by(SessionModel.updated_at.desc()).offset(offset).limit(query.size).all()
+
+        # 按最后消息时间排序，无消息的按创建时间
+        last_msg = (
+            db.query(func.max(Message.created_at))
+            .filter(Message.session_id == SessionModel.id, Message.is_deleted == False)
+            .correlate(SessionModel)
+            .scalar_subquery()
+        )
+        sort_key = func.coalesce(last_msg, SessionModel.created_at)
+        sessions = q.order_by(sort_key.desc()).offset(offset).limit(query.size).all()
         
         return sessions, total
 
@@ -111,12 +120,17 @@ class SessionService:
 
     @staticmethod
     def mark_as_read(db: Session, session_id: UUID, user_id: UUID) -> Optional[SessionModel]:
-        """标记会话为已读"""
+        """标记会话为已读（不触发 updated_at 变更）"""
         session = SessionService.get_session(db, session_id, user_id)
         if not session:
             return None
-        
-        session.last_visited_at = func.timezone("UTC", func.now())
+
+        # 使用 Core UPDATE 绕过 ORM onupdate，避免 updated_at 被刷新
+        db.execute(
+            update(SessionModel)
+            .where(SessionModel.id == session.id)
+            .values(last_visited_at=func.timezone("UTC", func.now()))
+        )
         db.commit()
         db.refresh(session)
         return session
@@ -127,16 +141,24 @@ class SessionService:
         session = SessionService.get_session(db, session_id, user_id)
         if not session:
             return 0
-        
+
         q = db.query(func.count(Message.id)).filter(
             Message.session_id == session_id,
             Message.is_deleted == False
         )
-        
+
         if session.last_visited_at:
             q = q.filter(Message.created_at > session.last_visited_at)
-        
+
         return q.scalar() or 0
+
+    @staticmethod
+    def get_last_activity_at(db: Session, session_id: UUID) -> Optional[datetime]:
+        """获取会话最后一条消息的时间"""
+        return db.query(func.max(Message.created_at)).filter(
+            Message.session_id == session_id,
+            Message.is_deleted == False,
+        ).scalar()
 
 
 class TopicService:

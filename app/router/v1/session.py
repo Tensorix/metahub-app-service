@@ -67,6 +67,7 @@ def get_session(session_id: UUID, db: Session = Depends(get_db), current_user: U
     
     resp = SessionResponse.model_validate(session)
     resp.unread_count = SessionService.get_unread_count(db, session_id, current_user.id)
+    resp.last_activity_at = SessionService.get_last_activity_at(db, session_id)
     return resp
 
 
@@ -92,6 +93,7 @@ def get_sessions(
     for s in sessions:
         resp = SessionResponse.model_validate(s)
         resp.unread_count = SessionService.get_unread_count(db, s.id, current_user.id)
+        resp.last_activity_at = SessionService.get_last_activity_at(db, s.id)
         items.append(resp)
     
     return SessionListResponse(items=items, total=total, page=page, size=size, pages=pages)
