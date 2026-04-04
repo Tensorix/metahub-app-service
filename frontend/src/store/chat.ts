@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { sessionApi, type Session, type Topic, type Message, type MessageCreate } from '@/lib/api';
+import { sessionApi, sandboxApi, type Session, type Topic, type Message, type MessageCreate, type SandboxInfo } from '@/lib/api';
 import { computeVirtualTopics, type VirtualTopic } from '@/lib/virtualTopic';
 import { chatWithAgentStream, chatResumeStream, stopGeneration as apiStopGeneration } from '@/lib/agentApi';
 import { processStreamEvent, createInitialState } from '@/lib/streamEventProcessor';
@@ -49,6 +49,10 @@ interface ChatState {
     review_configs: Array<{ action_name: string; allowed_decisions?: string[] }>;
   } | null;
 
+  // ===== Sandbox 状态 =====
+  sandboxStatus: Record<string, SandboxInfo | null>; // keyed by sessionId
+  sandboxLoading: Record<string, boolean>;
+
   // ===== 计算属性（改为方法，避免无限循环） =====
   getCurrentSession: () => Session | null;
   getCurrentTopic: () => Topic | VirtualTopic | null;
@@ -83,6 +87,11 @@ interface ChatState {
   regenerateMessage: (messageId: string) => Promise<void>;
   clearStreamState: () => void;
   sendResumeDecisions: (decisions: Array<{ type: string; edited_action?: { name: string; args: Record<string, unknown> } }>) => Promise<void>;
+
+  // Sandbox
+  loadSandboxStatus: (sessionId: string) => Promise<void>;
+  createSandbox: (sessionId: string) => Promise<void>;
+  stopSandbox: (sessionId: string) => Promise<void>;
 
   // UI
   setTopicSidebarCollapsed: (collapsed: boolean) => void;
@@ -121,6 +130,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   abortController: null,
   streamError: null,
   pendingInterrupt: null,
+
+  // Sandbox 初始状态
+  sandboxStatus: {},
+  sandboxLoading: {},
 
   // ===== 计算属性（改为方法，避免无限循环） =====
   getCurrentSession: () => {
@@ -498,6 +511,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { currentSessionId, currentTopicId, loadMessages } = get();
     if (!currentSessionId) return;
     await loadMessages(currentSessionId, currentTopicId ?? undefined);
+  },
+
+  // ===== Sandbox Actions =====
+  loadSandboxStatus: async (sessionId: string) => {
+    set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: true } }));
+    try {
+      const info = await sandboxApi.getStatus(sessionId);
+      set((s) => ({
+        sandboxStatus: { ...s.sandboxStatus, [sessionId]: info },
+        sandboxLoading: { ...s.sandboxLoading, [sessionId]: false },
+      }));
+    } catch {
+      set((s) => ({
+        sandboxStatus: { ...s.sandboxStatus, [sessionId]: null },
+        sandboxLoading: { ...s.sandboxLoading, [sessionId]: false },
+      }));
+    }
+  },
+
+  createSandbox: async (sessionId: string) => {
+    set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: true } }));
+    try {
+      const info = await sandboxApi.create(sessionId);
+      set((s) => ({
+        sandboxStatus: { ...s.sandboxStatus, [sessionId]: info },
+        sandboxLoading: { ...s.sandboxLoading, [sessionId]: false },
+      }));
+    } catch (err: any) {
+      set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: false } }));
+      throw err;
+    }
+  },
+
+  stopSandbox: async (sessionId: string) => {
+    set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: true } }));
+    try {
+      const info = await sandboxApi.stop(sessionId);
+      set((s) => ({
+        sandboxStatus: { ...s.sandboxStatus, [sessionId]: info },
+        sandboxLoading: { ...s.sandboxLoading, [sessionId]: false },
+      }));
+    } catch (err: any) {
+      set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: false } }));
+      throw err;
+    }
   },
 
   // ===== UI Actions =====

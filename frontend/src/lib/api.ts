@@ -1002,3 +1002,73 @@ export const backgroundTaskApi = {
     return response.data;
   },
 };
+
+// ============================================================
+// Sandbox API
+// ============================================================
+
+export interface SandboxInfo {
+  id: string;
+  session_id: string;
+  sandbox_id: string | null;
+  status: string; // creating | running | paused | stopping | stopped | error
+  image: string;
+  config: Record<string, unknown> | null;
+  error_message: string | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SandboxFileInfo {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number | null;
+}
+
+export interface TransferRequest {
+  source: 'store' | 'sandbox';
+  destination: 'store' | 'sandbox';
+  path: string;
+  dest_path?: string;
+}
+
+export const sandboxApi = {
+  create: async (sessionId: string, data?: { image?: string; timeout?: number }) => {
+    const resp = await api.post<SandboxInfo>(`/api/v1/sessions/${sessionId}/sandbox`, data ?? {});
+    return resp.data;
+  },
+  getStatus: async (sessionId: string): Promise<SandboxInfo | null> => {
+    const resp = await api.get(`/api/v1/sessions/${sessionId}/sandbox`);
+    return resp.data;
+  },
+  stop: async (sessionId: string) => {
+    const resp = await api.delete<SandboxInfo>(`/api/v1/sessions/${sessionId}/sandbox`);
+    return resp.data;
+  },
+  renew: async (sessionId: string, duration: number) => {
+    const resp = await api.post<SandboxInfo>(`/api/v1/sessions/${sessionId}/sandbox/renew`, { duration });
+    return resp.data;
+  },
+  listFiles: async (sessionId: string, path = '/'): Promise<SandboxFileInfo[]> => {
+    const resp = await api.get(`/api/v1/sessions/${sessionId}/sandbox/files`, { params: { path } });
+    return resp.data.files;
+  },
+  readFile: async (sessionId: string, path: string): Promise<string> => {
+    const resp = await api.get(`/api/v1/sessions/${sessionId}/sandbox/files/read`, { params: { path } });
+    return resp.data.content;
+  },
+  writeFile: async (sessionId: string, path: string, content: string) => {
+    const resp = await api.post(`/api/v1/sessions/${sessionId}/sandbox/files/write`, { path, content });
+    return resp.data;
+  },
+  deleteFile: async (sessionId: string, path: string) => {
+    const resp = await api.delete(`/api/v1/sessions/${sessionId}/sandbox/files`, { params: { path } });
+    return resp.data;
+  },
+  transfer: async (sessionId: string, data: TransferRequest) => {
+    const resp = await api.post(`/api/v1/sessions/${sessionId}/sandbox/files/transfer`, data);
+    return resp.data;
+  },
+};

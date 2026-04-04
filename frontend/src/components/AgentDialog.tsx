@@ -301,36 +301,36 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-3xl max-h-[90dvh] flex flex-col overflow-hidden p-0">
+        <DialogHeader className="shrink-0 px-6 pt-6 pb-4">
           <DialogTitle>{agent ? '编辑 Agent' : '创建 Agent'}</DialogTitle>
           <DialogDescription>
             {agent ? '修改 Agent 配置' : '创建一个新的 AI Agent，支持子代理、技能和记忆'}
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit}>
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
-            <TabsList className="w-full rounded-none border-b bg-transparent p-0 h-auto">
-              <TabsTrigger value="basic" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent">
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)} className="flex flex-col min-h-0 flex-1">
+            <TabsList className="shrink-0 w-full rounded-none border-b bg-transparent p-0 h-auto px-6">
+              <TabsTrigger value="basic" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent text-xs sm:text-sm">
                 基础配置
               </TabsTrigger>
-              <TabsTrigger value="advanced" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent">
+              <TabsTrigger value="advanced" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent text-xs sm:text-sm">
                 高级功能
               </TabsTrigger>
-              <TabsTrigger value="subagents" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent">
+              <TabsTrigger value="subagents" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent text-xs sm:text-sm">
                 子代理 ({mountedSubagents.length})
               </TabsTrigger>
-              <TabsTrigger value="mcp" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent">
+              <TabsTrigger value="mcp" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent text-xs sm:text-sm">
                 MCP ({mcpServers.length})
               </TabsTrigger>
-              <TabsTrigger value="summarization" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent">
+              <TabsTrigger value="summarization" className="rounded-none border-b-2 border-transparent data-[state=active]:border-brand data-[state=active]:text-brand data-[state=active]:shadow-none data-[state=active]:bg-transparent text-xs sm:text-sm">
                 对话摘要
               </TabsTrigger>
             </TabsList>
 
             {/* Basic Tab */}
-            <TabsContent value="basic" className="space-y-4 py-4">
+            <TabsContent value="basic" className="space-y-4 py-4 px-6 flex-1 overflow-y-auto min-h-0 mt-0">
               {/* Identity section */}
               <div className="rounded-xl border bg-surface/50 p-4 space-y-4">
                 <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">身份</h4>
@@ -570,7 +570,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
             </TabsContent>
 
             {/* Advanced Tab */}
-            <TabsContent value="advanced" className="space-y-4 py-4">
+            <TabsContent value="advanced" className="space-y-4 py-4 px-6 flex-1 overflow-y-auto min-h-0 mt-0">
               {/* Skills Section */}
               <div className="rounded-xl border bg-surface/50 p-4 space-y-4">
                 <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Skills（技能）</h4>
@@ -663,7 +663,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
             </TabsContent>
 
             {/* SubAgents Tab */}
-            <TabsContent value="subagents" className="py-4">
+            <TabsContent value="subagents" className="py-4 px-6 flex-1 overflow-y-auto min-h-0 mt-0">
               <SubAgentSection
                 agentId={agent?.id}
                 mountedSubagents={mountedSubagents}
@@ -672,7 +672,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
             </TabsContent>
 
             {/* MCP Servers Tab */}
-            <TabsContent value="mcp" className="py-4">
+            <TabsContent value="mcp" className="py-4 px-6 flex-1 overflow-y-auto min-h-0 mt-0">
               <MCPServerConfig
                 agentId={agent?.id}
                 servers={mcpServers}
@@ -681,7 +681,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
             </TabsContent>
 
             {/* Summarization Tab */}
-            <TabsContent value="summarization" className="space-y-4 py-4">
+            <TabsContent value="summarization" className="space-y-4 py-4 px-6 flex-1 overflow-y-auto min-h-0 mt-0">
               <div className="rounded-xl border bg-surface/50 p-4 space-y-4">
                 <div className="flex items-center gap-2">
                   <Checkbox
@@ -792,7 +792,7 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
             </TabsContent>
           </Tabs>
 
-          <DialogFooter className="mt-4">
+          <DialogFooter className="shrink-0 border-t px-6 py-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               取消
             </Button>

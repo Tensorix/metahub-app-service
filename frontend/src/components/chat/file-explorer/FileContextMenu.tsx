@@ -9,7 +9,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { FilePlus, FolderPlus, Pencil, Trash2, Upload, Copy } from 'lucide-react';
+import { FilePlus, FolderPlus, Pencil, Trash2, Upload, Copy, ArrowRightLeft } from 'lucide-react';
 
 interface FileContextMenuProps {
   type: 'file' | 'folder' | 'blank';
@@ -23,6 +23,8 @@ interface FileContextMenuProps {
   onDelete: (path: string, isDir: boolean) => void;
   onUpload: (parentPath: string) => void;
   onCopyPath: (path: string) => void;
+  onTransfer?: () => void;
+  transferLabel?: string;
 }
 
 const BLANK_PARENT = '/workspace';
@@ -39,6 +41,8 @@ export function FileContextMenu({
   onDelete,
   onUpload,
   onCopyPath,
+  onTransfer,
+  transferLabel,
 }: FileContextMenuProps) {
   return (
     <ContextMenu>
@@ -71,6 +75,15 @@ export function FileContextMenu({
               <Upload className="h-4 w-4 mr-2" />
               上传文件
             </ContextMenuItem>
+            {onTransfer && (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem onClick={onTransfer}>
+                  <ArrowRightLeft className="h-4 w-4 mr-2" />
+                  {transferLabel ?? '传输'}
+                </ContextMenuItem>
+              </>
+            )}
             <ContextMenuSeparator />
           </>
         )}
@@ -86,6 +99,12 @@ export function FileContextMenu({
               <Copy className="h-4 w-4 mr-2" />
               复制路径
             </ContextMenuItem>
+            {onTransfer && (
+              <ContextMenuItem onClick={onTransfer}>
+                <ArrowRightLeft className="h-4 w-4 mr-2" />
+                {transferLabel ?? '传输'}
+              </ContextMenuItem>
+            )}
             {!readonly && (
               <>
                 <ContextMenuSeparator />

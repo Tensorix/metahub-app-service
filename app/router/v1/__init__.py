@@ -19,6 +19,7 @@ from .session_transfer import router as session_transfer_router
 from .background_task import router as background_task_router
 from .scheduled_task import router as scheduled_task_router
 from .system_config import router as system_config_router
+from .sandbox import router as sandbox_router
 
 router = APIRouter()
 router.include_router(experimental_router, prefix="", tags=["v1"])
@@ -41,3 +42,4 @@ router.include_router(session_transfer_router, prefix="", tags=["session-transfe
 router.include_router(background_task_router, prefix="", tags=["background-tasks"])
 router.include_router(scheduled_task_router, prefix="", tags=["scheduled-tasks"])
 router.include_router(system_config_router, prefix="", tags=["system-config"])
+router.include_router(sandbox_router, prefix="", tags=["sandbox"])

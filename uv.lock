@@ -964,6 +964,7 @@ dependencies = [
     { name = "loguru" },
     { name = "nanoid" },
     { name = "openai" },
+    { name = "opensandbox" },
     { name = "pgvector" },
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic-settings" },
@@ -1000,6 +1001,7 @@ requires-dist = [
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "nanoid", specifier = ">=2.0.0" },
     { name = "openai", specifier = ">=1.30.0" },
+    { name = "opensandbox", specifier = ">=0.1.6" },
     { name = "pgvector", specifier = ">=0.3.0" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2.12" },
     { name = "pydantic-settings", specifier = ">=2.11.0" },
@@ -1107,6 +1109,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/4f/c1/44c5c17fdcaf36e8af25eda268d097e40799583ced48ca94adc5015576c3/openrouter-0.8.0.tar.gz", hash = "sha256:28efd76f89bcd13e195fd2729e9ed356a71d9ad88c78ded4ce073f6935381886", size = 207489, upload-time = "2026-03-27T19:20:13.601Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/d1/413bbdd98aac44bf094055cb282b3edaa61a1e1b7e54ebdbf9afebfd5178/openrouter-0.8.0-py3-none-any.whl", hash = "sha256:77cf76f14f2090747ff2c153734a9112dfb27faccb5f90d760efbb94ea7e0838", size = 442960, upload-time = "2026-03-27T19:20:12.135Z" },
+]
+
+[[package]]
+name = "opensandbox"
+version = "0.1.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/81/68/493e98dfc5be745cc2d199259d79af49b89f7973619a9b7e36d0d43d74b8/opensandbox-0.1.6.tar.gz", hash = "sha256:6a69c690342f3d28820154b4f7f27ce33fd4cf42e3982016535f6fc9de344324", size = 112275, upload-time = "2026-03-27T03:51:09.155Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/12/5454ec8eb63de9a4d73ad26cf1adad9cd760aba62dadd4dbb18eee5765d9/opensandbox-0.1.6-py3-none-any.whl", hash = "sha256:a8f7eeb124eddcf97c691230f55ef77413b9b727ede346e6e9219d8d56c61c43", size = 281317, upload-time = "2026-03-27T03:51:07.695Z" },
 ]
 
 [[package]]
@@ -1429,6 +1446,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/90/2c/8af215c0f776415f3590cac4f9086ccefd6fd463befeae41cd4d3f193e5a/pytest_asyncio-1.3.0.tar.gz", hash = "sha256:d7f52f36d231b80ee124cd216ffb19369aa168fc10095013c6b014a34d3ee9e5", size = 50087, upload-time = "2025-11-10T16:07:47.256Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e5/35/f8b19922b6a25bc0880171a2f1a003eaeb93657475193ab516fd87cac9da/pytest_asyncio-1.3.0-py3-none-any.whl", hash = "sha256:611e26147c7f77640e6d0a92a38ed17c3e9848063698d5c93d5aa7aa11cebff5", size = 15075, upload-time = "2025-11-10T16:07:45.537Z" },
+]
+
+[[package]]
+name = "python-dateutil"
+version = "2.9.0.post0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3", size = 342432, upload-time = "2024-03-01T18:36:20.211Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892, upload-time = "2024-03-01T18:36:18.57Z" },
 ]
 
 [[package]]

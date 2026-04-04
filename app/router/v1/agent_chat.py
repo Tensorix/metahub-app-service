@@ -48,6 +48,42 @@ router = APIRouter()
 # Store active generation tasks for cancellation
 _active_tasks: dict[str, asyncio.Task] = {}
 
+_SANDBOX_TOOL_NAMES = [
+    "sandbox_execute",
+    "sandbox_read_file",
+    "sandbox_write_file",
+    "sandbox_install",
+]
+
+
+def _inject_sandbox_tools(
+    db: "Session",
+    session_id: "UUID",
+    agent_config: dict,
+) -> str:
+    """Append sandbox tools to agent_config if session has a running sandbox.
+
+    Returns a cache_key_suffix so that sandbox-enabled and sandbox-disabled
+    agents are cached separately.
+    """
+    from app.db.model.session_sandbox import SessionSandbox
+
+    sandbox = (
+        db.query(SessionSandbox)
+        .filter(
+            SessionSandbox.session_id == session_id,
+            SessionSandbox.status == "running",
+        )
+        .first()
+    )
+    if sandbox:
+        existing = agent_config.get("tools") or []
+        agent_config["tools"] = existing + [
+            t for t in _SANDBOX_TOOL_NAMES if t not in existing
+        ]
+        return "_sandbox"
+    return ""
+
 
 @dataclass
 class StreamingPart:
@@ -552,9 +588,14 @@ async def chat_with_agent(
     # Get agent service with proper config
     agent_config = AgentFactory.build_agent_config(agent, db=db)
     logger.info(f"Getting agent service with config: {agent_config}")
-    
-    agent_service = await AgentFactory.get_agent(agent.id, agent_config)
-    
+
+    # Inject sandbox tools if sandbox is active
+    cache_key_suffix = _inject_sandbox_tools(db, session_id, agent_config)
+
+    agent_service = await AgentFactory.get_agent(
+        agent.id, agent_config, cache_key_suffix=cache_key_suffix,
+    )
+
     logger.info("Agent service obtained")
 
     # Thread ID for conversation continuity
@@ -871,7 +912,10 @@ async def chat_resume(
         raise HTTPException(status_code=404, detail="Topic not found")
 
     agent_config = AgentFactory.build_agent_config(agent, db=db)
-    agent_service = await AgentFactory.get_agent(agent.id, agent_config)
+    cache_key_suffix = _inject_sandbox_tools(db, session_id, agent_config)
+    agent_service = await AgentFactory.get_agent(
+        agent.id, agent_config, cache_key_suffix=cache_key_suffix,
+    )
     thread_id = f"topic_{topic.id}"
 
     async def generate_resume_events():
@@ -1057,7 +1101,10 @@ async def chat_websocket(
         )
 
         agent_config = AgentFactory.build_agent_config(agent, db=db)
-        agent_service = await AgentFactory.get_agent(agent.id, agent_config)
+        cache_key_suffix = _inject_sandbox_tools(db, session_id, agent_config)
+        agent_service = await AgentFactory.get_agent(
+            agent.id, agent_config, cache_key_suffix=cache_key_suffix,
+        )
 
         current_task: Optional[asyncio.Task] = None
 

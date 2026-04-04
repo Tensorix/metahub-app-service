@@ -13,6 +13,7 @@ from app.schema.system_config import (
     EmbeddingConfigValue,
     MessageAnalyzerConfigValue,
     ProviderConfig,
+    SandboxConfigValue,
     UpstreamModel,
 )
 
@@ -160,6 +161,37 @@ def get_agent_default_config(db: Optional[Session] = None) -> AgentDefaultConfig
         provider=config.AGENT_DEFAULT_PROVIDER,
         model_name=config.AGENT_DEFAULT_MODEL,
     )
+
+
+def get_sandbox_config(db: Optional[Session] = None) -> SandboxConfigValue:
+    """Get sandbox config from DB, falling back to defaults."""
+    if db is not None:
+        row = get_config(db, "sandbox")
+        if row and row.value:
+            try:
+                return SandboxConfigValue(**row.value)
+            except Exception:
+                logger.warning("Invalid sandbox config in DB, using defaults")
+
+    return SandboxConfigValue()
+
+
+def normalize_sandbox_config(
+    incoming: dict,
+    existing: Optional[dict] = None,
+) -> dict:
+    """Preserve existing API key when the client sends a masked value or null."""
+    result = dict(incoming)
+    existing = existing or {}
+    previous_key = existing.get("api_key")
+    incoming_key = result.get("api_key")
+
+    if incoming_key is None or (
+        isinstance(incoming_key, str) and incoming_key.startswith("****")
+    ):
+        result["api_key"] = previous_key
+
+    return result
 
 
 # ---------------------------------------------------------------------------

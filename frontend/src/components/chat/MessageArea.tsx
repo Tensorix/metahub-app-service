@@ -17,7 +17,7 @@ import { FileExplorer } from './FileExplorer';
 import { SessionDialog } from '@/components/SessionDialog';
 import { ResizableHandle } from '@/components/ui/resizable';
 import { cn } from '@/lib/utils';
-import { ChevronUp, ChevronDown, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2, ArrowLeft, FolderOpen } from 'lucide-react';
+import { ChevronUp, ChevronDown, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2, ArrowLeft, FolderOpen, Container } from 'lucide-react';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { useToast } from '@/hooks/use-toast';
 
@@ -54,6 +54,11 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   const fileExplorerOpen = useChatStore((state) => state.fileExplorerOpen);
   const setFileExplorerOpen = useChatStore((state) => state.setFileExplorerOpen);
   const updateSession = useChatStore((state) => state.updateSession);
+  const sandboxStatus = useChatStore((state) => state.sandboxStatus);
+  const sandboxLoading = useChatStore((state) => state.sandboxLoading);
+  const loadSandboxStatus = useChatStore((state) => state.loadSandboxStatus);
+  const createSandbox = useChatStore((state) => state.createSandbox);
+  const stopSandbox = useChatStore((state) => state.stopSandbox);
   
   // AI 聊天 hook
   const {
@@ -72,6 +77,36 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   const allTopics = getAllTopicsForSession(currentSessionId);
 
   const [isSessionSettingsOpen, setIsSessionSettingsOpen] = useState(false);
+
+  // Load sandbox status when session changes
+  useEffect(() => {
+    if (currentSessionId && currentSession?.type === 'ai') {
+      loadSandboxStatus(currentSessionId);
+    }
+  }, [currentSessionId, currentSession?.type, loadSandboxStatus]);
+
+  const currentSandbox = currentSessionId ? sandboxStatus[currentSessionId] : null;
+  const isSandboxLoading = currentSessionId ? sandboxLoading[currentSessionId] ?? false : false;
+  const isSandboxRunning = currentSandbox?.status === 'running';
+
+  const handleSandboxToggle = async () => {
+    if (!currentSessionId) return;
+    try {
+      if (isSandboxRunning) {
+        await stopSandbox(currentSessionId);
+        toast({ title: '沙箱已停止' });
+      } else {
+        await createSandbox(currentSessionId);
+        toast({ title: '沙箱已创建', description: '代码执行环境已就绪' });
+      }
+    } catch (err: any) {
+      toast({
+        title: isSandboxRunning ? '停止沙箱失败' : '创建沙箱失败',
+        description: err?.response?.data?.detail || String(err),
+        variant: 'destructive',
+      });
+    }
+  };
   
   // 话题侧边栏可调整宽度
   const [topicSidebarWidth, setTopicSidebarWidth] = useState(TOPIC_SIDEBAR_DEFAULT_WIDTH);
@@ -270,6 +305,32 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* AI 会话显示沙箱按钮 */}
+            {currentSession?.type === 'ai' && (
+              <Button
+                size="icon"
+                variant={isSandboxRunning ? "secondary" : "ghost"}
+                onClick={handleSandboxToggle}
+                disabled={isSandboxLoading || currentSandbox?.status === 'creating'}
+                title={
+                  isSandboxRunning ? "停止沙箱" :
+                  currentSandbox?.status === 'creating' ? "沙箱创建中..." :
+                  "启动沙箱"
+                }
+                className="relative"
+              >
+                {isSandboxLoading || currentSandbox?.status === 'creating' ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <>
+                    <Container className="h-5 w-5" />
+                    {isSandboxRunning && (
+                      <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-green-500" />
+                    )}
+                  </>
+                )}
+              </Button>
+            )}
             {/* AI 会话显示文件系统按钮 */}
             {currentSession?.type === 'ai' && (
               <Button

@@ -37,6 +37,15 @@ class AgentDefaultConfigValue(BaseModel):
     model_name: str = "gpt-4o-mini"
 
 
+class SandboxConfigValue(BaseModel):
+    enabled: bool = False
+    api_domain: str = ""
+    api_key: str = ""
+    default_image: str = "ubuntu"
+    default_timeout: int = 600
+    max_per_user: int = 3
+
+
 # --- API request / response schemas ---
 
 

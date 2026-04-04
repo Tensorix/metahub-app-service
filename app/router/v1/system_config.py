@@ -31,6 +31,8 @@ def get_system_config(
 
     if key == "providers":
         row = _mask_provider_keys(row)
+    elif key == "sandbox":
+        row = _mask_sandbox_key(row)
 
     return row
 
@@ -48,6 +50,10 @@ def update_system_config(
         existing = svc.get_config(db, key)
         existing_value = existing.value if existing else {}
         value = svc.normalize_provider_registry(value, existing_value)
+    elif key == "sandbox":
+        existing = svc.get_config(db, key)
+        existing_value = existing.value if existing else {}
+        value = svc.normalize_sandbox_config(value, existing_value)
 
     row = svc.upsert_config(db, key, value, body.description)
 
@@ -75,6 +81,8 @@ def update_system_config(
 
     if key == "providers":
         row = _mask_provider_keys(row)
+    elif key == "sandbox":
+        row = _mask_sandbox_key(row)
 
     return row
 
@@ -125,6 +133,24 @@ def _mask_provider_keys(row) -> object:
                 prov["api_key"] = "****" + raw_key[-4:]
 
     # Return a simple namespace that matches SystemConfigResponse fields
+    class _Masked:
+        pass
+
+    m = _Masked()
+    m.key = row.key
+    m.value = masked_value
+    m.description = row.description
+    m.updated_at = row.updated_at
+    return m
+
+
+def _mask_sandbox_key(row) -> object:
+    """Return a copy of the row with api_key masked."""
+    masked_value = copy.deepcopy(row.value)
+    raw_key = masked_value.get("api_key")
+    if raw_key and isinstance(raw_key, str) and len(raw_key) > 4:
+        masked_value["api_key"] = "****" + raw_key[-4:]
+
     class _Masked:
         pass
 

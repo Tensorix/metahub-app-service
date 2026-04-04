@@ -98,6 +98,7 @@ class AgentFactory:
         agent_config: dict[str, Any],
         use_checkpointer: bool = True,
         use_store: bool = True,
+        cache_key_suffix: str = "",
     ) -> DeepAgentService:
         """
         Create a new agent service instance.
@@ -107,11 +108,12 @@ class AgentFactory:
             agent_config: Agent configuration from AgentFactory.build_agent_config()
             use_checkpointer: Whether to use PostgreSQL checkpointer
             use_store: Whether to use PostgreSQL store
+            cache_key_suffix: Optional suffix for cache key (e.g. "_sandbox")
 
         Returns:
             DeepAgentService instance
         """
-        cache_key = str(agent_id)
+        cache_key = str(agent_id) + cache_key_suffix
 
         # Check cache
         if cache_key in cls._agents:
@@ -138,6 +140,7 @@ class AgentFactory:
         cls,
         agent_id: UUID,
         agent_config: dict[str, Any],
+        cache_key_suffix: str = "",
     ) -> DeepAgentService:
         """
         Get an existing agent or create a new one.
@@ -145,11 +148,14 @@ class AgentFactory:
         Args:
             agent_id: Unique agent identifier
             agent_config: Agent configuration
+            cache_key_suffix: Optional suffix for cache key (e.g. "_sandbox")
 
         Returns:
             DeepAgentService instance
         """
-        return await cls.create_agent(agent_id, agent_config)
+        return await cls.create_agent(
+            agent_id, agent_config, cache_key_suffix=cache_key_suffix
+        )
 
     @classmethod
     def clear_cache(cls, agent_id: Optional[UUID] = None):

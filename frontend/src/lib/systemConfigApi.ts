@@ -33,6 +33,15 @@ export interface AgentDefaultConfig {
   model_name: string;
 }
 
+export interface SandboxConfig {
+  enabled: boolean;
+  api_domain: string;
+  api_key: string;
+  default_image: string;
+  default_timeout: number;
+  max_per_user: number;
+}
+
 export interface UpstreamModel {
   id: string;
   object?: string;

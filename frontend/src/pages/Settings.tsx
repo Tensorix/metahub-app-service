@@ -5,6 +5,7 @@ import { ProviderSettings } from './settings/ProviderSettings';
 import { MessageAnalyzerSettings } from './settings/MessageAnalyzerSettings';
 import { EmbeddingSettings } from './settings/EmbeddingSettings';
 import { AccountSettings } from './settings/AccountSettings';
+import { SandboxSettings } from './settings/SandboxSettings';
 import { usePageTitle } from '@/contexts/PageTitleContext';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 
@@ -43,6 +44,7 @@ export function Settings() {
             <TabsTrigger value="providers">模型服务</TabsTrigger>
             <TabsTrigger value="message-analyzer">消息分析</TabsTrigger>
             <TabsTrigger value="embedding">向量嵌入</TabsTrigger>
+            <TabsTrigger value="sandbox">沙箱</TabsTrigger>
             <TabsTrigger value="account">账户</TabsTrigger>
           </TabsList>
         </div>
@@ -59,6 +61,9 @@ export function Settings() {
           </TabsContent>
           <TabsContent value="embedding" className="mt-0">
             <EmbeddingSettings />
+          </TabsContent>
+          <TabsContent value="sandbox" className="mt-0">
+            <SandboxSettings />
           </TabsContent>
           <TabsContent value="account" className="mt-0">
             <AccountSettings />

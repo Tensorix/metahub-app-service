@@ -18,6 +18,7 @@ from . import message_search
 from . import knowledge_base
 from . import scheduled_task
 from . import session_context
+from . import sandbox_tools
 
 __all__ = [
     "search",
@@ -27,4 +28,5 @@ __all__ = [
     "knowledge_base",
     "scheduled_task",
     "session_context",
+    "sandbox_tools",
 ]
