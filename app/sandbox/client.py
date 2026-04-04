@@ -7,7 +7,7 @@ from datetime import timedelta
 from typing import Any, Optional
 
 from opensandbox.config import ConnectionConfig
-from opensandbox.models.filesystem import SearchEntry, WriteEntry
+from opensandbox.models.filesystem import WriteEntry
 from opensandbox.sandbox import Sandbox
 
 from app.schema.system_config import SandboxConfigValue
@@ -23,6 +23,7 @@ class SandboxClient:
             domain=sandbox_config.api_domain,
             api_key=sandbox_config.api_key,
         )
+        self._handles: dict[str, Sandbox] = {}
 
     async def create(
         self,
@@ -37,17 +38,27 @@ class SandboxClient:
             timeout=timedelta(seconds=timeout),
             env=env or {},
         )
+        self._handles[sandbox.id] = sandbox
         return sandbox
 
     async def connect(self, sandbox_id: str) -> Sandbox:
-        """Connect to an existing running sandbox by ID."""
-        return await Sandbox.connect(sandbox_id, connection_config=self._config)
+        """Connect to an existing running sandbox by ID (cached)."""
+        if sandbox_id in self._handles:
+            return self._handles[sandbox_id]
+        sandbox = await Sandbox.connect(
+            sandbox_id,
+            connection_config=self._config,
+            skip_health_check=True,
+        )
+        self._handles[sandbox_id] = sandbox
+        return sandbox
 
     async def kill(self, sandbox_id: str) -> None:
         """Terminate a sandbox immediately."""
         sandbox = await self.connect(sandbox_id)
         await sandbox.kill()
         await sandbox.close()
+        self._handles.pop(sandbox_id, None)
 
     async def get_info(self, sandbox_id: str) -> dict[str, Any]:
         """Retrieve sandbox metadata / status."""
@@ -63,14 +74,19 @@ class SandboxClient:
     # Command execution
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _collect_output(messages) -> str:
+        """Join OutputMessage list into a single string."""
+        return "\n".join(m.text for m in (messages or []))
+
     async def run_command(self, sandbox_id: str, command: str) -> dict[str, Any]:
         """Run a shell command inside the sandbox."""
         sandbox = await self.connect(sandbox_id)
         result = await sandbox.commands.run(command)
         return {
             "exit_code": result.exit_code,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
+            "stdout": self._collect_output(result.logs.stdout),
+            "stderr": self._collect_output(result.logs.stderr),
         }
 
     # ------------------------------------------------------------------
@@ -88,13 +104,29 @@ class SandboxClient:
         await sandbox.files.write_files([WriteEntry(path=path, data=content)])
 
     async def list_files(self, sandbox_id: str, path: str = "/") -> list[dict[str, Any]]:
-        """List files matching ``*`` under *path*."""
+        """List immediate children of *path* (single level)."""
         sandbox = await self.connect(sandbox_id)
-        entries = await sandbox.files.search(SearchEntry(path=path, pattern="*"))
-        return [
-            {"name": e.name, "path": e.path, "is_dir": e.is_dir, "size": getattr(e, "size", None)}
-            for e in entries
-        ]
+        # SDK search is recursive; use ls command for single-level listing
+        norm = path.rstrip("/") or "/"
+        result = await sandbox.commands.run(
+            f"ls -1apL --group-directories-first {norm}"
+        )
+        stdout = self._collect_output(result.logs.stdout)
+        entries: list[dict[str, Any]] = []
+        for line in stdout.strip().splitlines():
+            line = line.strip()
+            if not line or line in ("./", "../"):
+                continue
+            is_dir = line.endswith("/")
+            name = line.rstrip("/")
+            entry_path = f"{norm}/{name}" if norm != "/" else f"/{name}"
+            entries.append({
+                "name": name,
+                "path": entry_path,
+                "is_dir": is_dir,
+                "size": None,
+            })
+        return entries
 
     async def delete_file(self, sandbox_id: str, path: str) -> None:
         """Delete a single file from the sandbox."""
