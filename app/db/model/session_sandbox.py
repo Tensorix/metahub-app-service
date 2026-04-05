@@ -28,6 +28,9 @@ class SessionSandbox(Base):
     sandbox_id: Mapped[Optional[str]] = mapped_column(
         String, nullable=True, comment="Remote OpenSandbox ID",
     )
+    terminal_session_id: Mapped[Optional[str]] = mapped_column(
+        String, nullable=True, comment="Remote OpenSandbox PTY session ID",
+    )
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="creating",
         comment="creating | running | paused | stopping | stopped | error",
@@ -42,6 +45,12 @@ class SessionSandbox(Base):
         String, nullable=True,
     )
     expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    terminal_session_created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    terminal_session_last_seen_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(

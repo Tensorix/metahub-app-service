@@ -34,6 +34,8 @@ export function FileExplorer({ sessionId, topicId, className, onClose }: FileExp
   const hasSandbox = sandboxStatus[sessionId]?.status === 'running';
   const [activeTab, setActiveTab] = useState<'store' | 'sandbox'>('store');
   const [transferring, setTransferring] = useState(false);
+  const isStoreTab = activeTab === 'store';
+  const isSandboxTab = activeTab === 'sandbox';
 
   const handleCopyPath = useCallback(
     (path: string) => {
@@ -86,20 +88,20 @@ export function FileExplorer({ sessionId, topicId, className, onClose }: FileExp
   );
 
   // ---- Sandbox tab ----
-  if (activeTab === 'sandbox' && hasSandbox) {
+  if (isSandboxTab && hasSandbox) {
     return (
       <div className={cn('flex flex-col h-full border-l bg-background', className)}>
         {/* Tab bar */}
         {hasSandbox && (
           <div className="flex border-b">
             <button
-              className={cn('flex-1 px-3 py-1.5 text-xs font-medium', activeTab === 'store' && 'border-b-2 border-primary')}
+              className={cn('flex-1 px-3 py-1.5 text-xs font-medium', isStoreTab && 'border-b-2 border-primary')}
               onClick={() => setActiveTab('store')}
             >
               Store
             </button>
             <button
-              className={cn('flex-1 px-3 py-1.5 text-xs font-medium', activeTab === 'sandbox' && 'border-b-2 border-primary')}
+              className={cn('flex-1 px-3 py-1.5 text-xs font-medium', isSandboxTab && 'border-b-2 border-primary')}
               onClick={() => setActiveTab('sandbox')}
             >
               Sandbox

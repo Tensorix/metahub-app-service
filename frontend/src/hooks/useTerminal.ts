@@ -1,147 +1,118 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { TerminalWSClient } from '@/lib/terminalApi';
-
-export interface TerminalLine {
-  id: string;
-  type: 'command' | 'stdout' | 'stderr' | 'system';
-  text: string;
-  exitCode?: number;
-}
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { TerminalWSClient, type TerminalServerMessage } from '@/lib/terminalApi';
 
 export interface UseTerminalReturn {
-  lines: TerminalLine[];
-  cwd: string;
   isConnected: boolean;
-  isBusy: boolean;
+  isConnecting: boolean;
   error: string | null;
-  connect: () => Promise<void>;
+  lastExitCode: number | null;
+  connect: (opts?: { reset?: boolean }) => Promise<void>;
   disconnect: () => void;
-  sendCommand: (command: string) => void;
-  interrupt: () => void;
-  clear: () => void;
-}
-
-let lineCounter = 0;
-function nextId(): string {
-  return `tl-${++lineCounter}-${Date.now()}`;
+  sendInput: (data: string | Uint8Array) => void;
+  resize: (cols: number, rows: number) => void;
+  signal: (signal: string) => void;
+  setOnBinaryMessage: (handler: ((data: Uint8Array) => void) | null) => void;
+  setOnControlMessage: (
+    handler: ((message: TerminalServerMessage) => void) | null
+  ) => void;
 }
 
 export function useTerminal(sessionId: string): UseTerminalReturn {
-  const [lines, setLines] = useState<TerminalLine[]>([]);
-  const [cwd, setCwd] = useState('/workspace');
   const [isConnected, setIsConnected] = useState(false);
-  const [isBusy, setIsBusy] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastExitCode, setLastExitCode] = useState<number | null>(null);
 
   const clientRef = useRef<TerminalWSClient | null>(null);
-  // Track the id of the last command line so we can attach exitCode to it
-  const lastCommandIdRef = useRef<string | null>(null);
-
-  const connect = useCallback(async () => {
-    // Disconnect existing if any
-    if (clientRef.current) {
-      clientRef.current.disconnect();
-    }
-
-    const client = new TerminalWSClient(sessionId);
-    clientRef.current = client;
-    setError(null);
-
-    client.onMessage = (msg) => {
-      switch (msg.type) {
-        case 'ready':
-          setIsConnected(true);
-          setCwd(msg.cwd);
-          setLines((prev) => [
-            ...prev,
-            { id: nextId(), type: 'system', text: `Connected to sandbox` },
-          ]);
-          break;
-
-        case 'stdout':
-          setLines((prev) => [
-            ...prev,
-            { id: nextId(), type: 'stdout', text: msg.text },
-          ]);
-          break;
-
-        case 'stderr':
-          setLines((prev) => [
-            ...prev,
-            { id: nextId(), type: 'stderr', text: msg.text },
-          ]);
-          break;
-
-        case 'exit':
-          setIsBusy(false);
-          // Attach exit code to the last command line
-          if (lastCommandIdRef.current) {
-            const cmdId = lastCommandIdRef.current;
-            setLines((prev) =>
-              prev.map((l) =>
-                l.id === cmdId ? { ...l, exitCode: msg.code } : l
-              )
-            );
-          }
-          break;
-
-        case 'cwd':
-          setCwd(msg.path);
-          break;
-
-        case 'error':
-          setIsBusy(false);
-          setLines((prev) => [
-            ...prev,
-            { id: nextId(), type: 'stderr', text: msg.message },
-          ]);
-          break;
-      }
-    };
-
-    client.onClose = () => {
-      setIsConnected(false);
-      setIsBusy(false);
-    };
-
-    client.onError = (err) => {
-      setError(err.message);
-      setIsConnected(false);
-      setIsBusy(false);
-    };
-
-    try {
-      await client.connect();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to connect');
-    }
-  }, [sessionId]);
+  const binaryHandlerRef = useRef<((data: Uint8Array) => void) | null>(null);
+  const controlHandlerRef = useRef<((message: TerminalServerMessage) => void) | null>(null);
 
   const disconnect = useCallback(() => {
     clientRef.current?.disconnect();
     clientRef.current = null;
     setIsConnected(false);
-    setIsBusy(false);
+    setIsConnecting(false);
   }, []);
 
-  const sendCommand = useCallback((command: string) => {
-    if (!clientRef.current?.isConnected) return;
-    const id = nextId();
-    lastCommandIdRef.current = id;
-    setLines((prev) => [...prev, { id, type: 'command', text: command }]);
-    setIsBusy(true);
-    clientRef.current.sendCommand(command);
+  const connect = useCallback(async (opts: { reset?: boolean } = {}) => {
+    disconnect();
+
+    const client = new TerminalWSClient(sessionId);
+    clientRef.current = client;
+    setError(null);
+    setLastExitCode(null);
+    setIsConnecting(true);
+
+    client.onBinaryMessage = (data) => {
+      if (clientRef.current !== client) return;
+      binaryHandlerRef.current?.(data);
+    };
+
+    client.onControlMessage = (message) => {
+      if (clientRef.current !== client) return;
+      if (message.type === 'exit') {
+        setLastExitCode(message.exit_code ?? null);
+      } else if (message.type === 'error') {
+        setError(message.error);
+      }
+      controlHandlerRef.current?.(message);
+    };
+
+    client.onOpen = () => {
+      if (clientRef.current !== client) return;
+      setIsConnected(true);
+      setIsConnecting(false);
+      setError(null);
+    };
+
+    client.onClose = () => {
+      if (clientRef.current !== client) return;
+      setIsConnected(false);
+      setIsConnecting(false);
+    };
+
+    client.onError = (err) => {
+      if (clientRef.current !== client) return;
+      setError(err.message);
+      setIsConnected(false);
+      setIsConnecting(false);
+    };
+
+    try {
+      await client.connect(opts);
+    } catch (err: any) {
+      if (clientRef.current === client) {
+        clientRef.current = null;
+      }
+      setError(err?.message || 'Failed to connect');
+      setIsConnected(false);
+      setIsConnecting(false);
+      throw err;
+    }
+  }, [disconnect, sessionId]);
+
+  const sendInput = useCallback((data: string | Uint8Array) => {
+    clientRef.current?.sendInput(data);
   }, []);
 
-  const interrupt = useCallback(() => {
-    clientRef.current?.interrupt();
+  const resize = useCallback((cols: number, rows: number) => {
+    clientRef.current?.resize(cols, rows);
   }, []);
 
-  const clear = useCallback(() => {
-    setLines([]);
+  const signal = useCallback((signalName: string) => {
+    clientRef.current?.signal(signalName);
   }, []);
 
-  // Cleanup on unmount
+  const setOnBinaryMessage = useCallback((handler: ((data: Uint8Array) => void) | null) => {
+    binaryHandlerRef.current = handler;
+  }, []);
+
+  const setOnControlMessage = useCallback((
+    handler: ((message: TerminalServerMessage) => void) | null
+  ) => {
+    controlHandlerRef.current = handler;
+  }, []);
+
   useEffect(() => {
     return () => {
       clientRef.current?.disconnect();
@@ -149,15 +120,16 @@ export function useTerminal(sessionId: string): UseTerminalReturn {
   }, []);
 
   return {
-    lines,
-    cwd,
     isConnected,
-    isBusy,
+    isConnecting,
     error,
+    lastExitCode,
     connect,
     disconnect,
-    sendCommand,
-    interrupt,
-    clear,
+    sendInput,
+    resize,
+    signal,
+    setOnBinaryMessage,
+    setOnControlMessage,
   };
 }

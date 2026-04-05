@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
 from app.db.model import Session as SessionModel
+from app.db.model.session_sandbox import SessionSandbox
+from app.db.session import get_db
 from app.deps import get_current_user
 from app.db.model.user import User
 from app.schema.sandbox import (
@@ -283,6 +285,27 @@ def _require_running_sandbox(db: Session, session_id: UUID) -> str:
     return sandbox_id
 
 
+def _get_running_sandbox_record(db: Session, session_id: UUID) -> SessionSandbox | None:
+    return (
+        db.query(SessionSandbox)
+        .filter(
+            SessionSandbox.session_id == session_id,
+            SessionSandbox.status == "running",
+        )
+        .first()
+    )
+
+
+def _clear_terminal_session(record: SessionSandbox) -> None:
+    record.terminal_session_id = None
+    record.terminal_session_created_at = None
+    record.terminal_session_last_seen_at = None
+
+
+def _is_truthy(value: str | None) -> bool:
+    return value is not None and value.lower() in {"1", "true", "yes", "on"}
+
+
 # ---------------------------------------------------------------------------
 # WebSocket terminal
 # ---------------------------------------------------------------------------
@@ -290,42 +313,105 @@ def _require_running_sandbox(db: Session, session_id: UUID) -> str:
 
 @router.websocket("/sessions/{session_id}/sandbox/terminal")
 async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
-    """Interactive terminal over WebSocket with streamed output.
-
-    Each command is executed via ``sandbox.commands.run()`` (no persistent
-    session required).  The working directory is tracked server-side and
-    injected as a ``cd`` prefix for every command.  A sentinel marker on
-    stderr captures the post-command cwd so that ``cd`` works naturally.
-
-    Commands run as ``asyncio.Task`` so the message loop stays responsive
-    to interrupt requests (Ctrl-C).  The ``on_init`` handler captures the
-    execution ID as soon as the sandbox assigns it, and the
-    ``on_execution_complete`` / ``on_error`` handlers send the ``exit``
-    message immediately — avoiding the 1-2 s delay that would otherwise
-    occur while waiting for the SDK to finalise the SSE stream.
-
-    Client → Server:
-      {"type": "command", "command": "ls -la"}
-      {"type": "interrupt"}
-
-    Server → Client:
-      {"type": "ready", "cwd": "/workspace"}
-      {"type": "stdout", "text": "..."}
-      {"type": "stderr", "text": "..."}
-      {"type": "exit", "code": 0}
-      {"type": "cwd", "path": "/workspace"}
-      {"type": "error", "message": "..."}
-    """
+    """Proxy a real OpenSandbox PTY session between browser and execd."""
     import asyncio
+    from websockets.exceptions import ConnectionClosed, InvalidStatus
 
     from app.db.session import SessionLocal
     from app.sandbox import get_sandbox_client
-    from app.sandbox.client import SandboxClient
+    from app.sandbox.client import SandboxPtySessionNotFoundError
     from app.service.auth import TokenService
     from app.service.system_config import get_sandbox_config
 
     await websocket.accept()
     db = SessionLocal()
+    upstream = None
+
+    async def _send_error_frame(message: str, *, code: str | None = None) -> None:
+        payload = {"type": "error", "error": message}
+        if code:
+            payload["code"] = code
+        with contextlib.suppress(Exception):
+            await websocket.send_json(payload)
+
+    async def _drop_terminal_session(record: SessionSandbox, client) -> None:
+        if not record.sandbox_id or not record.terminal_session_id:
+            _clear_terminal_session(record)
+            db.commit()
+            return
+
+        try:
+            await client.delete_pty_session(
+                record.sandbox_id,
+                record.terminal_session_id,
+            )
+        except SandboxPtySessionNotFoundError:
+            pass
+        finally:
+            _clear_terminal_session(record)
+            db.commit()
+
+    async def _ensure_terminal_session(
+        record: SessionSandbox,
+        client,
+        *,
+        reset: bool,
+    ) -> str:
+        if not record.sandbox_id:
+            raise RuntimeError("Sandbox record missing sandbox_id")
+
+        if reset:
+            await _drop_terminal_session(record, client)
+
+        now = datetime.now(timezone.utc)
+        if record.terminal_session_id:
+            try:
+                await client.get_pty_session_status(
+                    record.sandbox_id,
+                    record.terminal_session_id,
+                )
+            except SandboxPtySessionNotFoundError:
+                _clear_terminal_session(record)
+                db.commit()
+            else:
+                record.terminal_session_last_seen_at = now
+                db.commit()
+                return record.terminal_session_id
+
+        terminal_session_id = await client.create_pty_session(
+            record.sandbox_id,
+            cwd="/workspace",
+        )
+        record.terminal_session_id = terminal_session_id
+        record.terminal_session_created_at = now
+        record.terminal_session_last_seen_at = now
+        db.commit()
+        return terminal_session_id
+
+    async def _connect_upstream(record: SessionSandbox, client, *, reset: bool):
+        retry_with_fresh_session = True
+        next_reset = reset
+
+        while True:
+            terminal_session_id = await _ensure_terminal_session(
+                record,
+                client,
+                reset=next_reset,
+            )
+            try:
+                return await client.connect_pty_websocket(
+                    record.sandbox_id,
+                    terminal_session_id,
+                    since=0,
+                )
+            except InvalidStatus as exc:
+                status_code = getattr(exc.response, "status_code", None)
+                if status_code == 404 and retry_with_fresh_session:
+                    await _drop_terminal_session(record, client)
+                    retry_with_fresh_session = False
+                    next_reset = False
+                    continue
+                raise
 
     try:
         # --- Auth via query param (same pattern as agent_chat WS) ---
@@ -346,152 +432,82 @@ async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
 
         # --- Validate session ownership & running sandbox ---
         _validate_session_owner(db, session_id, user_id)
-        sandbox_id = SandboxService.get_active_sandbox_id(db, session_id)
-        if not sandbox_id:
+        record = _get_running_sandbox_record(db, session_id)
+        if not record or not record.sandbox_id:
             await websocket.close(code=4004, reason="No running sandbox")
             return
 
         client = get_sandbox_client(get_sandbox_config(db))
-        cwd = "/workspace"
-        sentinel = SandboxClient.CWD_SENTINEL
+        reset = _is_truthy(websocket.query_params.get("reset"))
 
-        await websocket.send_json({"type": "ready", "cwd": cwd})
-
-        # Shared mutable state between the message loop and command tasks.
-        current_execution_id: str | None = None
-        command_task: asyncio.Task | None = None
-
-        async def _run_command(command: str) -> None:
-            """Execute a single command in the background.
-
-            Streams output over the WebSocket, sends ``exit`` + ``cwd``
-            immediately when the SDK fires the completion/error event,
-            then lets ``run_terminal_command`` finish cleaning up.
-            """
-            nonlocal cwd, current_execution_id
-
-            new_cwd: list[str] = []
-            exit_sent = False
-
-            # -- streaming handlers (called by SDK during SSE processing) --
-
-            async def _on_init(init_event):
-                nonlocal current_execution_id
-                current_execution_id = init_event.id
-
-            async def _on_stdout(msg):
-                await websocket.send_json(
-                    {"type": "stdout", "text": msg.text}
-                )
-
-            async def _on_stderr(msg):
-                text: str = msg.text
-                if sentinel in text:
-                    start = text.index(sentinel) + len(sentinel)
-                    end = text.index(sentinel, start)
-                    new_cwd.append(text[start:end].strip())
-                    remaining = (
-                        text[: text.index(sentinel)]
-                        + text[end + len(sentinel) :]
-                    )
-                    remaining = remaining.strip()
-                    if remaining:
-                        await websocket.send_json(
-                            {"type": "stderr", "text": remaining}
-                        )
-                    return
-                await websocket.send_json(
-                    {"type": "stderr", "text": text}
-                )
-
-            async def _send_exit_and_cwd(code: int) -> None:
-                """Send exit + cwd immediately (called from event handlers)."""
-                nonlocal cwd, exit_sent
-                if exit_sent:
-                    return
-                exit_sent = True
-                await websocket.send_json({"type": "exit", "code": code})
-                if new_cwd:
-                    cwd = new_cwd[0]
-                    await websocket.send_json({"type": "cwd", "path": cwd})
-
-            async def _on_execution_complete(_complete_event):
-                await _send_exit_and_cwd(0)
-
-            async def _on_error(error_event):
-                try:
-                    code = int(error_event.value)
-                except (TypeError, ValueError):
-                    code = 1
-                await _send_exit_and_cwd(code)
-
-            try:
-                execution = await client.run_terminal_command(
-                    sandbox_id,
-                    command,
-                    cwd=cwd,
-                    on_stdout=_on_stdout,
-                    on_stderr=_on_stderr,
-                    on_init=_on_init,
-                    on_execution_complete=_on_execution_complete,
-                    on_error=_on_error,
-                )
-                # Fallback: send exit if the event handlers did not fire
-                if not exit_sent:
-                    await _send_exit_and_cwd(
-                        execution.exit_code if execution.exit_code is not None else 1
-                    )
-            except asyncio.CancelledError:
-                if not exit_sent:
-                    await websocket.send_json(
-                        {"type": "exit", "code": 130}  # SIGINT convention
-                    )
-            except Exception as exc:
-                logger.exception("Terminal command error")
-                if not exit_sent:
-                    await websocket.send_json(
-                        {"type": "error", "message": str(exc)}
-                    )
-            finally:
-                current_execution_id = None
-
-        # --- Message loop (always responsive) ---
-        while True:
-            data = await websocket.receive_json()
-            msg_type = data.get("type")
-
-            if msg_type == "command":
-                command = data.get("command", "").strip()
-                if not command:
-                    continue
-                # Ignore new commands while one is already running
-                if command_task and not command_task.done():
-                    continue
-                command_task = asyncio.create_task(_run_command(command))
-
-            elif msg_type == "interrupt":
-                if current_execution_id:
-                    try:
-                        await client.interrupt_execution(
-                            sandbox_id, current_execution_id
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Failed to interrupt execution %s",
-                            current_execution_id,
-                        )
-
-    except Exception as exc:
-        # WebSocket disconnect or unexpected error
-        if "disconnect" not in str(exc).lower():
-            logger.exception("Terminal WS error")
-    finally:
-        # Cancel any running command task on disconnect
         try:
-            if command_task and not command_task.done():
-                command_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await command_task
-        except NameError:
-            pass  # command_task not yet defined (early auth failure)
+            upstream = await _connect_upstream(record, client, reset=reset)
+        except InvalidStatus as exc:
+            status_code = getattr(exc.response, "status_code", None)
+            if status_code == 409:
+                await _send_error_frame(
+                    "Terminal is already attached in another client.",
+                    code="ALREADY_CONNECTED",
+                )
+                await websocket.close(code=4009, reason="Terminal already attached")
+                return
+            await _send_error_frame(
+                f"Failed to attach terminal upstream (status {status_code}).",
+                code="UPSTREAM_ATTACH_FAILED",
+            )
+            await websocket.close(code=1011, reason="Failed to attach terminal")
+            return
+
+        async def _browser_to_upstream() -> None:
+            while True:
+                message = await websocket.receive()
+                msg_type = message.get("type")
+                if msg_type == "websocket.disconnect":
+                    return
+
+                text = message.get("text")
+                if text is not None:
+                    await upstream.send(text)
+                    continue
+
+                data = message.get("bytes")
+                if data is not None:
+                    await upstream.send(data)
+
+        async def _upstream_to_browser() -> None:
+            async for message in upstream:
+                if isinstance(message, bytes):
+                    await websocket.send_bytes(message)
+                else:
+                    await websocket.send_text(message)
+
+        tasks = [
+            asyncio.create_task(_browser_to_upstream()),
+            asyncio.create_task(_upstream_to_browser()),
+        ]
+        done, pending = await asyncio.wait(
+            tasks,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+
+        for task in done:
+            exc = task.exception()
+            if exc and not isinstance(
+                exc,
+                (WebSocketDisconnect, ConnectionClosed, asyncio.CancelledError),
+            ):
+                raise exc
+
+    except Exception:
+        logger.exception("Terminal WS error")
+        await _send_error_frame("Terminal connection failed.", code="TERMINAL_PROXY_ERROR")
+    finally:
+        if upstream is not None:
+            with contextlib.suppress(Exception):
+                await upstream.close()
+        with contextlib.suppress(Exception):
+            await websocket.close()
         db.close()

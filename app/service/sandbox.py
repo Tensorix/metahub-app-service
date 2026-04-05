@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.db.model.session_sandbox import SessionSandbox
 from app.sandbox import get_sandbox_client
+from app.sandbox.client import SandboxPtySessionNotFoundError
 from app.service.system_config import get_sandbox_config
 
 logger = logging.getLogger(__name__)
@@ -134,15 +135,30 @@ class SandboxService:
         if record.status == "stopped":
             return record
 
+        config = get_sandbox_config(db)
+        client = get_sandbox_client(config)
+
+        if record.sandbox_id and record.terminal_session_id:
+            try:
+                await client.delete_pty_session(
+                    record.sandbox_id,
+                    record.terminal_session_id,
+                )
+            except SandboxPtySessionNotFoundError:
+                pass
+            except Exception as e:
+                logger.warning(f"Failed to delete remote PTY session: {e}")
+
         if record.sandbox_id:
             try:
-                config = get_sandbox_config(db)
-                client = get_sandbox_client(config)
                 await client.kill(record.sandbox_id)
             except Exception as e:
                 logger.warning(f"Failed to kill remote sandbox: {e}")
 
         record.status = "stopped"
+        record.terminal_session_id = None
+        record.terminal_session_created_at = None
+        record.terminal_session_last_seen_at = None
         db.commit()
         db.refresh(record)
 
@@ -201,15 +217,30 @@ class SandboxService:
         if not record:
             return
 
+        config = get_sandbox_config(db)
+        client = get_sandbox_client(config)
+
+        if record.sandbox_id and record.terminal_session_id:
+            try:
+                await client.delete_pty_session(
+                    record.sandbox_id,
+                    record.terminal_session_id,
+                )
+            except SandboxPtySessionNotFoundError:
+                pass
+            except Exception as e:
+                logger.warning(f"Cleanup: failed to delete PTY session: {e}")
+
         if record.sandbox_id:
             try:
-                config = get_sandbox_config(db)
-                client = get_sandbox_client(config)
                 await client.kill(record.sandbox_id)
             except Exception as e:
                 logger.warning(f"Cleanup: failed to kill sandbox: {e}")
 
         record.status = "stopped"
+        record.terminal_session_id = None
+        record.terminal_session_created_at = None
+        record.terminal_session_last_seen_at = None
         db.commit()
 
 

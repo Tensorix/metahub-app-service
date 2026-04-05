@@ -3,16 +3,33 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Optional
+from urllib.parse import urlencode
 
+import httpx
 from opensandbox.config import ConnectionConfig
+from opensandbox.constants import DEFAULT_EXECD_PORT
 from opensandbox.models.filesystem import WriteEntry
+from opensandbox.models.sandboxes import SandboxEndpoint
 from opensandbox.sandbox import Sandbox
+import websockets
 
 from app.schema.system_config import SandboxConfigValue
 
 logger = logging.getLogger(__name__)
+
+
+class SandboxPtySessionNotFoundError(Exception):
+    """Raised when an upstream PTY session no longer exists."""
+
+
+@dataclass(slots=True)
+class SandboxPtySessionStatus:
+    session_id: str
+    running: bool
+    output_offset: int
 
 
 class SandboxClient:
@@ -193,6 +210,151 @@ class SandboxClient:
         """Interrupt a running command execution."""
         sandbox = await self.connect(sandbox_id)
         await sandbox.commands.interrupt(execution_id)
+
+    # ------------------------------------------------------------------
+    # PTY terminal helpers (interactive shell)
+    # ------------------------------------------------------------------
+
+    async def create_pty_session(
+        self,
+        sandbox_id: str,
+        cwd: str | None = "/workspace",
+    ) -> str:
+        """Create a PTY session via execd."""
+        payload: dict[str, str] = {}
+        if cwd:
+            payload["cwd"] = cwd
+
+        response = await self._execd_request(
+            sandbox_id,
+            "POST",
+            "/pty",
+            json=payload,
+        )
+        session_id = response.json().get("session_id")
+        if not session_id:
+            raise RuntimeError("PTY create response missing session_id")
+        return session_id
+
+    async def get_pty_session_status(
+        self,
+        sandbox_id: str,
+        pty_session_id: str,
+    ) -> SandboxPtySessionStatus:
+        """Return PTY session status from execd."""
+        response = await self._execd_request(
+            sandbox_id,
+            "GET",
+            f"/pty/{pty_session_id}",
+        )
+        data = response.json()
+        return SandboxPtySessionStatus(
+            session_id=data.get("session_id") or pty_session_id,
+            running=bool(data.get("running")),
+            output_offset=int(data.get("output_offset") or 0),
+        )
+
+    async def delete_pty_session(
+        self,
+        sandbox_id: str,
+        pty_session_id: str,
+    ) -> None:
+        """Delete a PTY session via execd."""
+        await self._execd_request(
+            sandbox_id,
+            "DELETE",
+            f"/pty/{pty_session_id}",
+        )
+
+    async def connect_pty_websocket(
+        self,
+        sandbox_id: str,
+        pty_session_id: str,
+        *,
+        since: int = 0,
+    ):
+        """Attach to the PTY WebSocket for a session."""
+        endpoint = await self._get_execd_endpoint(sandbox_id)
+        ws_url = self._execd_websocket_url(
+            endpoint,
+            f"/pty/{pty_session_id}/ws",
+            {"since": since},
+        )
+        timeout_seconds = self._config.request_timeout.total_seconds()
+        return await websockets.connect(
+            ws_url,
+            additional_headers=self._execd_headers(endpoint),
+            open_timeout=timeout_seconds,
+            ping_interval=None,
+            max_size=None,
+            compression=None,
+        )
+
+    async def _get_execd_endpoint(self, sandbox_id: str) -> SandboxEndpoint:
+        sandbox = await self.connect(sandbox_id)
+        return await sandbox.get_endpoint(DEFAULT_EXECD_PORT)
+
+    async def _execd_request(
+        self,
+        sandbox_id: str,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+    ) -> httpx.Response:
+        endpoint = await self._get_execd_endpoint(sandbox_id)
+        timeout_seconds = self._config.request_timeout.total_seconds()
+
+        async with httpx.AsyncClient(
+            base_url=self._execd_base_url(endpoint),
+            headers=self._execd_headers(endpoint),
+            timeout=httpx.Timeout(timeout_seconds),
+            transport=self._config.transport,
+        ) as client:
+            response = await client.request(method, path, json=json)
+
+        if response.status_code == 404:
+            raise SandboxPtySessionNotFoundError(
+                f"PTY session resource not found: {path}"
+            )
+        response.raise_for_status()
+        return response
+
+    def _execd_headers(self, endpoint: SandboxEndpoint) -> dict[str, str]:
+        return {
+            "User-Agent": self._config.user_agent,
+            **self._config.headers,
+            **endpoint.headers,
+        }
+
+    def _execd_base_url(self, endpoint: SandboxEndpoint) -> str:
+        raw = endpoint.endpoint.rstrip("/")
+        if raw.startswith(("http://", "https://")):
+            return raw
+        return f"{self._config.protocol}://{raw}"
+
+    def _execd_websocket_url(
+        self,
+        endpoint: SandboxEndpoint,
+        path: str,
+        query: dict[str, Any] | None = None,
+    ) -> str:
+        base_url = self._execd_base_url(endpoint)
+        if base_url.startswith("https://"):
+            ws_base = "wss://" + base_url[len("https://") :]
+        elif base_url.startswith("http://"):
+            ws_base = "ws://" + base_url[len("http://") :]
+        elif base_url.startswith(("ws://", "wss://")):
+            ws_base = base_url
+        else:
+            ws_base = f"ws://{base_url}"
+
+        url = f"{ws_base.rstrip('/')}{path}"
+        if query:
+            encoded = urlencode({k: v for k, v in query.items() if v is not None})
+            if encoded:
+                url = f"{url}?{encoded}"
+        return url
 
 
 def _shell_quote(s: str) -> str:
