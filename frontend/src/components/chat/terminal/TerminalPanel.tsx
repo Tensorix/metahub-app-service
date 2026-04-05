@@ -97,10 +97,33 @@ export function TerminalPanel({ sessionId, onClose, className }: TerminalPanelPr
     [handleSubmit, terminal, history, historyIndex, inputValue]
   );
 
+  // When a command is running the input is unmounted — move focus to the
+  // scroll container so it can still capture keyboard events (Ctrl-C).
+  useEffect(() => {
+    if (terminal.isBusy) {
+      scrollRef.current?.focus();
+    }
+  }, [terminal.isBusy]);
+
+  // Handle Ctrl-C on the scroll container (when input is unmounted during busy)
+  const handleContainerKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === 'c' && e.ctrlKey && terminal.isBusy) {
+        e.preventDefault();
+        terminal.interrupt();
+      }
+    },
+    [terminal]
+  );
+
   // Focus input when clicking anywhere in the terminal
   const handleContainerClick = useCallback(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (terminal.isBusy) {
+      scrollRef.current?.focus();
+    } else {
+      inputRef.current?.focus();
+    }
+  }, [terminal.isBusy]);
 
   // Derive short prompt path (last 2 segments)
   const promptPath = terminal.cwd === '/' ? '/' : terminal.cwd.split('/').slice(-2).join('/');
@@ -143,7 +166,9 @@ export function TerminalPanel({ sessionId, onClose, className }: TerminalPanelPr
       {/* Scrollable output + inline input */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[13px] leading-[1.6]"
+        className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[13px] leading-[1.6] outline-none"
+        tabIndex={-1}
+        onKeyDown={handleContainerKeyDown}
       >
         {/* Connection state */}
         {!terminal.isConnected && !terminal.error && (

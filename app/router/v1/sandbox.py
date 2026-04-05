@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from uuid import UUID
 
@@ -296,6 +297,13 @@ async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
     injected as a ``cd`` prefix for every command.  A sentinel marker on
     stderr captures the post-command cwd so that ``cd`` works naturally.
 
+    Commands run as ``asyncio.Task`` so the message loop stays responsive
+    to interrupt requests (Ctrl-C).  The ``on_init`` handler captures the
+    execution ID as soon as the sandbox assigns it, and the
+    ``on_execution_complete`` / ``on_error`` handlers send the ``exit``
+    message immediately — avoiding the 1-2 s delay that would otherwise
+    occur while waiting for the SDK to finalise the SSE stream.
+
     Client → Server:
       {"type": "command", "command": "ls -la"}
       {"type": "interrupt"}
@@ -308,6 +316,8 @@ async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
       {"type": "cwd", "path": "/workspace"}
       {"type": "error", "message": "..."}
     """
+    import asyncio
+
     from app.db.session import SessionLocal
     from app.sandbox import get_sandbox_client
     from app.sandbox.client import SandboxClient
@@ -347,9 +357,105 @@ async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
 
         await websocket.send_json({"type": "ready", "cwd": cwd})
 
+        # Shared mutable state between the message loop and command tasks.
         current_execution_id: str | None = None
+        command_task: asyncio.Task | None = None
 
-        # --- Message loop ---
+        async def _run_command(command: str) -> None:
+            """Execute a single command in the background.
+
+            Streams output over the WebSocket, sends ``exit`` + ``cwd``
+            immediately when the SDK fires the completion/error event,
+            then lets ``run_terminal_command`` finish cleaning up.
+            """
+            nonlocal cwd, current_execution_id
+
+            new_cwd: list[str] = []
+            exit_sent = False
+
+            # -- streaming handlers (called by SDK during SSE processing) --
+
+            async def _on_init(init_event):
+                nonlocal current_execution_id
+                current_execution_id = init_event.id
+
+            async def _on_stdout(msg):
+                await websocket.send_json(
+                    {"type": "stdout", "text": msg.text}
+                )
+
+            async def _on_stderr(msg):
+                text: str = msg.text
+                if sentinel in text:
+                    start = text.index(sentinel) + len(sentinel)
+                    end = text.index(sentinel, start)
+                    new_cwd.append(text[start:end].strip())
+                    remaining = (
+                        text[: text.index(sentinel)]
+                        + text[end + len(sentinel) :]
+                    )
+                    remaining = remaining.strip()
+                    if remaining:
+                        await websocket.send_json(
+                            {"type": "stderr", "text": remaining}
+                        )
+                    return
+                await websocket.send_json(
+                    {"type": "stderr", "text": text}
+                )
+
+            async def _send_exit_and_cwd(code: int) -> None:
+                """Send exit + cwd immediately (called from event handlers)."""
+                nonlocal cwd, exit_sent
+                if exit_sent:
+                    return
+                exit_sent = True
+                await websocket.send_json({"type": "exit", "code": code})
+                if new_cwd:
+                    cwd = new_cwd[0]
+                    await websocket.send_json({"type": "cwd", "path": cwd})
+
+            async def _on_execution_complete(_complete_event):
+                await _send_exit_and_cwd(0)
+
+            async def _on_error(error_event):
+                try:
+                    code = int(error_event.value)
+                except (TypeError, ValueError):
+                    code = 1
+                await _send_exit_and_cwd(code)
+
+            try:
+                execution = await client.run_terminal_command(
+                    sandbox_id,
+                    command,
+                    cwd=cwd,
+                    on_stdout=_on_stdout,
+                    on_stderr=_on_stderr,
+                    on_init=_on_init,
+                    on_execution_complete=_on_execution_complete,
+                    on_error=_on_error,
+                )
+                # Fallback: send exit if the event handlers did not fire
+                if not exit_sent:
+                    await _send_exit_and_cwd(
+                        execution.exit_code if execution.exit_code is not None else 1
+                    )
+            except asyncio.CancelledError:
+                if not exit_sent:
+                    await websocket.send_json(
+                        {"type": "exit", "code": 130}  # SIGINT convention
+                    )
+            except Exception as exc:
+                logger.exception("Terminal command error")
+                if not exit_sent:
+                    await websocket.send_json(
+                        {"type": "error", "message": str(exc)}
+                    )
+            finally:
+                current_execution_id = None
+
+        # --- Message loop (always responsive) ---
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type")
@@ -358,61 +464,10 @@ async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
                 command = data.get("command", "").strip()
                 if not command:
                     continue
-
-                # Will be mutated by the sentinel-parsing stderr handler
-                new_cwd: list[str] = []
-
-                async def _on_stdout(msg):
-                    await websocket.send_json(
-                        {"type": "stdout", "text": msg.text}
-                    )
-
-                async def _on_stderr(msg, _s=sentinel, _nc=new_cwd):
-                    text: str = msg.text
-                    # Check for the cwd sentinel injected by the wrapper
-                    if _s in text:
-                        # Extract path between sentinels
-                        start = text.index(_s) + len(_s)
-                        end = text.index(_s, start)
-                        _nc.append(text[start:end].strip())
-                        # Strip sentinel line; forward any remaining text
-                        remaining = text[:text.index(_s)] + text[end + len(_s):]
-                        remaining = remaining.strip()
-                        if remaining:
-                            await websocket.send_json(
-                                {"type": "stderr", "text": remaining}
-                            )
-                        return
-                    await websocket.send_json(
-                        {"type": "stderr", "text": text}
-                    )
-
-                try:
-                    execution = await client.run_terminal_command(
-                        sandbox_id,
-                        command,
-                        cwd=cwd,
-                        on_stdout=_on_stdout,
-                        on_stderr=_on_stderr,
-                    )
-                    current_execution_id = execution.id
-                    await websocket.send_json(
-                        {"type": "exit", "code": execution.exit_code}
-                    )
-
-                    # Update tracked cwd if the sentinel was captured
-                    if new_cwd:
-                        cwd = new_cwd[0]
-                        await websocket.send_json(
-                            {"type": "cwd", "path": cwd}
-                        )
-                except Exception as exc:
-                    logger.exception("Terminal command error")
-                    await websocket.send_json(
-                        {"type": "error", "message": str(exc)}
-                    )
-                finally:
-                    current_execution_id = None
+                # Ignore new commands while one is already running
+                if command_task and not command_task.done():
+                    continue
+                command_task = asyncio.create_task(_run_command(command))
 
             elif msg_type == "interrupt":
                 if current_execution_id:
@@ -431,4 +486,12 @@ async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
         if "disconnect" not in str(exc).lower():
             logger.exception("Terminal WS error")
     finally:
+        # Cancel any running command task on disconnect
+        try:
+            if command_task and not command_task.done():
+                command_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await command_task
+        except NameError:
+            pass  # command_task not yet defined (early auth failure)
         db.close()

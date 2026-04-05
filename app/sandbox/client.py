@@ -149,6 +149,9 @@ class SandboxClient:
         *,
         on_stdout=None,
         on_stderr=None,
+        on_init=None,
+        on_execution_complete=None,
+        on_error=None,
     ):
         """Run a one-shot command with streaming callbacks.
 
@@ -177,6 +180,9 @@ class SandboxClient:
         handlers = ExecutionHandlers(
             on_stdout=on_stdout,
             on_stderr=on_stderr,
+            on_init=on_init,
+            on_execution_complete=on_execution_complete,
+            on_error=on_error,
         )
         sandbox = await self.connect(sandbox_id)
         return await sandbox.commands.run(wrapped, handlers=handlers)
