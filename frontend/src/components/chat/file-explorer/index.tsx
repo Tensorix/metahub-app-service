@@ -17,6 +17,7 @@ import { DropZone } from './DropZone';
 import { FileContextMenu } from './FileContextMenu';
 import { useFileExplorer } from './useFileExplorer';
 import { useSandboxFileExplorer } from './useSandboxFileExplorer';
+import { TerminalPanel } from '../terminal/TerminalPanel';
 
 interface FileExplorerProps {
   sessionId: string;
@@ -32,7 +33,7 @@ export function FileExplorer({ sessionId, topicId, className, onClose }: FileExp
 
   const sandboxStatus = useChatStore((s) => s.sandboxStatus);
   const hasSandbox = sandboxStatus[sessionId]?.status === 'running';
-  const [activeTab, setActiveTab] = useState<'store' | 'sandbox'>('store');
+  const [activeTab, setActiveTab] = useState<'store' | 'sandbox' | 'terminal'>('store');
   const [transferring, setTransferring] = useState(false);
 
   const handleCopyPath = useCallback(
@@ -85,6 +86,36 @@ export function FileExplorer({ sessionId, topicId, className, onClose }: FileExp
     [sessionId, toast, explorer],
   );
 
+  // ---- Terminal tab ----
+  if (activeTab === 'terminal' && hasSandbox) {
+    return (
+      <div className={cn('flex flex-col h-full border-l bg-background', className)}>
+        {/* Tab bar */}
+        <div className="flex border-b">
+          <button
+            className={cn('flex-1 px-3 py-1.5 text-xs font-medium', activeTab === 'store' && 'border-b-2 border-primary')}
+            onClick={() => setActiveTab('store')}
+          >
+            Store
+          </button>
+          <button
+            className={cn('flex-1 px-3 py-1.5 text-xs font-medium', activeTab === 'sandbox' && 'border-b-2 border-primary')}
+            onClick={() => setActiveTab('sandbox')}
+          >
+            Sandbox
+          </button>
+          <button
+            className={cn('flex-1 px-3 py-1.5 text-xs font-medium', activeTab === 'terminal' && 'border-b-2 border-primary')}
+            onClick={() => setActiveTab('terminal')}
+          >
+            Terminal
+          </button>
+        </div>
+        <TerminalPanel sessionId={sessionId} onClose={onClose} className="flex-1 min-h-0" />
+      </div>
+    );
+  }
+
   // ---- Sandbox tab ----
   if (activeTab === 'sandbox' && hasSandbox) {
     return (
@@ -103,6 +134,12 @@ export function FileExplorer({ sessionId, topicId, className, onClose }: FileExp
               onClick={() => setActiveTab('sandbox')}
             >
               Sandbox
+            </button>
+            <button
+              className={cn('flex-1 px-3 py-1.5 text-xs font-medium', activeTab === 'terminal' && 'border-b-2 border-primary')}
+              onClick={() => setActiveTab('terminal')}
+            >
+              Terminal
             </button>
           </div>
         )}
@@ -211,6 +248,12 @@ export function FileExplorer({ sessionId, topicId, className, onClose }: FileExp
               onClick={() => setActiveTab('sandbox')}
             >
               Sandbox
+            </button>
+            <button
+              className={cn('flex-1 px-3 py-1.5 text-xs font-medium', activeTab === 'terminal' && 'border-b-2 border-primary')}
+              onClick={() => setActiveTab('terminal')}
+            >
+              Terminal
             </button>
           </div>
         )}

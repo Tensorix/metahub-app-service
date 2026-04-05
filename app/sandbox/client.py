@@ -132,3 +132,63 @@ class SandboxClient:
         """Delete a single file from the sandbox."""
         sandbox = await self.connect(sandbox_id)
         await sandbox.files.delete_files([path])
+
+    # ------------------------------------------------------------------
+    # Terminal helpers (non-session, cwd tracked per-command)
+    # ------------------------------------------------------------------
+
+    # Sentinel written to stderr so the WS handler can extract the
+    # post-command working directory without polluting stdout.
+    CWD_SENTINEL = "__CWD_SENTINEL__"
+
+    async def run_terminal_command(
+        self,
+        sandbox_id: str,
+        command: str,
+        cwd: str = "/workspace",
+        *,
+        on_stdout=None,
+        on_stderr=None,
+    ):
+        """Run a one-shot command with streaming callbacks.
+
+        Wraps *command* so that the resulting working directory is
+        emitted on stderr between CWD_SENTINEL markers.  The caller
+        should strip those lines from user-visible output and use the
+        value to update its tracked cwd.
+
+        Returns the ``Execution`` object (has ``.exit_code``, ``.id``).
+        """
+        from opensandbox.models.execd import ExecutionHandlers
+
+        # The wrapper:
+        #  1. cd into tracked cwd
+        #  2. Execute the user command (which may itself cd)
+        #  3. Capture exit code
+        #  4. Emit current pwd wrapped in sentinels on stderr
+        #  5. Exit with the original exit code
+        wrapped = (
+            f'cd {_shell_quote(cwd)} && {{ {command} ; }}; '
+            f'__ec=$?; '
+            f'echo "{self.CWD_SENTINEL}$(pwd){self.CWD_SENTINEL}" >&2; '
+            f'exit $__ec'
+        )
+
+        handlers = ExecutionHandlers(
+            on_stdout=on_stdout,
+            on_stderr=on_stderr,
+        )
+        sandbox = await self.connect(sandbox_id)
+        return await sandbox.commands.run(wrapped, handlers=handlers)
+
+    async def interrupt_execution(
+        self, sandbox_id: str, execution_id: str
+    ) -> None:
+        """Interrupt a running command execution."""
+        sandbox = await self.connect(sandbox_id)
+        await sandbox.commands.interrupt(execution_id)
+
+
+def _shell_quote(s: str) -> str:
+    """Single-quote a string for safe shell interpolation."""
+    return "'" + s.replace("'", "'\\''") + "'"

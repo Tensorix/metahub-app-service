@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -280,3 +280,155 @@ def _require_running_sandbox(db: Session, session_id: UUID) -> str:
     if not sandbox_id:
         raise HTTPException(404, "No running sandbox for this session")
     return sandbox_id
+
+
+# ---------------------------------------------------------------------------
+# WebSocket terminal
+# ---------------------------------------------------------------------------
+
+
+@router.websocket("/sessions/{session_id}/sandbox/terminal")
+async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
+    """Interactive terminal over WebSocket with streamed output.
+
+    Each command is executed via ``sandbox.commands.run()`` (no persistent
+    session required).  The working directory is tracked server-side and
+    injected as a ``cd`` prefix for every command.  A sentinel marker on
+    stderr captures the post-command cwd so that ``cd`` works naturally.
+
+    Client → Server:
+      {"type": "command", "command": "ls -la"}
+      {"type": "interrupt"}
+
+    Server → Client:
+      {"type": "ready", "cwd": "/workspace"}
+      {"type": "stdout", "text": "..."}
+      {"type": "stderr", "text": "..."}
+      {"type": "exit", "code": 0}
+      {"type": "cwd", "path": "/workspace"}
+      {"type": "error", "message": "..."}
+    """
+    from app.db.session import SessionLocal
+    from app.sandbox import get_sandbox_client
+    from app.sandbox.client import SandboxClient
+    from app.service.auth import TokenService
+    from app.service.system_config import get_sandbox_config
+
+    await websocket.accept()
+    db = SessionLocal()
+
+    try:
+        # --- Auth via query param (same pattern as agent_chat WS) ---
+        token = websocket.query_params.get("token")
+        if not token:
+            await websocket.close(code=4001, reason="Missing token")
+            return
+
+        try:
+            payload = TokenService.decode_token(token)
+            if not payload or payload.get("type") != "access":
+                await websocket.close(code=4001, reason="Invalid token")
+                return
+            user_id = UUID(payload.get("sub"))
+        except Exception:
+            await websocket.close(code=4001, reason="Invalid token")
+            return
+
+        # --- Validate session ownership & running sandbox ---
+        _validate_session_owner(db, session_id, user_id)
+        sandbox_id = SandboxService.get_active_sandbox_id(db, session_id)
+        if not sandbox_id:
+            await websocket.close(code=4004, reason="No running sandbox")
+            return
+
+        client = get_sandbox_client(get_sandbox_config(db))
+        cwd = "/workspace"
+        sentinel = SandboxClient.CWD_SENTINEL
+
+        await websocket.send_json({"type": "ready", "cwd": cwd})
+
+        current_execution_id: str | None = None
+
+        # --- Message loop ---
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type")
+
+            if msg_type == "command":
+                command = data.get("command", "").strip()
+                if not command:
+                    continue
+
+                # Will be mutated by the sentinel-parsing stderr handler
+                new_cwd: list[str] = []
+
+                async def _on_stdout(msg):
+                    await websocket.send_json(
+                        {"type": "stdout", "text": msg.text}
+                    )
+
+                async def _on_stderr(msg, _s=sentinel, _nc=new_cwd):
+                    text: str = msg.text
+                    # Check for the cwd sentinel injected by the wrapper
+                    if _s in text:
+                        # Extract path between sentinels
+                        start = text.index(_s) + len(_s)
+                        end = text.index(_s, start)
+                        _nc.append(text[start:end].strip())
+                        # Strip sentinel line; forward any remaining text
+                        remaining = text[:text.index(_s)] + text[end + len(_s):]
+                        remaining = remaining.strip()
+                        if remaining:
+                            await websocket.send_json(
+                                {"type": "stderr", "text": remaining}
+                            )
+                        return
+                    await websocket.send_json(
+                        {"type": "stderr", "text": text}
+                    )
+
+                try:
+                    execution = await client.run_terminal_command(
+                        sandbox_id,
+                        command,
+                        cwd=cwd,
+                        on_stdout=_on_stdout,
+                        on_stderr=_on_stderr,
+                    )
+                    current_execution_id = execution.id
+                    await websocket.send_json(
+                        {"type": "exit", "code": execution.exit_code}
+                    )
+
+                    # Update tracked cwd if the sentinel was captured
+                    if new_cwd:
+                        cwd = new_cwd[0]
+                        await websocket.send_json(
+                            {"type": "cwd", "path": cwd}
+                        )
+                except Exception as exc:
+                    logger.exception("Terminal command error")
+                    await websocket.send_json(
+                        {"type": "error", "message": str(exc)}
+                    )
+                finally:
+                    current_execution_id = None
+
+            elif msg_type == "interrupt":
+                if current_execution_id:
+                    try:
+                        await client.interrupt_execution(
+                            sandbox_id, current_execution_id
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to interrupt execution %s",
+                            current_execution_id,
+                        )
+
+    except Exception as exc:
+        # WebSocket disconnect or unexpected error
+        if "disconnect" not in str(exc).lower():
+            logger.exception("Terminal WS error")
+    finally:
+        db.close()
