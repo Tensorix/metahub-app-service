@@ -25,6 +25,10 @@ class SandboxPtySessionNotFoundError(Exception):
     """Raised when an upstream PTY session no longer exists."""
 
 
+class SandboxPtyUnsupportedError(Exception):
+    """Raised when the upstream execd does not support PTY APIs."""
+
+
 @dataclass(slots=True)
 class SandboxPtySessionStatus:
     session_id: str
@@ -218,7 +222,7 @@ class SandboxClient:
     async def create_pty_session(
         self,
         sandbox_id: str,
-        cwd: str | None = "/workspace",
+        cwd: str | None = None,
     ) -> str:
         """Create a PTY session via execd."""
         payload: dict[str, str] = {}
@@ -235,6 +239,44 @@ class SandboxClient:
         if not session_id:
             raise RuntimeError("PTY create response missing session_id")
         return session_id
+
+    async def resolve_pty_cwd(
+        self,
+        sandbox_id: str,
+        *,
+        preferred: str = "/workspace",
+    ) -> str | None:
+        """Resolve a safe PTY cwd, falling back when preferred path is missing.
+
+        Why this exists:
+        PTY startup can fail with a misleading `fork/exec ... no such file or directory`
+        when `cmd.Dir` points to a non-existent directory. We probe first and return a
+        known-good absolute directory.
+        """
+        probe = (
+            f"if [ -d {_shell_quote(preferred)} ]; then "
+            f"printf '%s' {_shell_quote(preferred)}; "
+            "else pwd -P; fi"
+        )
+
+        try:
+            result = await self.run_command(sandbox_id, probe)
+        except Exception:
+            return None
+
+        exit_code = result.get("exit_code")
+        if exit_code is None or int(exit_code) != 0:
+            return None
+
+        stdout = (result.get("stdout") or "").strip()
+        if not stdout:
+            return None
+
+        cwd = stdout.splitlines()[-1].strip()
+        if not cwd.startswith("/"):
+            return None
+
+        return cwd
 
     async def get_pty_session_status(
         self,
@@ -272,13 +314,17 @@ class SandboxClient:
         pty_session_id: str,
         *,
         since: int = 0,
+        pty: bool | None = None,
     ):
         """Attach to the PTY WebSocket for a session."""
         endpoint = await self._get_execd_endpoint(sandbox_id)
+        query: dict[str, Any] = {"since": since}
+        if pty is not None:
+            query["pty"] = 1 if pty else 0
         ws_url = self._execd_websocket_url(
             endpoint,
             f"/pty/{pty_session_id}/ws",
-            {"since": since},
+            query,
         )
         timeout_seconds = self._config.request_timeout.total_seconds()
         return await websockets.connect(
@@ -304,16 +350,23 @@ class SandboxClient:
     ) -> httpx.Response:
         endpoint = await self._get_execd_endpoint(sandbox_id)
         timeout_seconds = self._config.request_timeout.total_seconds()
+        base_url = self._execd_base_url(endpoint).rstrip("/") + "/"
+        resource_path = path.lstrip("/")
 
         async with httpx.AsyncClient(
-            base_url=self._execd_base_url(endpoint),
+            base_url=base_url,
             headers=self._execd_headers(endpoint),
             timeout=httpx.Timeout(timeout_seconds),
             transport=self._config.transport,
         ) as client:
-            response = await client.request(method, path, json=json)
+            response = await client.request(method, resource_path, json=json)
 
         if response.status_code == 404:
+            # 404 on PTY create means this execd runtime likely has no PTY API.
+            if method.upper() == "POST" and resource_path == "pty":
+                raise SandboxPtyUnsupportedError(
+                    f"PTY API is not available on upstream execd: {path}"
+                )
             raise SandboxPtySessionNotFoundError(
                 f"PTY session resource not found: {path}"
             )

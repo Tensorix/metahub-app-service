@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
@@ -306,6 +307,58 @@ def _is_truthy(value: str | None) -> bool:
     return value is not None and value.lower() in {"1", "true", "yes", "on"}
 
 
+def _rewrite_upstream_terminal_error(message: str) -> str | None:
+    """Normalize known upstream terminal errors to actionable frontend messages."""
+    try:
+        payload = json.loads(message)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("type") != "error":
+        return None
+
+    error_text = payload.get("error") or payload.get("message")
+    if not isinstance(error_text, str):
+        return None
+
+    normalized = error_text.lower()
+    if (
+        "pty.startwithsize" in normalized
+        and "bash" in normalized
+        and "no such file or directory" in normalized
+    ):
+        payload["error"] = (
+            "Upstream PTY failed to start bash (/usr/bin/bash). "
+            "The sandbox may contain bash, but execd still cannot execute it "
+            "(for example path/linker/shared-library mismatch, or PTY cwd does not exist). "
+            "Please verify /usr/bin/bash and /bin/bash are executable inside the running sandbox, "
+            "then recreate the sandbox."
+        )
+        payload["code"] = "PTY_BASH_START_FAILED"
+        payload["details"] = error_text
+        return json.dumps(payload)
+
+    return None
+
+
+def _extract_terminal_error_code(message: str) -> str | None:
+    """Extract error code from terminal control frames when present."""
+    try:
+        payload = json.loads(message)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("type") != "error":
+        return None
+
+    code = payload.get("code")
+    return code if isinstance(code, str) else None
+
+
 # ---------------------------------------------------------------------------
 # WebSocket terminal
 # ---------------------------------------------------------------------------
@@ -319,9 +372,15 @@ async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
 
     from app.db.session import SessionLocal
     from app.sandbox import get_sandbox_client
-    from app.sandbox.client import SandboxPtySessionNotFoundError
+    from app.sandbox.client import (
+        SandboxPtySessionNotFoundError,
+        SandboxPtyUnsupportedError,
+    )
     from app.service.auth import TokenService
     from app.service.system_config import get_sandbox_config
+
+    class _PtyBashStartFailed(Exception):
+        """Raised when upstream PTY cannot start bash."""
 
     await websocket.accept()
     db = SessionLocal()
@@ -378,9 +437,13 @@ async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
                 db.commit()
                 return record.terminal_session_id
 
+        terminal_cwd = await client.resolve_pty_cwd(
+            record.sandbox_id,
+            preferred="/workspace",
+        )
         terminal_session_id = await client.create_pty_session(
             record.sandbox_id,
-            cwd="/workspace",
+            cwd=terminal_cwd,
         )
         record.terminal_session_id = terminal_session_id
         record.terminal_session_created_at = now
@@ -388,7 +451,13 @@ async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
         db.commit()
         return terminal_session_id
 
-    async def _connect_upstream(record: SessionSandbox, client, *, reset: bool):
+    async def _connect_upstream(
+        record: SessionSandbox,
+        client,
+        *,
+        reset: bool,
+        pty_mode: bool,
+    ):
         retry_with_fresh_session = True
         next_reset = reset
 
@@ -403,6 +472,7 @@ async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
                     record.sandbox_id,
                     terminal_session_id,
                     since=0,
+                    pty=pty_mode,
                 )
             except InvalidStatus as exc:
                 status_code = getattr(exc.response, "status_code", None)
@@ -440,66 +510,110 @@ async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
         client = get_sandbox_client(get_sandbox_config(db))
         reset = _is_truthy(websocket.query_params.get("reset"))
 
-        try:
-            upstream = await _connect_upstream(record, client, reset=reset)
-        except InvalidStatus as exc:
-            status_code = getattr(exc.response, "status_code", None)
-            if status_code == 409:
-                await _send_error_frame(
-                    "Terminal is already attached in another client.",
-                    code="ALREADY_CONNECTED",
+        pty_mode = True
+
+        while True:
+            try:
+                upstream = await _connect_upstream(
+                    record,
+                    client,
+                    reset=reset,
+                    pty_mode=pty_mode,
                 )
-                await websocket.close(code=4009, reason="Terminal already attached")
+            except SandboxPtyUnsupportedError:
+                await _send_error_frame(
+                    "Interactive PTY terminal is not supported by current sandbox runtime.",
+                    code="PTY_UNSUPPORTED",
+                )
+                await websocket.close(code=1011, reason="PTY unsupported")
                 return
-            await _send_error_frame(
-                f"Failed to attach terminal upstream (status {status_code}).",
-                code="UPSTREAM_ATTACH_FAILED",
-            )
-            await websocket.close(code=1011, reason="Failed to attach terminal")
-            return
-
-        async def _browser_to_upstream() -> None:
-            while True:
-                message = await websocket.receive()
-                msg_type = message.get("type")
-                if msg_type == "websocket.disconnect":
+            except InvalidStatus as exc:
+                status_code = getattr(exc.response, "status_code", None)
+                if status_code == 409:
+                    await _send_error_frame(
+                        "Terminal is already attached in another client.",
+                        code="ALREADY_CONNECTED",
+                    )
+                    await websocket.close(code=4009, reason="Terminal already attached")
                     return
+                await _send_error_frame(
+                    f"Failed to attach terminal upstream (status {status_code}).",
+                    code="UPSTREAM_ATTACH_FAILED",
+                )
+                await websocket.close(code=1011, reason="Failed to attach terminal")
+                return
 
-                text = message.get("text")
-                if text is not None:
-                    await upstream.send(text)
-                    continue
+            async def _browser_to_upstream(active_upstream) -> None:
+                while True:
+                    message = await websocket.receive()
+                    msg_type = message.get("type")
+                    if msg_type == "websocket.disconnect":
+                        return
 
-                data = message.get("bytes")
-                if data is not None:
-                    await upstream.send(data)
+                    text = message.get("text")
+                    if text is not None:
+                        await active_upstream.send(text)
+                        continue
 
-        async def _upstream_to_browser() -> None:
-            async for message in upstream:
-                if isinstance(message, bytes):
-                    await websocket.send_bytes(message)
-                else:
-                    await websocket.send_text(message)
+                    data = message.get("bytes")
+                    if data is not None:
+                        await active_upstream.send(data)
 
-        tasks = [
-            asyncio.create_task(_browser_to_upstream()),
-            asyncio.create_task(_upstream_to_browser()),
-        ]
-        done, pending = await asyncio.wait(
-            tasks,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
+            async def _upstream_to_browser(active_upstream) -> None:
+                async for message in active_upstream:
+                    if isinstance(message, bytes):
+                        await websocket.send_bytes(message)
+                    else:
+                        rewritten = _rewrite_upstream_terminal_error(message)
+                        outgoing = rewritten or message
+                        await websocket.send_text(outgoing)
 
-        for task in done:
-            exc = task.exception()
-            if exc and not isinstance(
-                exc,
-                (WebSocketDisconnect, ConnectionClosed, asyncio.CancelledError),
-            ):
-                raise exc
+                        if _extract_terminal_error_code(outgoing) == "PTY_BASH_START_FAILED":
+                            raise _PtyBashStartFailed()
+
+            tasks = [
+                asyncio.create_task(_browser_to_upstream(upstream)),
+                asyncio.create_task(_upstream_to_browser(upstream)),
+            ]
+            done, pending = await asyncio.wait(
+                tasks,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+
+            failure: Exception | None = None
+            for task in done:
+                exc = task.exception()
+                if isinstance(exc, _PtyBashStartFailed):
+                    failure = exc
+                    break
+                if exc and not isinstance(
+                    exc,
+                    (WebSocketDisconnect, ConnectionClosed, asyncio.CancelledError),
+                ):
+                    raise exc
+
+            if failure is None:
+                break
+
+            with contextlib.suppress(Exception):
+                await upstream.close()
+
+            if pty_mode:
+                pty_mode = False
+                reset = False
+                await _send_error_frame(
+                    "PTY mode startup failed. Switched to pipe mode for troubleshooting.",
+                    code="PTY_PIPE_FALLBACK",
+                )
+                continue
+
+            with contextlib.suppress(Exception):
+                await _drop_terminal_session(record, client)
+            await websocket.close(code=1011, reason="PTY bash start failed")
+            return
 
     except Exception:
         logger.exception("Terminal WS error")

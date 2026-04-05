@@ -8,13 +8,37 @@ Available tools (registered under category "sandbox"):
 - sandbox_install: Install a package (apt/pip)
 """
 
-from typing import Optional
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from typing import Awaitable, Callable, Optional
 from uuid import UUID
 
 from app.agent.tools.context import agent_session_id
 from app.agent.tools.registry import ToolRegistry
 from app.db.session import SessionLocal
 from app.service.sandbox import SandboxService
+
+def _run_async(awaitable_factory: Callable[[], Awaitable]):
+    """Run async code safely from sync tool context, including worker threads."""
+
+    def _run_in_fresh_loop():
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(awaitable_factory())
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
+
+    try:
+        # If this fails, there is no active loop in current thread.
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return _run_in_fresh_loop()
+
+    # If we are already inside a running loop, execute in an isolated thread.
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(_run_in_fresh_loop).result()
 
 
 def _get_sandbox_id() -> Optional[str]:
@@ -56,16 +80,14 @@ def sandbox_execute(command: str) -> str:
     Returns:
         Command output including exit code, stdout, and stderr.
     """
-    import asyncio
-
     sandbox_id = _get_sandbox_id()
     if not sandbox_id:
         return "Error: No active sandbox for this session."
 
     try:
         client = _get_client()
-        result = asyncio.get_event_loop().run_until_complete(
-            client.run_command(sandbox_id, command)
+        result = _run_async(
+            lambda: client.run_command(sandbox_id, command)
         )
         parts = [f"exit_code: {result['exit_code']}"]
         if result.get("stdout"):
@@ -92,16 +114,14 @@ def sandbox_read_file(path: str) -> str:
     Returns:
         File contents or error message.
     """
-    import asyncio
-
     sandbox_id = _get_sandbox_id()
     if not sandbox_id:
         return "Error: No active sandbox for this session."
 
     try:
         client = _get_client()
-        content = asyncio.get_event_loop().run_until_complete(
-            client.read_file(sandbox_id, path)
+        content = _run_async(
+            lambda: client.read_file(sandbox_id, path)
         )
         return content
     except Exception as e:
@@ -124,16 +144,14 @@ def sandbox_write_file(path: str, content: str) -> str:
     Returns:
         Success message or error.
     """
-    import asyncio
-
     sandbox_id = _get_sandbox_id()
     if not sandbox_id:
         return "Error: No active sandbox for this session."
 
     try:
         client = _get_client()
-        asyncio.get_event_loop().run_until_complete(
-            client.write_file(sandbox_id, path, content)
+        _run_async(
+            lambda: client.write_file(sandbox_id, path, content)
         )
         return f"File written: {path}"
     except Exception as e:
@@ -162,8 +180,6 @@ def sandbox_install(
     Returns:
         Installation output or error.
     """
-    import asyncio
-
     sandbox_id = _get_sandbox_id()
     if not sandbox_id:
         return "Error: No active sandbox for this session."
@@ -177,8 +193,8 @@ def sandbox_install(
 
     try:
         client = _get_client()
-        result = asyncio.get_event_loop().run_until_complete(
-            client.run_command(sandbox_id, cmd)
+        result = _run_async(
+            lambda: client.run_command(sandbox_id, cmd)
         )
         parts = [f"exit_code: {result['exit_code']}"]
         if result.get("stdout"):
