@@ -14,10 +14,11 @@ import { ToolApprovalCard } from './ToolApprovalCard';
 import { TopicSelector } from './TopicSelector';
 import { TopicSidebar } from './TopicSidebar';
 import { FileExplorer } from './FileExplorer';
+import { TerminalPanel } from './terminal/TerminalPanel';
 import { SessionDialog } from '@/components/SessionDialog';
 import { ResizableHandle } from '@/components/ui/resizable';
 import { cn } from '@/lib/utils';
-import { ChevronUp, ChevronDown, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2, ArrowLeft, FolderOpen, Container } from 'lucide-react';
+import { ChevronUp, ChevronDown, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2, ArrowLeft, FolderOpen, Container, TerminalSquare } from 'lucide-react';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { useToast } from '@/hooks/use-toast';
 
@@ -53,6 +54,8 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   const setTopicSidebarCollapsed = useChatStore((state) => state.setTopicSidebarCollapsed);
   const fileExplorerOpen = useChatStore((state) => state.fileExplorerOpen);
   const setFileExplorerOpen = useChatStore((state) => state.setFileExplorerOpen);
+  const terminalOpen = useChatStore((state) => state.terminalOpen);
+  const setTerminalOpen = useChatStore((state) => state.setTerminalOpen);
   const updateSession = useChatStore((state) => state.updateSession);
   const sandboxStatus = useChatStore((state) => state.sandboxStatus);
   const sandboxLoading = useChatStore((state) => state.sandboxLoading);
@@ -345,6 +348,17 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
                 <FolderOpen className="h-5 w-5" />
               </Button>
             )}
+            {/* 终端按钮 - 仅沙箱运行时显示 */}
+            {currentSession?.type === 'ai' && isSandboxRunning && (
+              <Button
+                size="icon"
+                variant={terminalOpen ? "secondary" : "ghost"}
+                onClick={() => setTerminalOpen(!terminalOpen)}
+                title={terminalOpen ? "关闭终端" : "打开终端"}
+              >
+                <TerminalSquare className="h-5 w-5" />
+              </Button>
+            )}
             {currentSession && (
               <Button
                 size="icon"
@@ -383,9 +397,24 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
 
       <div className="flex-1 flex flex-row min-h-0">
         <div className="flex-1 flex flex-col min-w-0 h-full relative group/message-area overflow-hidden">
-          {/* 消息列表 或 文件系统 - 点击文件图标时切换，带滑入滑出动画 */}
+          {/* 消息列表 / 文件系统 / 终端 - 互斥视图切换 */}
           <AnimatePresence mode="wait" initial={false}>
-            {currentSession?.type === 'ai' && fileExplorerOpen && currentSessionId ? (
+            {currentSession?.type === 'ai' && terminalOpen && currentSessionId && isSandboxRunning ? (
+              <motion.div
+                key="terminal"
+                initial={{ opacity: 0, x: 32 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 32 }}
+                transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
+                className="flex-1 flex flex-col min-h-0 absolute inset-0"
+              >
+                <TerminalPanel
+                  sessionId={currentSessionId}
+                  className="flex-1 min-h-0"
+                  onClose={() => setTerminalOpen(false)}
+                />
+              </motion.div>
+            ) : currentSession?.type === 'ai' && fileExplorerOpen && currentSessionId ? (
               <motion.div
                 key="file-explorer"
                 initial={{ opacity: 0, x: 32 }}
@@ -484,7 +513,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
         </div>
 
           {/* 浮动话题切换器 - 固定在消息区域右侧（仅消息模式显示） */}
-          {currentSession && displayMode === 'paged' && !fileExplorerOpen && (
+          {currentSession && displayMode === 'paged' && !fileExplorerOpen && !terminalOpen && (
             <div className={cn(
               "absolute right-3 top-1/2 -translate-y-1/2 z-20 transition-all duration-300",
               "opacity-50 hover:opacity-100",
@@ -526,7 +555,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
           )}
 
         {/* 输入框 - 文件系统模式时隐藏 */}
-        {!fileExplorerOpen && (
+        {!fileExplorerOpen && !terminalOpen && (
         <div className="px-3 pb-3 pt-2 space-y-3">
           {currentSession?.type === 'ai' && pendingInterrupt && (
             <ToolApprovalCard

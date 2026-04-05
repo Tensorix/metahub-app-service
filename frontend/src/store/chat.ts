@@ -31,6 +31,7 @@ interface ChatState {
   // ===== UI 状态 =====
   topicSidebarCollapsed: boolean;
   fileExplorerOpen: boolean; // 右侧窗格/抽屉展示文件系统而非话题列表
+  terminalOpen: boolean;
   leftDrawerOpen: boolean;
   rightDrawerOpen: boolean;
   boundaryProgress: number; // 0-100
@@ -96,6 +97,7 @@ interface ChatState {
   // UI
   setTopicSidebarCollapsed: (collapsed: boolean) => void;
   setFileExplorerOpen: (open: boolean) => void;
+  setTerminalOpen: (open: boolean) => void;
   setLeftDrawerOpen: (open: boolean) => void;
   setRightDrawerOpen: (open: boolean) => void;
   setBoundaryState: (progress: number, direction: 'up' | 'down' | null) => void;
@@ -118,6 +120,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sessionMessages: {},
   topicSidebarCollapsed: typeof window !== 'undefined' ? window.innerWidth < 1024 : false,
   fileExplorerOpen: false,
+  terminalOpen: false,
   leftDrawerOpen: false,
   rightDrawerOpen: false,
   boundaryProgress: 0,
@@ -560,7 +563,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ===== UI Actions =====
   setTopicSidebarCollapsed: (collapsed) => set({ topicSidebarCollapsed: collapsed }),
-  setFileExplorerOpen: (open) => set({ fileExplorerOpen: open }),
+  setFileExplorerOpen: (open) => set({ fileExplorerOpen: open, ...(open ? { terminalOpen: false } : {}) }),
+  setTerminalOpen: (open) => set({ terminalOpen: open, ...(open ? { fileExplorerOpen: false } : {}) }),
   setLeftDrawerOpen: (open) => set({ leftDrawerOpen: open }),
   setRightDrawerOpen: (open) => set({ rightDrawerOpen: open }),
   setBoundaryState: (progress, direction) => set({ boundaryProgress: progress, boundaryDirection: direction }),
