@@ -9,36 +9,58 @@ Available tools (registered under category "sandbox"):
 """
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
+import threading
 from typing import Awaitable, Callable, Optional
-from uuid import UUID
 
 from app.agent.tools.context import agent_session_id
 from app.agent.tools.registry import ToolRegistry
 from app.db.session import SessionLocal
 from app.service.sandbox import SandboxService
 
+# ---------------------------------------------------------------------------
+# Persistent event loop for tool-path async operations.
+#
+# Why: Sandbox SDK objects (Sandbox, httpx transport, httpcore pool) contain
+# asyncio primitives (Event, Lock) that are bound to the loop they were
+# first used on.  Creating a fresh loop per tool call means cached SDK
+# handles become invalid immediately, causing "Event … bound to a different
+# event loop" and "list.remove(x): x not in list" errors.
+#
+# A dedicated long-lived loop ensures all tool-path SDK objects stay on the
+# same loop for the lifetime of the process.
+# ---------------------------------------------------------------------------
+_tool_loop: asyncio.AbstractEventLoop | None = None
+_tool_loop_thread: threading.Thread | None = None
+_tool_loop_lock = threading.Lock()
+
+# Separate SandboxClient for tools — NOT the global singleton used by
+# FastAPI router/service.  Sharing handles across different event loops
+# (FastAPI loop vs tool loop) is the root cause of the errors.
+_tool_client = None
+_tool_client_config_hash: str | None = None
+
+
+def _get_tool_loop() -> asyncio.AbstractEventLoop:
+    """Return (or create) a persistent background event loop for tool calls."""
+    global _tool_loop, _tool_loop_thread
+    with _tool_loop_lock:
+        if _tool_loop is not None and _tool_loop.is_running():
+            return _tool_loop
+        _tool_loop = asyncio.new_event_loop()
+        _tool_loop_thread = threading.Thread(
+            target=_tool_loop.run_forever,
+            daemon=True,
+            name="sandbox-tool-loop",
+        )
+        _tool_loop_thread.start()
+        return _tool_loop
+
+
 def _run_async(awaitable_factory: Callable[[], Awaitable]):
-    """Run async code safely from sync tool context, including worker threads."""
-
-    def _run_in_fresh_loop():
-        loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(loop)
-            return loop.run_until_complete(awaitable_factory())
-        finally:
-            loop.close()
-            asyncio.set_event_loop(None)
-
-    try:
-        # If this fails, there is no active loop in current thread.
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return _run_in_fresh_loop()
-
-    # If we are already inside a running loop, execute in an isolated thread.
-    with ThreadPoolExecutor(max_workers=1) as ex:
-        return ex.submit(_run_in_fresh_loop).result()
+    """Run async code on the persistent tool loop from any sync context."""
+    loop = _get_tool_loop()
+    future = asyncio.run_coroutine_threadsafe(awaitable_factory(), loop)
+    return future.result(timeout=120)
 
 
 def _get_sandbox_id() -> Optional[str]:
@@ -51,14 +73,25 @@ def _get_sandbox_id() -> Optional[str]:
 
 
 def _get_client():
-    """Build a SandboxClient from current system config."""
-    from app.db.session import SessionLocal
-    from app.sandbox import get_sandbox_client
+    """Return a SandboxClient dedicated to the tool event loop.
+
+    This is intentionally separate from the global singleton used by
+    FastAPI async routes to prevent cross-event-loop handle contamination.
+    """
+    global _tool_client, _tool_client_config_hash
+
+    from app.sandbox.client import SandboxClient
     from app.service.system_config import get_sandbox_config
 
     with SessionLocal() as db:
         cfg = get_sandbox_config(db)
-    return get_sandbox_client(cfg)
+
+    config_hash = f"{cfg.api_domain}:{cfg.api_key}"
+    if _tool_client is None or _tool_client_config_hash != config_hash:
+        _tool_client = SandboxClient(cfg)
+        _tool_client_config_hash = config_hash
+
+    return _tool_client
 
 
 @ToolRegistry.register(
