@@ -18,7 +18,7 @@ import { RegenerateButton } from './RegenerateButton';
 import { FloatingTodo } from './TodoVisualization';
 import { LoadingDots } from './LoadingDots';
 import { cn } from '@/lib/utils';
-import { Bot, User } from 'lucide-react';
+import { Bot, Monitor, User } from 'lucide-react';
 import type { Message, MessagePart, SubAgentCallContent } from '@/lib/api';
 import { parseToolCallContent, parseToolResultContent } from '@/lib/api';
 import { staggerContainer, listItem, slideInLeft, slideInRight, fadeUp } from '@/lib/motion';
@@ -36,6 +36,8 @@ export function AIMessageList({ className }: { className?: string }) {
   const topicKey = currentTopicId || currentSessionId;
   const messageList = topicKey ? (messages[topicKey] || []) : [];
 
+  console.debug('[AIMessageList] render', { topicKey, msgCount: messageList.length, isStreaming: storeIsStreaming, streamingMsgId: streamingMessageId, msgs: messageList.map(m => ({ id: m.id?.slice(-8), role: m.role, parts: m.parts?.length })) });
+
   return (
     <div className={cn("flex-1 overflow-y-auto p-4", className)}>
       <div className="max-w-3xl mx-auto space-y-4">
@@ -45,15 +47,15 @@ export function AIMessageList({ className }: { className?: string }) {
           variants={staggerContainer}
           initial="hidden"
           animate="visible"
+          className="space-y-4"
         >
           {messageList.map((message) => (
-            <motion.div key={message.id} variants={listItem} className="mb-4 last:mb-0">
-              <MessageItem
-                message={message}
-                isStreaming={message.id === streamingMessageId}
-                isThinking={isThinking}
-              />
-            </motion.div>
+            <MessageItem
+              key={message.id}
+              message={message}
+              isStreaming={message.id === streamingMessageId}
+              isThinking={isThinking}
+            />
           ))}
         </motion.div>
 
@@ -89,6 +91,7 @@ interface MessageItemProps {
 function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
   const isUser = message.role === 'user' || message.role === 'self';
   const isAssistant = message.role === 'assistant';
+  const isSystemLike = message.role === 'system' || message.role === 'null';
 
   // Organize parts: preserve original order, pair tool_call with tool_result
   const organizedParts = useMemo(() => {
@@ -171,11 +174,16 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
     return result;
   }, [message.parts, isAssistant]);
 
+  if (isAssistant) {
+    console.debug('[MessageItem]', message.id?.slice(-8), 'rawParts:', message.parts?.length, message.parts?.map(p => `${p.type}:${p.content?.slice(0, 30)}`), 'organized:', organizedParts.length, organizedParts.map(p => p.type));
+  }
+
   const getSenderName = () => {
     if (message.sender?.name) return message.sender.name;
     if (message.parts[0]?.metadata?.sender_name) return message.parts[0].metadata.sender_name;
     if (isUser) return '我';
     if (isAssistant) return 'AI';
+    if (isSystemLike) return '系统';
     return '未知用户';
   };
 
@@ -189,7 +197,8 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
       .join('');
 
     return (
-      <motion.div variants={slideInRight} initial="hidden" animate="visible" className="flex gap-3 flex-row-reverse">
+      <motion.div variants={listItem} initial="hidden" animate="visible">
+        <motion.div variants={slideInRight} initial="hidden" animate="visible" className="flex gap-3 flex-row-reverse">
         <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg bg-brand/8 text-brand">
           <User className="h-4 w-4" />
         </div>
@@ -201,17 +210,25 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
             <p className="whitespace-pre-wrap">{textContent}</p>
           </div>
         </div>
+        </motion.div>
       </motion.div>
     );
   }
 
   // AI message
   if (isAssistant) {
-    const hasTextContent = organizedParts.some(p => p.type === 'text');
+    const hasTextContent = organizedParts.some(
+      (p) => p.type === 'text' && !!p.data?.content?.trim(),
+    );
     const showLoadingDots = isStreaming && organizedParts.length === 0;
+    const hasRenderablePart = organizedParts.some((item) => {
+      if (item.type === 'text') return !!item.data?.content?.trim();
+      return true;
+    });
 
     return (
-      <motion.div variants={slideInLeft} initial="hidden" animate="visible" className="group flex gap-3">
+      <motion.div variants={listItem} initial="hidden" animate="visible">
+        <motion.div variants={slideInLeft} initial="hidden" animate="visible" className="group flex gap-3">
         <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg bg-brand/8 text-brand">
           <Bot className="h-4 w-4" />
         </div>
@@ -224,6 +241,12 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
               <LoadingDots size="md" />
             </div>
           )}
+
+            {!showLoadingDots && !hasRenderablePart && (
+              <div className="rounded-2xl rounded-tl-md px-4 py-3 bg-surface text-xs text-muted-foreground">
+                等待内容...
+              </div>
+            )}
 
           {organizedParts.map((item, index) => {
             switch (item.type) {
@@ -264,6 +287,7 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
                 );
 
               case 'text':
+                if (!item.data.content?.trim()) return null;
                 return (
                   <div key={`text-${index}`} className="rounded-2xl rounded-tl-md px-4 py-3 bg-surface">
                     <StreamingMessage
@@ -290,9 +314,31 @@ function MessageItem({ message, isStreaming, isThinking }: MessageItemProps) {
             </div>
           )}
         </div>
+        </motion.div>
       </motion.div>
     );
   }
 
-  return null;
+  const fallbackContent = message.parts
+    .map((part) => (part.type === 'text' ? part.content : `[${part.type}] ${part.content}`))
+    .join('\n')
+    .trim();
+
+  return (
+    <motion.div variants={listItem} initial="hidden" animate="visible">
+      <motion.div variants={slideInLeft} initial="hidden" animate="visible" className="flex gap-3">
+        <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg bg-brand/8 text-brand">
+          <Monitor className="h-4 w-4" />
+        </div>
+        <div className="flex-1 min-w-0 space-y-2">
+          <span className="text-xs text-muted-foreground">{senderName}</span>
+          <div className="rounded-2xl rounded-tl-md px-4 py-3 bg-surface">
+            <p className="whitespace-pre-wrap text-sm">
+              {fallbackContent || '该消息暂不支持当前渲染类型'}
+            </p>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
 }

@@ -118,12 +118,14 @@ class StreamingCollector:
         """将当前累积的 text_chunks 转换为一个独立的 text part"""
         if self.text_chunks:
             text_content = "".join(self.text_chunks)
+            self.text_chunks = []  # 清空当前累积的 chunks
+            if not text_content.strip():
+                return  # 跳过空文本，避免前端渲染空白气泡
             self.text_parts.append(StreamingPart(
                 type=MessagePartType.TEXT,
                 content={"text": text_content},
                 metadata={"timestamp": datetime.now(timezone.utc).isoformat()}
             ))
-            self.text_chunks = []  # 清空当前累积的 chunks
 
     def add_operation_start(
         self,
@@ -496,8 +498,7 @@ async def _save_message_with_parts(
         message_str=message_str,
     )
     db.add(message)
-    db.commit()
-    db.refresh(message)
+    db.flush()  # 获取 message.id 但不提交，确保 message 和 parts 在同一事务
 
     # Create message parts
     for part_data in parts_data:
@@ -509,7 +510,7 @@ async def _save_message_with_parts(
         )
         db.add(part)
 
-    db.commit()
+    db.commit()  # 一次提交 message + 所有 parts，避免中间状态
 
     return message
 
@@ -772,6 +773,11 @@ async def chat_with_agent(
                     )
                 if event_type == "interrupt":
                     collector.flush_current_text()
+
+                # 跳过空文本/思考事件，避免前端创建空白 parts
+                if event_type in {"message", "thinking"} and not event_data.get("content"):
+                    continue
+
                 yield {
                     "event": event_type,
                     "data": json.dumps(event_data),

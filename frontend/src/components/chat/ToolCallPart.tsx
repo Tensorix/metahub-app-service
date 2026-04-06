@@ -24,7 +24,14 @@ export function ToolCallPart({ callPart, resultPart }: ToolCallPartProps) {
   const callContent = parseToolCallContent(callPart);
   const resultContent = resultPart ? parseToolResultContent(resultPart) : null;
 
-  if (!callContent) return null;
+  if (!callContent) {
+    return (
+      <div className="my-1.5 rounded-lg border border-border/30 bg-muted/20 px-3 py-2">
+        <div className="text-xs text-muted-foreground">Tool Call</div>
+        <pre className="mt-1 text-xs whitespace-pre-wrap break-words">{callPart.content}</pre>
+      </div>
+    );
+  }
 
   const isRunning = !resultContent;
   const isSuccess = resultContent?.success ?? true;

@@ -413,6 +413,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ? { topic_id: topicId, size: 100 }
         : { size: 200 };
       const response = await sessionApi.getMessages(sessionId, params);
+      console.debug('[loadMessages] API returned', response.items.length, 'messages', response.items.map((m: any) => ({ id: m.id, role: m.role, parts: m.parts?.length ?? 0, partsTypes: m.parts?.map((p: any) => p.type) })));
       if (topicId) {
         set((state) => ({
           messages: { ...state.messages, [topicId]: response.items },
@@ -554,6 +555,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((s) => ({
         sandboxStatus: { ...s.sandboxStatus, [sessionId]: info },
         sandboxLoading: { ...s.sandboxLoading, [sessionId]: false },
+        terminalOpen: false, // 沙箱停止时关闭终端
       }));
     } catch (err: any) {
       set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: false } }));
@@ -639,12 +641,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((state) => {
         const msgs = state.messages[topicKey] || [];
         const idx = msgs.findIndex((m) => m.id === aiMessageId);
-        if (idx === -1) return state;
+        if (idx === -1) {
+          console.warn('[updateMsg] Message not found in store', { aiMessageId, topicKey, msgCount: msgs.length, msgIds: msgs.map(m => m.id) });
+          return state;
+        }
         const updated = [...msgs];
         updated[idx] = msg;
         return { messages: { ...state.messages, [topicKey]: updated } };
       });
     };
+
+    let receivedDone = false;
 
     try {
       let proc = createInitialState();
@@ -656,9 +663,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         content,
         { topicId: topicId || undefined, signal: controller.signal }
       )) {
+        console.debug('[stream] event:', event.event, 'content' in event.data ? (event.data as any).content?.slice?.(0, 50) : '');
         const result = processStreamEvent(currentMsg, event, proc);
         currentMsg = result.message;
         proc = result.state;
+        console.debug('[stream] parts after process:', currentMsg.parts.length, currentMsg.parts.map(p => `${p.type}:${p.content?.slice?.(0, 30) ?? ''}`));
 
         // Text/thinking events: batch with RAF
         if (event.event === 'message' || event.event === 'thinking') {
@@ -679,17 +688,45 @@ export const useChatStore = create<ChatState>((set, get) => ({
           set({ isThinking: result.effects.isThinking });
         }
         if (result.effects.interrupt) {
+          const hasRenderableParts = currentMsg.parts.some((part) => {
+            if (part.type === 'text') return !!part.content?.trim();
+            return true;
+          });
+
+          // If interrupt arrives before any visible part, remove temp placeholder.
+          if (!hasRenderableParts) {
+            set((state) => {
+              const msgs = state.messages[topicKey] || [];
+              return {
+                messages: {
+                  ...state.messages,
+                  [topicKey]: msgs.filter((m) => m.id !== aiMessageId),
+                },
+              };
+            });
+          }
+
           set({
             pendingInterrupt: result.effects.interrupt,
             isStreaming: false,
+            streamingMessageId: null,
             abortController: null,
           });
+          receivedDone = true;
         }
         if (result.effects.error) {
           set({ streamError: result.effects.error });
         }
         if (result.effects.done) {
-          if (result.effects.doneStatus === 'interrupt') break;
+          receivedDone = true;
+          if (result.effects.doneStatus === 'interrupt') {
+            set({
+              isStreaming: false,
+              streamingMessageId: null,
+              abortController: null,
+            });
+            break;
+          }
           set({
             isStreaming: false,
             streamingMessageId: null,
@@ -702,6 +739,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
     } catch (error) {
+      receivedDone = true;
       if ((error as Error).name === 'AbortError') {
         set({
           isStreaming: false,
@@ -715,6 +753,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           abortController: null,
           streamingMessageId: null,
         });
+      }
+    } finally {
+      // Safety net: if stream ended without done/error event, clean up state
+      if (!receivedDone) {
+        console.warn('[sendAIMessage] Stream ended without done event, cleaning up');
+        set({
+          isStreaming: false,
+          streamingMessageId: null,
+          abortController: null,
+        });
+        // Load final messages from DB
+        if (topicId) {
+          try {
+            await get().loadMessages(currentSessionId, topicId);
+          } catch { /* ignore */ }
+        }
       }
     }
   },
@@ -831,6 +885,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     };
 
+    let receivedDone = false;
+
     try {
       let proc = createInitialState();
 
@@ -849,17 +905,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
           set({ isThinking: result.effects.isThinking });
         }
         if (result.effects.interrupt) {
+          receivedDone = true;
           set({ pendingInterrupt: result.effects.interrupt, isStreaming: false, abortController: null });
         }
         if (result.effects.error) {
           set({ streamError: result.effects.error });
         }
         if (result.effects.done) {
+          receivedDone = true;
           set({ isStreaming: false, streamingMessageId: null, abortController: null });
           await get().loadMessages(currentSessionId, currentTopicId);
         }
       }
     } catch (err) {
+      receivedDone = true;
       if ((err as Error).name !== 'AbortError') {
         set({
           isStreaming: false,
@@ -867,6 +926,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
           abortController: null,
           pendingInterrupt: null,
         });
+      }
+    } finally {
+      if (!receivedDone) {
+        console.warn('[sendResumeDecisions] Stream ended without done event, cleaning up');
+        set({
+          isStreaming: false,
+          streamingMessageId: null,
+          abortController: null,
+        });
+        try {
+          await get().loadMessages(currentSessionId, currentTopicId);
+        } catch { /* ignore */ }
       }
     }
   },

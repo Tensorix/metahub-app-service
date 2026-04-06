@@ -283,22 +283,35 @@ class MessageService:
 
     @staticmethod
     def get_messages(db: Session, session_id: UUID, query: MessageListQuery) -> tuple[list[Message], int]:
-        from sqlalchemy.orm import joinedload
-        
+        from sqlalchemy.orm import joinedload, subqueryload
+
         q = db.query(Message).filter(
             Message.session_id == session_id,
             Message.is_deleted == query.is_deleted
-        ).options(joinedload(Message.sender))  # 预加载 sender 关系
-        
+        ).options(
+            joinedload(Message.sender),
+            subqueryload(Message.parts),  # 预加载 parts 关系，避免 N+1 查询
+        )
+
         if query.topic_id:
             q = q.filter(Message.topic_id == query.topic_id)
         if query.role:
             q = q.filter(Message.role == query.role)
-        
-        total = q.count()
+
+        # count 不需要 joinedload，用去掉 options 的基础查询
+        count_q = db.query(Message).filter(
+            Message.session_id == session_id,
+            Message.is_deleted == query.is_deleted
+        )
+        if query.topic_id:
+            count_q = count_q.filter(Message.topic_id == query.topic_id)
+        if query.role:
+            count_q = count_q.filter(Message.role == query.role)
+        total = count_q.count()
+
         offset = (query.page - 1) * query.size
         messages = q.order_by(Message.created_at.asc()).offset(offset).limit(query.size).all()
-        
+
         return messages, total
 
     @staticmethod

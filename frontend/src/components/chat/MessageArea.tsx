@@ -554,16 +554,19 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
             </div>
           )}
 
-        {/* 输入框 - 文件系统模式时隐藏 */}
-        {!fileExplorerOpen && !terminalOpen && (
-        <div className="px-3 pb-3 pt-2 space-y-3">
-          {currentSession?.type === 'ai' && pendingInterrupt && (
+        {currentSession?.type === 'ai' && pendingInterrupt && (
+          <div className="px-3 pt-2">
             <ToolApprovalCard
               actionRequests={pendingInterrupt.action_requests}
               onApprove={resumeApprove}
               onReject={resumeReject}
             />
-          )}
+          </div>
+        )}
+
+        {/* 输入框 - 文件系统/终端模式时隐藏 */}
+        {!fileExplorerOpen && !(terminalOpen && isSandboxRunning) && (
+        <div className="px-3 pb-3 pt-2 space-y-3">
           {currentSession?.type === 'ai' ? (
             <MessageInput
               onSend={sendAIMessage}

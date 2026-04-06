@@ -453,15 +453,24 @@ function SessionItem({ session, isSelected, onSelect, onEdit, onDelete }: Sessio
   const Icon = cfg.icon;
   const hasUnread = session.unread_count > 0;
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onSelect();
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: [0.25, 0.4, 0.25, 1] }}
     >
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onSelect}
+        onKeyDown={handleKeyDown}
         className={cn(
           'group relative flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors',
           isSelected
@@ -549,7 +558,7 @@ function SessionItem({ session, isSelected, onSelect, onEdit, onDelete }: Sessio
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-      </button>
+      </div>
     </motion.div>
   );
 }
