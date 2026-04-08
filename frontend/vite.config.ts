@@ -3,17 +3,26 @@ import react from '@vitejs/plugin-react'
 import path from "path"
 import tailwindcss from "@tailwindcss/vite"
 
-// Split large vendor dependencies into separate chunks.
-// This is the primary defense against rollup OOM during the chunking/rendering
-// phase: instead of holding the full module graph in memory for a single giant
-// vendor chunk, rollup processes each vendor group incrementally. It also
-// improves browser caching in production.
+// Minimal `manualChunks`: ONLY split shiki's per-language/theme data files.
+//
+// WHY NOTHING ELSE IS SPLIT:
+// Rollup chunk boundaries are not transparent. Any library that relies on
+// one of the patterns below breaks when split across chunks:
+//   1. ESM circular deps (antd ↔ @rc-component, @emotion internals, react
+//      ↔ scheduler) → "Cannot access 'X' before initialization" / TDZ
+//   2. CJS UMD wrappers (cytoscape plugins: layout-base, cose-base,
+//      cytoscape-cose-bilkent; older mermaid deps) → "Cannot set
+//      properties of undefined (setting 'exports')"
+//   3. React 19 internal scheduler handoff → "Cannot set properties of
+//      undefined (setting 'unstable_now')"
+// Shiki's `@shikijs/langs/dist/*.mjs` and `@shikijs/themes/dist/*.mjs` files
+// are pure ESM data with zero cross-imports, so they are the ONLY splits
+// that are safe AND actually reduce rollup's peak rendering memory.
 function manualChunks(id: string): string | undefined {
   if (!id.includes('node_modules')) return
-  // Split shiki per-language and per-theme so rollup renders them as many
-  // small chunks instead of one ~10 MB monolith. This dramatically lowers
-  // the peak rendering memory because rollup can serialize + minify + GC
-  // one small chunk at a time.
+  // Shiki langs: one chunk per language so rollup renders + serializes +
+  // GCs each tiny file independently instead of holding a ~10 MB monolith
+  // in memory for the whole rendering phase. This is the main CI OOM fix.
   if (id.includes('@shikijs/langs')) {
     const match = id.match(/@shikijs\/langs\/dist\/([^./]+)/)
     return match ? `shiki-lang-${match[1]}` : 'shiki-langs'
@@ -23,43 +32,10 @@ function manualChunks(id: string): string | undefined {
     return match ? `shiki-theme-${match[1]}` : 'shiki-themes'
   }
   if (id.includes('@shikijs/') || id.includes('node_modules/shiki/')) return 'shiki-core'
-  // Visualization libraries (large, rarely needed on first paint)
-  if (id.includes('node_modules/mermaid/')) return 'mermaid'
-  if (id.includes('node_modules/cytoscape')) return 'cytoscape'
-  // UI frameworks
-  if (id.includes('@lobehub/')) return 'lobehub'
-  if (
-    id.includes('node_modules/antd/') ||
-    id.includes('@ant-design/') ||
-    id.includes('@rc-component/') ||
-    id.includes('node_modules/rc-')
-  ) return 'antd'
-  if (id.includes('@radix-ui/') || id.includes('@base-ui/')) return 'radix'
-  // Core React
-  if (id.includes('react-router')) return 'react-router'
-  if (id.includes('node_modules/react-dom/')) return 'react-dom'
-  if (id.includes('node_modules/react/')) return 'react'
-  // Emoji & icons
-  if (id.includes('@emoji-mart/') || id.includes('node_modules/emoji-mart/')) return 'emoji'
-  if (id.includes('lucide-react')) return 'lucide'
-  // Editor ecosystem
-  if (id.includes('node_modules/motion/') || id.includes('framer-motion')) return 'motion'
-  if (id.includes('@xterm/') || id.includes('node_modules/xterm/')) return 'xterm'
-  if (
-    id.includes('/remark') ||
-    id.includes('/rehype') ||
-    id.includes('/unified/') ||
-    id.includes('/mdast') ||
-    id.includes('/micromark')
-  ) return 'markdown'
-  if (id.includes('@emotion/')) return 'emotion'
-  if (id.includes('@dnd-kit/')) return 'dnd-kit'
-  if (id.includes('@tanstack/')) return 'tanstack'
-  // Date & util libraries
-  if (id.includes('date-fns')) return 'date-fns'
-  if (id.includes('node_modules/dayjs/')) return 'dayjs'
-  if (id.includes('es-toolkit') || id.includes('lodash')) return 'utils'
-  return 'vendor'
+  // Everything else: let rollup decide. Do NOT add more groupings here
+  // unless you've verified the library has zero cross-imports into the
+  // rest of the vendor graph AND ships pure ESM.
+  return undefined
 }
 
 // https://vite.dev/config/
