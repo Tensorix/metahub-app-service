@@ -18,7 +18,7 @@ RUN bun install --frozen-lockfile
 COPY frontend/ ./
 
 # Build frontend for production
-RUN bun run build
+RUN bun run build:ci
 
 
 # ============================================
