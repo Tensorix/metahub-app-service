@@ -41,6 +41,7 @@ class SandboxConfigValue(BaseModel):
     enabled: bool = False
     api_domain: str = ""
     api_key: str = ""
+    use_server_proxy: bool = False
     default_image: str = "ubuntu"
     default_timeout: int = 600
     max_per_user: int = 3

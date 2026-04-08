@@ -20,6 +20,7 @@ export function SandboxSettings() {
   const [enabled, setEnabled] = useState(false);
   const [apiDomain, setApiDomain] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [useServerProxy, setUseServerProxy] = useState(false);
   const [defaultImage, setDefaultImage] = useState('ubuntu');
   const [defaultTimeout, setDefaultTimeout] = useState(600);
   const [maxPerUser, setMaxPerUser] = useState(3);
@@ -36,6 +37,7 @@ export function SandboxSettings() {
         setEnabled(v.enabled ?? false);
         setApiDomain(v.api_domain ?? '');
         setApiKey(v.api_key ?? '');
+        setUseServerProxy(v.use_server_proxy ?? false);
         setDefaultImage(v.default_image ?? 'ubuntu');
         setDefaultTimeout(v.default_timeout ?? 600);
         setMaxPerUser(v.max_per_user ?? 3);
@@ -52,6 +54,7 @@ export function SandboxSettings() {
         enabled,
         api_domain: apiDomain,
         api_key: apiKey,
+        use_server_proxy: useServerProxy,
         default_image: defaultImage,
         default_timeout: defaultTimeout,
         max_per_user: maxPerUser,
@@ -120,6 +123,16 @@ export function SandboxSettings() {
             <p className="text-xs text-muted-foreground">
               保存后 API Key 将以掩码显示
             </p>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <Label>使用服务端代理</Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                当 API Domain 无法被应用直接访问时启用（例如容器网络隔离场景）
+              </p>
+            </div>
+            <Switch checked={useServerProxy} onCheckedChange={setUseServerProxy} />
           </div>
 
           <div className="grid grid-cols-3 gap-4">

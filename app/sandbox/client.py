@@ -43,6 +43,7 @@ class SandboxClient:
         self._config = ConnectionConfig(
             domain=sandbox_config.api_domain,
             api_key=sandbox_config.api_key,
+            use_server_proxy=sandbox_config.use_server_proxy,
         )
         self._handles: dict[str, Sandbox] = {}
 

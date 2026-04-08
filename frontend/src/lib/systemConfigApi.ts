@@ -37,6 +37,7 @@ export interface SandboxConfig {
   enabled: boolean;
   api_domain: string;
   api_key: string;
+  use_server_proxy: boolean;
   default_image: string;
   default_timeout: number;
   max_per_user: number;
