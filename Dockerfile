@@ -17,8 +17,11 @@ RUN bun install --frozen-lockfile
 # Copy frontend source code
 COPY frontend/ ./
 
-# Build frontend for production
-RUN bun run build:ci
+# Build frontend for production.
+# `--smol` puts Bun in low-memory mode (smaller heap, more aggressive GC),
+# which is required on constrained CI runners where the default heap causes
+# rollup to be OOM-killed during the chunking phase.
+RUN bun --smol run build:ci
 
 
 # ============================================
