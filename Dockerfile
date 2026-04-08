@@ -5,23 +5,35 @@ FROM hub.tensorix.xyz/oven/bun:1.2-alpine AS frontend-builder
 
 WORKDIR /frontend
 
+# Install Node.js for the build step. Rationale:
+# - Bun's JavaScriptCore runtime does NOT support --max-old-space-size, so we
+#   cannot cap heap growth on constrained CI runners (bun --smol isn't enough
+#   for this project's rollup rendering phase).
+# - Node's V8 respects NODE_OPTIONS and GCs aggressively under memory pressure,
+#   which is required to get through rollup rendering for @lobehub/editor's
+#   transitive shiki/mermaid/cytoscape dependencies.
+# - Bun is kept for `bun install` because it's significantly faster.
+RUN apk add --no-cache nodejs
+
 # Configure Bun to use China mirror
 # RUN printf '[install]\nregistry = "https://registry.npmmirror.com"' > bunfig.toml
 
 # Copy frontend package files
 COPY frontend/package.json frontend/bun.lock* ./
 
-# Install frontend dependencies
+# Install frontend dependencies (Bun is used here for speed)
 RUN bun install --frozen-lockfile
 
 # Copy frontend source code
 COPY frontend/ ./
 
-# Build frontend for production.
-# `--smol` puts Bun in low-memory mode (smaller heap, more aggressive GC),
-# which is required on constrained CI runners where the default heap causes
-# rollup to be OOM-killed during the chunking phase.
-RUN bun --smol run build:ci
+# Build frontend for production using Node + V8 with an explicit heap ceiling.
+# 3 GB leaves ~1 GB headroom on a 4 GB CI runner for native modules, the C++
+# heap, and esbuild's worker processes. If your CI runner is smaller, lower
+# this accordingly.
+ENV NODE_OPTIONS="--max-old-space-size=3072"
+RUN node ./node_modules/typescript/bin/tsc -b && \
+    node ./node_modules/vite/bin/vite.js build --mode ci
 
 
 # ============================================

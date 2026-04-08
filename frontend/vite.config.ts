@@ -10,10 +10,22 @@ import tailwindcss from "@tailwindcss/vite"
 // improves browser caching in production.
 function manualChunks(id: string): string | undefined {
   if (!id.includes('node_modules')) return
+  // Split shiki per-language and per-theme so rollup renders them as many
+  // small chunks instead of one ~10 MB monolith. This dramatically lowers
+  // the peak rendering memory because rollup can serialize + minify + GC
+  // one small chunk at a time.
+  if (id.includes('@shikijs/langs')) {
+    const match = id.match(/@shikijs\/langs\/dist\/([^./]+)/)
+    return match ? `shiki-lang-${match[1]}` : 'shiki-langs'
+  }
+  if (id.includes('@shikijs/themes')) {
+    const match = id.match(/@shikijs\/themes\/dist\/([^./]+)/)
+    return match ? `shiki-theme-${match[1]}` : 'shiki-themes'
+  }
+  if (id.includes('@shikijs/') || id.includes('node_modules/shiki/')) return 'shiki-core'
   // Visualization libraries (large, rarely needed on first paint)
   if (id.includes('node_modules/mermaid/')) return 'mermaid'
   if (id.includes('node_modules/cytoscape')) return 'cytoscape'
-  if (id.includes('@shikijs/') || id.includes('node_modules/shiki/')) return 'shiki'
   // UI frameworks
   if (id.includes('@lobehub/')) return 'lobehub'
   if (
@@ -78,7 +90,14 @@ export default defineConfig(({ mode }) => {
       // Source maps in particular are a major contributor to rollup OOM.
       sourcemap: !isCiMode,
       reportCompressedSize: !isCiMode,
+      // We already split the biggest offenders by hand; silence the noisy
+      // warning so CI logs stay focused on real issues.
+      chunkSizeWarningLimit: 2048,
       rollupOptions: {
+        // `safest` mode does less module graph analysis, which trades a tiny
+        // amount of dead-code elimination for significantly lower peak memory
+        // during rendering — a good deal on memory-constrained CI.
+        treeshake: isCiMode ? 'safest' : 'recommended',
         output: {
           manualChunks,
         },
