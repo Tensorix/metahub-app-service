@@ -32,6 +32,9 @@ from app.sandbox.browser_proxy import (
     rewrite_set_cookie_header,
 )
 from app.schema.sandbox import (
+    SandboxAdminInfo,
+    SandboxAdminListResponse,
+    SandboxAdminPagination,
     SandboxConfigUpdateRequest,
     SandboxCreateRequest,
     SandboxFileListResponse,
@@ -913,3 +916,128 @@ async def sandbox_terminal(websocket: WebSocket, session_id: UUID):
         with contextlib.suppress(Exception):
             await websocket.close()
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Sandbox administration (system-wide listing via OpenSandbox API)
+# ---------------------------------------------------------------------------
+
+
+def _require_sandbox_admin_config(db: Session):
+    """Return sandbox config if the service is enabled and configured."""
+    from app.service.system_config import get_sandbox_config
+
+    cfg = get_sandbox_config(db)
+    if not cfg.enabled:
+        raise HTTPException(400, "Sandbox service is disabled")
+    if not cfg.api_domain or not cfg.api_key:
+        raise HTTPException(400, "Sandbox service is not fully configured")
+    return cfg
+
+
+@router.get(
+    "/sandbox-admin/sandboxes",
+    response_model=SandboxAdminListResponse,
+)
+async def admin_list_sandboxes(
+    states: list[str] | None = Query(
+        default=None,
+        description="Filter by sandbox states (e.g. Running, Paused, Terminated)",
+    ),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """List sandboxes directly from the OpenSandbox admin API."""
+    cfg = _require_sandbox_admin_config(db)
+    from app.sandbox.admin import list_sandboxes, sandbox_info_to_dict
+
+    try:
+        result = await list_sandboxes(
+            cfg,
+            states=states,
+            page=page,
+            page_size=page_size,
+        )
+    except Exception as exc:
+        logger.exception("Failed to list sandboxes from OpenSandbox")
+        raise HTTPException(502, f"Failed to list sandboxes: {exc}")
+
+    return SandboxAdminListResponse(
+        sandboxes=[
+            SandboxAdminInfo(**sandbox_info_to_dict(info))
+            for info in result.sandbox_infos
+        ],
+        pagination=SandboxAdminPagination(
+            page=result.pagination.page,
+            page_size=result.pagination.page_size,
+            total_items=result.pagination.total_items,
+            total_pages=result.pagination.total_pages,
+            has_next_page=result.pagination.has_next_page,
+        ),
+    )
+
+
+@router.get(
+    "/sandbox-admin/sandboxes/{sandbox_id}",
+    response_model=SandboxAdminInfo,
+)
+async def admin_get_sandbox(
+    sandbox_id: str,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Fetch details for a single sandbox from the OpenSandbox admin API."""
+    cfg = _require_sandbox_admin_config(db)
+    from app.sandbox.admin import get_sandbox_info, sandbox_info_to_dict
+
+    try:
+        info = await get_sandbox_info(cfg, sandbox_id)
+    except Exception as exc:
+        logger.exception("Failed to fetch sandbox %s", sandbox_id)
+        raise HTTPException(502, f"Failed to fetch sandbox: {exc}")
+
+    return SandboxAdminInfo(**sandbox_info_to_dict(info))
+
+
+@router.delete(
+    "/sandbox-admin/sandboxes/{sandbox_id}",
+    status_code=204,
+)
+async def admin_kill_sandbox(
+    sandbox_id: str,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Terminate a sandbox via the OpenSandbox admin API.
+
+    Also reconciles local SessionSandbox records so the session view stays
+    consistent with the upstream state.
+    """
+    cfg = _require_sandbox_admin_config(db)
+    from app.sandbox.admin import kill_sandbox
+
+    try:
+        await kill_sandbox(cfg, sandbox_id)
+    except Exception as exc:
+        logger.exception("Failed to kill sandbox %s", sandbox_id)
+        raise HTTPException(502, f"Failed to kill sandbox: {exc}")
+
+    # Best-effort local state reconciliation: mark matching SessionSandbox rows
+    # as stopped so the per-session UI reflects the termination.
+    try:
+        rows = (
+            db.query(SessionSandbox)
+            .filter(SessionSandbox.sandbox_id == sandbox_id)
+            .all()
+        )
+        for row in rows:
+            row.status = "stopped"
+        if rows:
+            db.commit()
+    except Exception:
+        logger.exception("Failed to reconcile local SessionSandbox state")
+        db.rollback()
+
+    return Response(status_code=204)

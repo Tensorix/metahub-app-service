@@ -77,3 +77,38 @@ class SandboxTransferResponse(BaseModel):
 
 class SandboxRenewRequest(BaseModel):
     duration: int = 600
+
+
+# ---------------------------------------------------------------------------
+# Sandbox admin (system-wide listing / details via OpenSandbox API)
+# ---------------------------------------------------------------------------
+
+
+class SandboxAdminStatus(BaseModel):
+    state: str
+    reason: Optional[str] = None
+    message: Optional[str] = None
+    last_transition_at: Optional[datetime] = None
+
+
+class SandboxAdminInfo(BaseModel):
+    id: str
+    status: SandboxAdminStatus
+    entrypoint: list[str] = []
+    image: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    created_at: datetime
+    metadata: Optional[dict[str, str]] = None
+
+
+class SandboxAdminPagination(BaseModel):
+    page: int
+    page_size: int
+    total_items: int
+    total_pages: int
+    has_next_page: bool
+
+
+class SandboxAdminListResponse(BaseModel):
+    sandboxes: list[SandboxAdminInfo]
+    pagination: SandboxAdminPagination
