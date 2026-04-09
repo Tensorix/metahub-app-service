@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -13,9 +13,12 @@ from sqlalchemy.orm import Session
 from app.db.model.session_sandbox import SessionSandbox
 from app.sandbox import get_sandbox_client
 from app.sandbox.client import SandboxPtySessionNotFoundError
+from app.schema.sandbox import SandboxHostMount
 from app.service.system_config import get_sandbox_config
 
 logger = logging.getLogger(__name__)
+
+_UNSET = object()
 
 
 class SandboxService:
@@ -28,6 +31,8 @@ class SandboxService:
         user_id: UUID,
         image: str | None = None,
         timeout: int | None = None,
+        mounts: list[SandboxHostMount] | None = None,
+        replace_mounts: bool = False,
     ) -> SessionSandbox:
         """Persist per-session sandbox config without starting a sandbox.
 
@@ -41,7 +46,7 @@ class SandboxService:
         )
 
         if existing:
-            if existing.status in ("creating", "running", "stopping"):
+            if existing.status in ("creating", "running", "paused", "stopping"):
                 raise HTTPException(
                     400, "Cannot modify sandbox config while it is running"
                 )
@@ -49,6 +54,10 @@ class SandboxService:
                 existing.image = image
             if timeout is not None:
                 existing.timeout = timeout
+            existing.config = _merge_sandbox_config(
+                existing.config,
+                mounts=mounts if replace_mounts else _UNSET,
+            )
             db.commit()
             db.refresh(existing)
             return existing
@@ -61,6 +70,10 @@ class SandboxService:
             status="stopped",
             image=image or config.default_image,
             timeout=timeout,
+            config=_merge_sandbox_config(
+                None,
+                mounts=mounts if replace_mounts else _UNSET,
+            ),
         )
         db.add(record)
         db.commit()
@@ -75,6 +88,7 @@ class SandboxService:
         image: str | None = None,
         timeout: int | None = None,
         env: dict[str, str] | None = None,
+        mounts: list[SandboxHostMount] | None = None,
     ) -> SessionSandbox:
         config = get_sandbox_config(db)
         if not config.enabled:
@@ -90,11 +104,13 @@ class SandboxService:
         )
         persisted_image: str | None = None
         persisted_timeout: int | None = None
+        persisted_config: dict[str, Any] | None = None
         if existing:
             if existing.status not in ("stopped", "error"):
                 raise HTTPException(409, "Session already has an active sandbox")
             persisted_image = existing.image
             persisted_timeout = existing.timeout
+            persisted_config = _clone_config(existing.config)
             # Remove stale record so we can create a fresh one (unique constraint)
             db.delete(existing)
             db.flush()
@@ -116,6 +132,13 @@ class SandboxService:
         # Priority: explicit body → persisted record → global default
         effective_image = image or persisted_image or config.default_image
         effective_timeout = timeout or persisted_timeout or config.default_timeout
+        effective_env = _resolve_config_value(persisted_config, "env", env)
+        effective_mounts = _resolve_config_value(persisted_config, "mounts", mounts)
+        merged_config = _merge_sandbox_config(
+            persisted_config,
+            env=effective_env,
+            mounts=effective_mounts,
+        )
 
         record = SessionSandbox(
             session_id=session_id,
@@ -123,7 +146,7 @@ class SandboxService:
             status="creating",
             image=effective_image,
             timeout=effective_timeout,
-            config={"env": env} if env else None,
+            config=merged_config,
         )
         db.add(record)
         db.commit()
@@ -134,7 +157,8 @@ class SandboxService:
             sandbox = await client.create(
                 image=effective_image,
                 timeout=effective_timeout,
-                env=env,
+                env=effective_env,
+                mounts=_normalize_mounts(effective_mounts),
             )
             record.sandbox_id = sandbox.id
             record.status = "running"
@@ -243,6 +267,75 @@ class SandboxService:
         return record
 
     @staticmethod
+    async def pause_sandbox(
+        db: Session, session_id: UUID, user_id: UUID
+    ) -> SessionSandbox:
+        record = (
+            db.query(SessionSandbox)
+            .filter(
+                SessionSandbox.session_id == session_id,
+                SessionSandbox.user_id == user_id,
+                SessionSandbox.status == "running",
+            )
+            .first()
+        )
+        if not record or not record.sandbox_id:
+            raise HTTPException(404, "No running sandbox for this session")
+
+        config = get_sandbox_config(db)
+        client = get_sandbox_client(config)
+
+        if record.terminal_session_id:
+            try:
+                await client.delete_pty_session(
+                    record.sandbox_id,
+                    record.terminal_session_id,
+                )
+            except SandboxPtySessionNotFoundError:
+                pass
+            except Exception as e:
+                logger.warning(f"Failed to delete remote PTY session: {e}")
+
+        await client.pause(record.sandbox_id)
+        record.status = "paused"
+        record.terminal_session_id = None
+        record.terminal_session_created_at = None
+        record.terminal_session_last_seen_at = None
+        db.commit()
+        db.refresh(record)
+        _clear_agent_cache_for_session(db, session_id)
+        return record
+
+    @staticmethod
+    async def resume_sandbox(
+        db: Session, session_id: UUID, user_id: UUID
+    ) -> SessionSandbox:
+        record = (
+            db.query(SessionSandbox)
+            .filter(
+                SessionSandbox.session_id == session_id,
+                SessionSandbox.user_id == user_id,
+                SessionSandbox.status == "paused",
+            )
+            .first()
+        )
+        if not record or not record.sandbox_id:
+            raise HTTPException(404, "No paused sandbox for this session")
+
+        config = get_sandbox_config(db)
+        client = get_sandbox_client(config)
+        await client.resume(record.sandbox_id)
+        record.status = "running"
+        if record.timeout:
+            record.expires_at = datetime.now(timezone.utc) + timedelta(
+                seconds=record.timeout
+            )
+        db.commit()
+        db.refresh(record)
+        _clear_agent_cache_for_session(db, session_id)
+        return record
+
+    @staticmethod
     def get_active_sandbox_id(db: Session, session_id: UUID) -> Optional[str]:
         """Quick lookup: return sandbox_id if session has a running sandbox."""
         record = (
@@ -304,3 +397,60 @@ def _clear_agent_cache_for_session(db: Session, session_id: UUID) -> None:
     session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if session and session.agent_id:
         AgentFactory.clear_cache(session.agent_id)
+
+
+def _clone_config(config: dict[str, Any] | None) -> dict[str, Any]:
+    return dict(config) if isinstance(config, dict) else {}
+
+
+def _normalize_mounts(
+    mounts: list[SandboxHostMount] | list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    if not mounts:
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for mount in mounts:
+        if isinstance(mount, SandboxHostMount):
+            normalized.append(mount.model_dump(exclude_none=True))
+        elif isinstance(mount, dict):
+            normalized.append(
+                SandboxHostMount(**mount).model_dump(exclude_none=True)
+            )
+    return normalized
+
+
+def _resolve_config_value(
+    config: dict[str, Any] | None,
+    key: str,
+    explicit: Any,
+) -> Any:
+    if explicit is not None:
+        return explicit
+    if isinstance(config, dict):
+        return config.get(key)
+    return None
+
+
+def _merge_sandbox_config(
+    existing: dict[str, Any] | None,
+    *,
+    env: dict[str, str] | None | object = _UNSET,
+    mounts: list[SandboxHostMount] | list[dict[str, Any]] | None | object = _UNSET,
+) -> dict[str, Any] | None:
+    result = _clone_config(existing)
+
+    if env is not _UNSET:
+        if env:
+            result["env"] = env
+        else:
+            result.pop("env", None)
+
+    if mounts is not _UNSET:
+        normalized_mounts = _normalize_mounts(mounts)
+        if normalized_mounts:
+            result["mounts"] = normalized_mounts
+        else:
+            result.pop("mounts", None)
+
+    return result or None

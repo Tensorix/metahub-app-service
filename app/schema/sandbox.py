@@ -4,18 +4,46 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, computed_field, field_validator
+
+
+class SandboxHostMount(BaseModel):
+    host_path: str = Field(..., description="Absolute host path to mount")
+    mount_path: str = Field(..., description="Absolute mount path inside sandbox")
+    read_only: bool = Field(False, description="Whether the mount is read-only")
+    sub_path: Optional[str] = Field(
+        None,
+        description="Optional sub-path within the host path to mount",
+    )
+
+    @field_validator("host_path", "mount_path")
+    @classmethod
+    def _validate_absolute_path(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned.startswith("/"):
+            raise ValueError("Mount paths must be absolute")
+        return cleaned
+
+    @field_validator("sub_path")
+    @classmethod
+    def _validate_sub_path(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
 
 class SandboxCreateRequest(BaseModel):
     image: Optional[str] = None
     timeout: Optional[int] = None
     env: Optional[dict[str, str]] = None
+    mounts: Optional[list[SandboxHostMount]] = None
 
 
 class SandboxConfigUpdateRequest(BaseModel):
     image: Optional[str] = None
     timeout: Optional[int] = None
+    mounts: Optional[list[SandboxHostMount]] = None
 
 
 class SandboxResponse(BaseModel):
@@ -32,6 +60,23 @@ class SandboxResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def mounts(self) -> list[SandboxHostMount]:
+        raw = self.config.get("mounts") if isinstance(self.config, dict) else None
+        if not isinstance(raw, list):
+            return []
+
+        mounts: list[SandboxHostMount] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            try:
+                mounts.append(SandboxHostMount(**item))
+            except Exception:
+                continue
+        return mounts
 
 
 class SandboxFileInfo(BaseModel):

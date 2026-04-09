@@ -30,6 +30,7 @@ export function SandboxPanel({ sessionId, className, onClose }: SandboxPanelProp
   const sandboxStatus = useChatStore((s) => s.sandboxStatus);
   const current = sandboxStatus[sessionId] ?? null;
   const isRunning = current?.status === 'running';
+  const isPaused = current?.status === 'paused';
 
   const [activeTab, setActiveTab] = useState<TabKey>('config');
 
@@ -49,6 +50,8 @@ export function SandboxPanel({ sessionId, className, onClose }: SandboxPanelProp
               'text-xs px-1.5 py-0.5 rounded-md',
               isRunning
                 ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+                : isPaused
+                  ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
                 : current?.status === 'error'
                   ? 'bg-destructive/10 text-destructive'
                   : 'bg-muted text-muted-foreground',

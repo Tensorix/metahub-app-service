@@ -51,12 +51,20 @@ class _FakeSandboxClient:
     def __init__(self):
         self.deleted_sessions: list[tuple[str, str]] = []
         self.killed_sandboxes: list[str] = []
+        self.paused_sandboxes: list[str] = []
+        self.resumed_sandboxes: list[str] = []
 
     async def delete_pty_session(self, sandbox_id: str, terminal_session_id: str) -> None:
         self.deleted_sessions.append((sandbox_id, terminal_session_id))
 
     async def kill(self, sandbox_id: str) -> None:
         self.killed_sandboxes.append(sandbox_id)
+
+    async def pause(self, sandbox_id: str) -> None:
+        self.paused_sandboxes.append(sandbox_id)
+
+    async def resume(self, sandbox_id: str) -> None:
+        self.resumed_sandboxes.append(sandbox_id)
 
 
 @pytest.mark.asyncio
@@ -105,6 +113,80 @@ async def test_stop_sandbox_cleans_up_terminal_session(monkeypatch):
     assert fake_client.killed_sandboxes == ["sandbox-123"]
 
 
+@pytest.mark.asyncio
+async def test_pause_sandbox_cleans_up_terminal_session(monkeypatch):
+    user_id = uuid4()
+    session_id = uuid4()
+
+    sandbox_record = SessionSandbox(
+        session_id=session_id,
+        user_id=user_id,
+        sandbox_id="sandbox-123",
+        status="running",
+        image="ubuntu",
+        timeout=600,
+        terminal_session_id="pty-123",
+        terminal_session_created_at=datetime.now(timezone.utc),
+        terminal_session_last_seen_at=datetime.now(timezone.utc),
+    )
+    db = _FakeDB(sandbox_record, SessionModel(id=session_id, user_id=user_id, type="ai", is_deleted=False))
+    fake_client = _FakeSandboxClient()
+
+    monkeypatch.setattr(
+        sandbox_service_module,
+        "get_sandbox_config",
+        lambda _db: SandboxConfigValue(enabled=True, api_domain="api.example.com", api_key="secret"),
+    )
+    monkeypatch.setattr(
+        sandbox_service_module,
+        "get_sandbox_client",
+        lambda _cfg: fake_client,
+    )
+
+    record = await SandboxService.pause_sandbox(db, session_id, user_id)
+
+    assert record.status == "paused"
+    assert record.terminal_session_id is None
+    assert record.terminal_session_created_at is None
+    assert record.terminal_session_last_seen_at is None
+    assert fake_client.deleted_sessions == [("sandbox-123", "pty-123")]
+    assert fake_client.paused_sandboxes == ["sandbox-123"]
+
+
+@pytest.mark.asyncio
+async def test_resume_sandbox_marks_record_running(monkeypatch):
+    user_id = uuid4()
+    session_id = uuid4()
+
+    sandbox_record = SessionSandbox(
+        session_id=session_id,
+        user_id=user_id,
+        sandbox_id="sandbox-123",
+        status="paused",
+        image="ubuntu",
+        timeout=600,
+    )
+    db = _FakeDB(sandbox_record, SessionModel(id=session_id, user_id=user_id, type="ai", is_deleted=False))
+    fake_client = _FakeSandboxClient()
+
+    monkeypatch.setattr(
+        sandbox_service_module,
+        "get_sandbox_config",
+        lambda _db: SandboxConfigValue(enabled=True, api_domain="api.example.com", api_key="secret"),
+    )
+    monkeypatch.setattr(
+        sandbox_service_module,
+        "get_sandbox_client",
+        lambda _cfg: fake_client,
+    )
+
+    record = await SandboxService.resume_sandbox(db, session_id, user_id)
+
+    assert record.status == "running"
+    assert record.expires_at is not None
+    assert fake_client.resumed_sandboxes == ["sandbox-123"]
+
+
 def test_sandbox_client_builds_execd_websocket_url_and_headers():
     client = SandboxClient(
         SandboxConfigValue(
@@ -131,6 +213,50 @@ def test_sandbox_client_builds_execd_websocket_url_and_headers():
     assert headers["X-Custom"] == "custom"
     assert headers["X-EXECD-ACCESS-TOKEN"] == "token-1"
     assert "User-Agent" in headers
+
+
+@pytest.mark.asyncio
+async def test_sandbox_client_create_passes_host_volumes(monkeypatch):
+    client = SandboxClient(
+        SandboxConfigValue(
+            enabled=True,
+            api_domain="api.example.com",
+            api_key="secret",
+        )
+    )
+
+    captured: dict[str, object] = {}
+
+    class _FakeSandboxHandle:
+        id = "sandbox-123"
+
+    async def _fake_create(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return _FakeSandboxHandle()
+
+    monkeypatch.setattr("app.sandbox.client.Sandbox.create", _fake_create)
+
+    sandbox = await client.create(
+        image="ubuntu",
+        timeout=600,
+        mounts=[
+            {
+                "host_path": "/tmp/host-data",
+                "mount_path": "/workspace/data",
+                "read_only": True,
+                "sub_path": "nested",
+            }
+        ],
+    )
+
+    volumes = captured["kwargs"]["volumes"]
+    assert sandbox.id == "sandbox-123"
+    assert len(volumes) == 1
+    assert volumes[0].host.path == "/tmp/host-data"
+    assert volumes[0].mount_path == "/workspace/data"
+    assert volumes[0].read_only is True
+    assert volumes[0].sub_path == "nested"
 
 
 @pytest.mark.asyncio
@@ -235,6 +361,7 @@ async def test_connect_pty_websocket_supports_pipe_mode_query(monkeypatch):
             api_key="secret",
         )
     )
+    client._config.protocol = "https"
     endpoint = SandboxEndpoint(
         endpoint="sandbox.example.com:44772",
         headers={},

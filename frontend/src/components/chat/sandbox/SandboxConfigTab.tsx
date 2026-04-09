@@ -4,12 +4,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useChatStore } from '@/store/chat';
-import { sandboxApi } from '@/lib/api';
+import { sandboxApi, type SandboxMount } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Play, Save, Square, RefreshCw } from 'lucide-react';
+import { Loader2, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Square, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface SandboxConfigTabProps {
@@ -17,6 +18,12 @@ interface SandboxConfigTabProps {
 }
 
 const DEFAULT_TIMEOUT = 600;
+const EMPTY_MOUNT: SandboxMount = {
+  host_path: '',
+  mount_path: '/workspace',
+  read_only: false,
+  sub_path: '',
+};
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
@@ -27,12 +34,27 @@ function formatDate(value: string | null | undefined): string {
   }
 }
 
+function normalizeMount(mount: SandboxMount): SandboxMount {
+  return {
+    host_path: mount.host_path.trim(),
+    mount_path: mount.mount_path.trim(),
+    read_only: Boolean(mount.read_only),
+    sub_path: mount.sub_path?.trim() || undefined,
+  };
+}
+
+function serializeMounts(mounts: SandboxMount[]): string {
+  return JSON.stringify(mounts.map(normalizeMount));
+}
+
 export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
   const { toast } = useToast();
   const sandboxStatus = useChatStore((s) => s.sandboxStatus);
   const sandboxLoading = useChatStore((s) => s.sandboxLoading);
   const updateSandboxConfig = useChatStore((s) => s.updateSandboxConfig);
   const createSandbox = useChatStore((s) => s.createSandbox);
+  const pauseSandbox = useChatStore((s) => s.pauseSandbox);
+  const resumeSandbox = useChatStore((s) => s.resumeSandbox);
   const stopSandbox = useChatStore((s) => s.stopSandbox);
 
   const current = sandboxStatus[sessionId] ?? null;
@@ -40,33 +62,55 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
 
   const status = current?.status ?? 'stopped';
   const isRunning = status === 'running';
+  const isPaused = status === 'paused';
   const isTransient = status === 'creating' || status === 'stopping';
-  const editsLocked = isRunning || isTransient;
+  const editsLocked = isRunning || isPaused || isTransient;
 
   const [imageDraft, setImageDraft] = useState<string>(current?.image ?? '');
   const [timeoutDraft, setTimeoutDraft] = useState<string>(
     current?.timeout != null ? String(current.timeout) : '',
   );
+  const [mountDrafts, setMountDrafts] = useState<SandboxMount[]>(current?.mounts ?? []);
   const [renewing, setRenewing] = useState(false);
 
   // Sync drafts when the underlying record changes (e.g. status update)
   useEffect(() => {
     setImageDraft(current?.image ?? '');
     setTimeoutDraft(current?.timeout != null ? String(current.timeout) : '');
-  }, [current?.image, current?.timeout]);
+    setMountDrafts(current?.mounts ?? []);
+  }, [current?.image, current?.timeout, current?.mounts]);
 
   const hasDrafts = useMemo(() => {
     const cleanImage = imageDraft.trim();
     const cleanTimeout = timeoutDraft.trim();
     const recordedImage = current?.image ?? '';
     const recordedTimeout = current?.timeout != null ? String(current.timeout) : '';
-    return cleanImage !== recordedImage || cleanTimeout !== recordedTimeout;
-  }, [imageDraft, timeoutDraft, current]);
+    const recordedMounts = serializeMounts(current?.mounts ?? []);
+    const draftMounts = serializeMounts(mountDrafts);
+    return (
+      cleanImage !== recordedImage ||
+      cleanTimeout !== recordedTimeout ||
+      recordedMounts !== draftMounts
+    );
+  }, [imageDraft, timeoutDraft, mountDrafts, current]);
 
   const buildPayload = () => {
     const image = imageDraft.trim();
     const timeout = timeoutDraft.trim();
-    const payload: { image?: string; timeout?: number } = {};
+    const payload: { image?: string; timeout?: number; mounts: SandboxMount[] } = {
+      mounts: mountDrafts.map(normalizeMount).filter((mount) => {
+        if (!mount.host_path && !mount.mount_path && !mount.sub_path) {
+          return false;
+        }
+        if (!mount.host_path) {
+          throw new Error('Host path is required for each mount');
+        }
+        if (!mount.mount_path) {
+          throw new Error('Mount path is required for each mount');
+        }
+        return true;
+      }),
+    };
     if (image) payload.image = image;
     if (timeout) {
       const n = Number(timeout);
@@ -122,6 +166,32 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
     }
   };
 
+  const handlePause = async () => {
+    try {
+      await pauseSandbox(sessionId);
+      toast({ title: '沙箱已暂停' });
+    } catch (err: any) {
+      toast({
+        title: '暂停沙箱失败',
+        description: err?.response?.data?.detail || err?.message || String(err),
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleResume = async () => {
+    try {
+      await resumeSandbox(sessionId);
+      toast({ title: '沙箱已恢复' });
+    } catch (err: any) {
+      toast({
+        title: '恢复沙箱失败',
+        description: err?.response?.data?.detail || err?.message || String(err),
+        variant: 'destructive',
+      });
+    }
+  };
+
   const handleRenew = async () => {
     setRenewing(true);
     try {
@@ -160,6 +230,8 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
                 'px-1.5 py-0.5 rounded-md font-medium',
                 isRunning
                   ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+                  : isPaused
+                    ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
                   : status === 'error'
                     ? 'bg-destructive/10 text-destructive'
                     : 'bg-muted text-muted-foreground',
@@ -238,18 +310,154 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
               <Save className="h-4 w-4 mr-1.5" />
               Save
             </Button>
-            {editsLocked && !isRunning && (
+            {editsLocked && (
               <span className="text-xs text-muted-foreground">
-                Cannot edit while sandbox is {status}.
+                Stop the sandbox to change image, timeout, or mounts.
               </span>
             )}
           </div>
+        </div>
+
+        <div className="space-y-3 pt-2 border-t">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium">Host Mounts</div>
+              <div className="text-xs text-muted-foreground">
+                Absolute host path to sandbox mount path.
+              </div>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setMountDrafts((prev) => [...prev, { ...EMPTY_MOUNT }])}
+              disabled={editsLocked}
+            >
+              <Plus className="h-4 w-4 mr-1.5" />
+              Add
+            </Button>
+          </div>
+
+          {mountDrafts.length === 0 ? (
+            <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+              No host mounts configured.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {mountDrafts.map((mount, index) => (
+                <div key={index} className="rounded-md border p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Mount #{index + 1}
+                    </span>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      onClick={() =>
+                        setMountDrafts((prev) => prev.filter((_, i) => i !== index))
+                      }
+                      disabled={editsLocked}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Host Path</Label>
+                    <Input
+                      value={mount.host_path}
+                      onChange={(e) =>
+                        setMountDrafts((prev) =>
+                          prev.map((item, i) =>
+                            i === index ? { ...item, host_path: e.target.value } : item,
+                          ),
+                        )
+                      }
+                      placeholder="/absolute/path/on/host"
+                      disabled={editsLocked}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Mount Path</Label>
+                    <Input
+                      value={mount.mount_path}
+                      onChange={(e) =>
+                        setMountDrafts((prev) =>
+                          prev.map((item, i) =>
+                            i === index ? { ...item, mount_path: e.target.value } : item,
+                          ),
+                        )
+                      }
+                      placeholder="/workspace/data"
+                      disabled={editsLocked}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Sub Path</Label>
+                    <Input
+                      value={mount.sub_path ?? ''}
+                      onChange={(e) =>
+                        setMountDrafts((prev) =>
+                          prev.map((item, i) =>
+                            i === index ? { ...item, sub_path: e.target.value } : item,
+                          ),
+                        )
+                      }
+                      placeholder="optional/sub/dir"
+                      disabled={editsLocked}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2">
+                    <div>
+                      <div className="text-xs font-medium">Read only</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Prevent writes to the mounted host path.
+                      </div>
+                    </div>
+                    <Switch
+                      checked={mount.read_only}
+                      onCheckedChange={(checked) =>
+                        setMountDrafts((prev) =>
+                          prev.map((item, i) =>
+                            i === index ? { ...item, read_only: checked } : item,
+                          ),
+                        )
+                      }
+                      disabled={editsLocked}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Lifecycle controls */}
         <div className="flex flex-col gap-2 pt-2 border-t">
           {isRunning ? (
             <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handlePause}
+                disabled={loading || isTransient}
+                className="w-full"
+              >
+                {loading ? (
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                ) : (
+                  <Pause className="h-4 w-4 mr-1.5" />
+                )}
+                Pause Sandbox
+              </Button>
               <Button
                 size="sm"
                 variant="destructive"
@@ -277,6 +485,36 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
                   <RefreshCw className="h-4 w-4 mr-1.5" />
                 )}
                 Renew
+              </Button>
+            </>
+          ) : isPaused ? (
+            <>
+              <Button
+                size="sm"
+                onClick={handleResume}
+                disabled={loading || isTransient}
+                className="w-full"
+              >
+                {loading ? (
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-4 w-4 mr-1.5" />
+                )}
+                Resume Sandbox
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={handleStop}
+                disabled={loading || isTransient}
+                className="w-full"
+              >
+                {loading ? (
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                ) : (
+                  <Square className="h-4 w-4 mr-1.5" />
+                )}
+                Stop Sandbox
               </Button>
             </>
           ) : (

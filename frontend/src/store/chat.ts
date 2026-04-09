@@ -1,5 +1,14 @@
 import { create } from 'zustand';
-import { sessionApi, sandboxApi, type Session, type Topic, type Message, type MessageCreate, type SandboxInfo } from '@/lib/api';
+import {
+  sessionApi,
+  sandboxApi,
+  type Session,
+  type Topic,
+  type Message,
+  type MessageCreate,
+  type SandboxInfo,
+  type SandboxMount,
+} from '@/lib/api';
 import { computeVirtualTopics, type VirtualTopic } from '@/lib/virtualTopic';
 import { chatWithAgentStream, chatResumeStream, stopGeneration as apiStopGeneration } from '@/lib/agentApi';
 import { processStreamEvent, createInitialState } from '@/lib/streamEventProcessor';
@@ -93,12 +102,14 @@ interface ChatState {
   loadSandboxStatus: (sessionId: string) => Promise<void>;
   createSandbox: (
     sessionId: string,
-    options?: { image?: string; timeout?: number },
+    options?: { image?: string; timeout?: number; mounts?: SandboxMount[] },
   ) => Promise<void>;
+  pauseSandbox: (sessionId: string) => Promise<void>;
+  resumeSandbox: (sessionId: string) => Promise<void>;
   stopSandbox: (sessionId: string) => Promise<void>;
   updateSandboxConfig: (
     sessionId: string,
-    data: { image?: string; timeout?: number },
+    data: { image?: string; timeout?: number; mounts?: SandboxMount[] },
   ) => Promise<void>;
 
   // UI
@@ -541,10 +552,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  createSandbox: async (sessionId: string, options?: { image?: string; timeout?: number }) => {
+  createSandbox: async (
+    sessionId: string,
+    options?: { image?: string; timeout?: number; mounts?: SandboxMount[] },
+  ) => {
     set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: true } }));
     try {
       const info = await sandboxApi.create(sessionId, options);
+      set((s) => ({
+        sandboxStatus: { ...s.sandboxStatus, [sessionId]: info },
+        sandboxLoading: { ...s.sandboxLoading, [sessionId]: false },
+      }));
+    } catch (err: any) {
+      set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: false } }));
+      throw err;
+    }
+  },
+
+  pauseSandbox: async (sessionId: string) => {
+    set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: true } }));
+    try {
+      const info = await sandboxApi.pause(sessionId);
+      set((s) => ({
+        sandboxStatus: { ...s.sandboxStatus, [sessionId]: info },
+        sandboxLoading: { ...s.sandboxLoading, [sessionId]: false },
+      }));
+    } catch (err: any) {
+      set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: false } }));
+      throw err;
+    }
+  },
+
+  resumeSandbox: async (sessionId: string) => {
+    set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: true } }));
+    try {
+      const info = await sandboxApi.resume(sessionId);
       set((s) => ({
         sandboxStatus: { ...s.sandboxStatus, [sessionId]: info },
         sandboxLoading: { ...s.sandboxLoading, [sessionId]: false },

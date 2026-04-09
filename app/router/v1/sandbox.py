@@ -117,6 +117,7 @@ async def create_sandbox(
         image=body.image,
         timeout=body.timeout,
         env=body.env,
+        mounts=body.mounts,
     )
     return record
 
@@ -155,6 +156,8 @@ async def update_sandbox_config(
         user_id=current_user.id,
         image=body.image,
         timeout=body.timeout,
+        mounts=body.mounts,
+        replace_mounts="mounts" in body.model_fields_set,
     )
     return record
 
@@ -170,6 +173,34 @@ async def stop_sandbox(
 ):
     _validate_session_owner(db, session_id, current_user.id)
     record = await SandboxService.stop_sandbox(db, session_id, current_user.id)
+    return record
+
+
+@router.post(
+    "/sessions/{session_id}/sandbox/pause",
+    response_model=SandboxResponse,
+)
+async def pause_sandbox(
+    session_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _validate_session_owner(db, session_id, current_user.id)
+    record = await SandboxService.pause_sandbox(db, session_id, current_user.id)
+    return record
+
+
+@router.post(
+    "/sessions/{session_id}/sandbox/resume",
+    response_model=SandboxResponse,
+)
+async def resume_sandbox(
+    session_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _validate_session_owner(db, session_id, current_user.id)
+    record = await SandboxService.resume_sandbox(db, session_id, current_user.id)
     return record
 
 

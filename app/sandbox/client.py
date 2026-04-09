@@ -12,7 +12,7 @@ import httpx
 from opensandbox.config import ConnectionConfig
 from opensandbox.constants import DEFAULT_EXECD_PORT
 from opensandbox.models.filesystem import WriteEntry
-from opensandbox.models.sandboxes import SandboxEndpoint
+from opensandbox.models.sandboxes import Host, SandboxEndpoint, Volume
 from opensandbox.sandbox import Sandbox
 import websockets
 
@@ -52,6 +52,7 @@ class SandboxClient:
         image: str = "ubuntu",
         timeout: int = 600,
         env: Optional[dict[str, str]] = None,
+        mounts: Optional[list[dict[str, Any]]] = None,
     ) -> Sandbox:
         """Provision a new sandbox and return the SDK handle."""
         sandbox = await Sandbox.create(
@@ -59,6 +60,7 @@ class SandboxClient:
             connection_config=self._config,
             timeout=timedelta(seconds=timeout),
             env=env or {},
+            volumes=self._build_volumes(mounts),
         )
         self._handles[sandbox.id] = sandbox
         return sandbox
@@ -81,6 +83,23 @@ class SandboxClient:
         await sandbox.kill()
         await sandbox.close()
         self._handles.pop(sandbox_id, None)
+
+    async def pause(self, sandbox_id: str) -> None:
+        """Pause a running sandbox."""
+        sandbox = await self.connect(sandbox_id)
+        await sandbox.pause()
+        await sandbox.close()
+        self._handles.pop(sandbox_id, None)
+
+    async def resume(self, sandbox_id: str) -> Sandbox:
+        """Resume a paused sandbox and cache the new handle."""
+        sandbox = await Sandbox.resume(
+            sandbox_id,
+            connection_config=self._config,
+            skip_health_check=True,
+        )
+        self._handles[sandbox_id] = sandbox
+        return sandbox
 
     async def get_info(self, sandbox_id: str) -> dict[str, Any]:
         """Retrieve sandbox metadata / status."""
@@ -452,6 +471,33 @@ class SandboxClient:
             if encoded:
                 url = f"{url}?{encoded}"
         return url
+
+    @staticmethod
+    def _build_volumes(
+        mounts: list[dict[str, Any]] | None,
+    ) -> list[Volume] | None:
+        if not mounts:
+            return None
+
+        volumes: list[Volume] = []
+        for index, mount in enumerate(mounts):
+            host_path = str(mount.get("host_path") or "").strip()
+            mount_path = str(mount.get("mount_path") or "").strip()
+            if not host_path or not mount_path:
+                continue
+
+            volume_kwargs: dict[str, Any] = {
+                "name": f"host-mount-{index}",
+                "host": Host(path=host_path),
+                "mountPath": mount_path,
+                "readOnly": bool(mount.get("read_only", False)),
+            }
+            sub_path = mount.get("sub_path")
+            if sub_path:
+                volume_kwargs["subPath"] = sub_path
+            volumes.append(Volume(**volume_kwargs))
+
+        return volumes or None
 
 
 def _shell_quote(s: str) -> str:

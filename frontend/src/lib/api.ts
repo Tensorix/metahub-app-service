@@ -1019,6 +1019,14 @@ export interface SandboxInfo {
   expires_at: string | null;
   created_at: string;
   updated_at: string;
+  mounts: SandboxMount[];
+}
+
+export interface SandboxMount {
+  host_path: string;
+  mount_path: string;
+  read_only: boolean;
+  sub_path?: string | null;
 }
 
 export interface SandboxFileInfo {
@@ -1036,7 +1044,10 @@ export interface TransferRequest {
 }
 
 export const sandboxApi = {
-  create: async (sessionId: string, data?: { image?: string; timeout?: number }) => {
+  create: async (
+    sessionId: string,
+    data?: { image?: string; timeout?: number; mounts?: SandboxMount[] },
+  ) => {
     const resp = await api.post<SandboxInfo>(`/api/v1/sessions/${sessionId}/sandbox`, data ?? {});
     return resp.data;
   },
@@ -1046,7 +1057,7 @@ export const sandboxApi = {
   },
   updateConfig: async (
     sessionId: string,
-    data: { image?: string; timeout?: number },
+    data: { image?: string; timeout?: number; mounts?: SandboxMount[] },
   ): Promise<SandboxInfo> => {
     const resp = await api.put<SandboxInfo>(
       `/api/v1/sessions/${sessionId}/sandbox/config`,
@@ -1056,6 +1067,14 @@ export const sandboxApi = {
   },
   stop: async (sessionId: string) => {
     const resp = await api.delete<SandboxInfo>(`/api/v1/sessions/${sessionId}/sandbox`);
+    return resp.data;
+  },
+  pause: async (sessionId: string) => {
+    const resp = await api.post<SandboxInfo>(`/api/v1/sessions/${sessionId}/sandbox/pause`);
+    return resp.data;
+  },
+  resume: async (sessionId: string) => {
+    const resp = await api.post<SandboxInfo>(`/api/v1/sessions/${sessionId}/sandbox/resume`);
     return resp.data;
   },
   renew: async (sessionId: string, duration: number) => {
