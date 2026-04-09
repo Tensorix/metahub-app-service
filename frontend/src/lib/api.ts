@@ -1013,6 +1013,7 @@ export interface SandboxInfo {
   sandbox_id: string | null;
   status: string; // creating | running | paused | stopping | stopped | error
   image: string;
+  timeout: number | null;
   config: Record<string, unknown> | null;
   error_message: string | null;
   expires_at: string | null;
@@ -1041,6 +1042,16 @@ export const sandboxApi = {
   },
   getStatus: async (sessionId: string): Promise<SandboxInfo | null> => {
     const resp = await api.get(`/api/v1/sessions/${sessionId}/sandbox`);
+    return resp.data;
+  },
+  updateConfig: async (
+    sessionId: string,
+    data: { image?: string; timeout?: number },
+  ): Promise<SandboxInfo> => {
+    const resp = await api.put<SandboxInfo>(
+      `/api/v1/sessions/${sessionId}/sandbox/config`,
+      data,
+    );
     return resp.data;
   },
   stop: async (sessionId: string) => {

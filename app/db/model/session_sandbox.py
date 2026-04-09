@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid7
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -37,6 +37,10 @@ class SessionSandbox(Base):
     )
     image: Mapped[str] = mapped_column(
         String(255), nullable=False, default="ubuntu",
+    )
+    timeout: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True,
+        comment="Desired timeout in seconds for next sandbox start",
     )
     config: Mapped[Optional[dict]] = mapped_column(
         JSONB, nullable=True, comment="Resource limits, env vars, etc.",

@@ -14,11 +14,11 @@ import { ToolApprovalCard } from './ToolApprovalCard';
 import { TopicSelector } from './TopicSelector';
 import { TopicSidebar } from './TopicSidebar';
 import { FileExplorer } from './FileExplorer';
-import { TerminalPanel } from './terminal/TerminalPanel';
+import { SandboxPanel } from './sandbox';
 import { SessionDialog } from '@/components/SessionDialog';
 import { ResizableHandle } from '@/components/ui/resizable';
 import { cn } from '@/lib/utils';
-import { ChevronUp, ChevronDown, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2, ArrowLeft, FolderOpen, Container, TerminalSquare } from 'lucide-react';
+import { ChevronUp, ChevronDown, Hash, Loader2, PanelRightClose, PanelRightOpen, ArrowUp, ArrowDown, Plus, Settings2, ArrowLeft, FolderOpen, Container } from 'lucide-react';
 import { useBreakpoints } from '@/hooks/useMediaQuery';
 import { useToast } from '@/hooks/use-toast';
 
@@ -54,14 +54,11 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   const setTopicSidebarCollapsed = useChatStore((state) => state.setTopicSidebarCollapsed);
   const fileExplorerOpen = useChatStore((state) => state.fileExplorerOpen);
   const setFileExplorerOpen = useChatStore((state) => state.setFileExplorerOpen);
-  const terminalOpen = useChatStore((state) => state.terminalOpen);
-  const setTerminalOpen = useChatStore((state) => state.setTerminalOpen);
+  const sandboxPanelOpen = useChatStore((state) => state.sandboxPanelOpen);
+  const setSandboxPanelOpen = useChatStore((state) => state.setSandboxPanelOpen);
   const updateSession = useChatStore((state) => state.updateSession);
   const sandboxStatus = useChatStore((state) => state.sandboxStatus);
-  const sandboxLoading = useChatStore((state) => state.sandboxLoading);
   const loadSandboxStatus = useChatStore((state) => state.loadSandboxStatus);
-  const createSandbox = useChatStore((state) => state.createSandbox);
-  const stopSandbox = useChatStore((state) => state.stopSandbox);
   
   // AI 聊天 hook
   const {
@@ -89,28 +86,9 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
   }, [currentSessionId, currentSession?.type, loadSandboxStatus]);
 
   const currentSandbox = currentSessionId ? sandboxStatus[currentSessionId] : null;
-  const isSandboxLoading = currentSessionId ? sandboxLoading[currentSessionId] ?? false : false;
   const isSandboxRunning = currentSandbox?.status === 'running';
 
-  const handleSandboxToggle = async () => {
-    if (!currentSessionId) return;
-    try {
-      if (isSandboxRunning) {
-        await stopSandbox(currentSessionId);
-        toast({ title: '沙箱已停止' });
-      } else {
-        await createSandbox(currentSessionId);
-        toast({ title: '沙箱已创建', description: '代码执行环境已就绪' });
-      }
-    } catch (err: any) {
-      toast({
-        title: isSandboxRunning ? '停止沙箱失败' : '创建沙箱失败',
-        description: err?.response?.data?.detail || String(err),
-        variant: 'destructive',
-      });
-    }
-  };
-  
+
   // 话题侧边栏可调整宽度
   const [topicSidebarWidth, setTopicSidebarWidth] = useState(TOPIC_SIDEBAR_DEFAULT_WIDTH);
   // 拖拽调整大小时禁用过渡，避免动画导致右侧异常收缩
@@ -312,25 +290,14 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
             {currentSession?.type === 'ai' && (
               <Button
                 size="icon"
-                variant={isSandboxRunning ? "secondary" : "ghost"}
-                onClick={handleSandboxToggle}
-                disabled={isSandboxLoading || currentSandbox?.status === 'creating'}
-                title={
-                  isSandboxRunning ? "停止沙箱" :
-                  currentSandbox?.status === 'creating' ? "沙箱创建中..." :
-                  "启动沙箱"
-                }
+                variant={sandboxPanelOpen ? "secondary" : "ghost"}
+                onClick={() => setSandboxPanelOpen(!sandboxPanelOpen)}
+                title={sandboxPanelOpen ? "关闭沙箱面板" : "打开沙箱面板"}
                 className="relative"
               >
-                {isSandboxLoading || currentSandbox?.status === 'creating' ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <>
-                    <Container className="h-5 w-5" />
-                    {isSandboxRunning && (
-                      <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-green-500" />
-                    )}
-                  </>
+                <Container className="h-5 w-5" />
+                {isSandboxRunning && (
+                  <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-green-500" />
                 )}
               </Button>
             )}
@@ -346,17 +313,6 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
                 title={fileExplorerOpen ? "关闭文件系统" : "在消息区域打开文件系统"}
               >
                 <FolderOpen className="h-5 w-5" />
-              </Button>
-            )}
-            {/* 终端按钮 - 仅沙箱运行时显示 */}
-            {currentSession?.type === 'ai' && isSandboxRunning && (
-              <Button
-                size="icon"
-                variant={terminalOpen ? "secondary" : "ghost"}
-                onClick={() => setTerminalOpen(!terminalOpen)}
-                title={terminalOpen ? "关闭终端" : "打开终端"}
-              >
-                <TerminalSquare className="h-5 w-5" />
               </Button>
             )}
             {currentSession && (
@@ -397,21 +353,21 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
 
       <div className="flex-1 flex flex-row min-h-0">
         <div className="flex-1 flex flex-col min-w-0 h-full relative group/message-area overflow-hidden">
-          {/* 消息列表 / 文件系统 / 终端 - 互斥视图切换 */}
+          {/* 消息列表 / 文件系统 / 沙箱面板 - 互斥视图切换 */}
           <AnimatePresence mode="wait" initial={false}>
-            {currentSession?.type === 'ai' && terminalOpen && currentSessionId && isSandboxRunning ? (
+            {currentSession?.type === 'ai' && sandboxPanelOpen && currentSessionId ? (
               <motion.div
-                key="terminal"
+                key="sandbox-panel"
                 initial={{ opacity: 0, x: 32 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 32 }}
                 transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
                 className="flex-1 flex flex-col min-h-0 absolute inset-0"
               >
-                <TerminalPanel
+                <SandboxPanel
                   sessionId={currentSessionId}
                   className="flex-1 min-h-0"
-                  onClose={() => setTerminalOpen(false)}
+                  onClose={() => setSandboxPanelOpen(false)}
                 />
               </motion.div>
             ) : currentSession?.type === 'ai' && fileExplorerOpen && currentSessionId ? (
@@ -513,7 +469,7 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
         </div>
 
           {/* 浮动话题切换器 - 固定在消息区域右侧（仅消息模式显示） */}
-          {currentSession && displayMode === 'paged' && !fileExplorerOpen && !terminalOpen && (
+          {currentSession && displayMode === 'paged' && !fileExplorerOpen && !sandboxPanelOpen && (
             <div className={cn(
               "absolute right-3 top-1/2 -translate-y-1/2 z-20 transition-all duration-300",
               "opacity-50 hover:opacity-100",
@@ -564,8 +520,8 @@ export function MessageArea({ onBack, showBackButton }: MessageAreaProps) {
           </div>
         )}
 
-        {/* 输入框 - 文件系统/终端模式时隐藏 */}
-        {!fileExplorerOpen && !(terminalOpen && isSandboxRunning) && (
+        {/* 输入框 - 文件系统/沙箱面板模式时隐藏 */}
+        {!fileExplorerOpen && !sandboxPanelOpen && (
         <div className="px-3 pb-3 pt-2 space-y-3">
           {currentSession?.type === 'ai' ? (
             <MessageInput

@@ -31,7 +31,7 @@ interface ChatState {
   // ===== UI 状态 =====
   topicSidebarCollapsed: boolean;
   fileExplorerOpen: boolean; // 右侧窗格/抽屉展示文件系统而非话题列表
-  terminalOpen: boolean;
+  sandboxPanelOpen: boolean; // 右侧窗格展示 Sandbox 面板（Config / Terminal / Browser）
   leftDrawerOpen: boolean;
   rightDrawerOpen: boolean;
   boundaryProgress: number; // 0-100
@@ -91,13 +91,20 @@ interface ChatState {
 
   // Sandbox
   loadSandboxStatus: (sessionId: string) => Promise<void>;
-  createSandbox: (sessionId: string) => Promise<void>;
+  createSandbox: (
+    sessionId: string,
+    options?: { image?: string; timeout?: number },
+  ) => Promise<void>;
   stopSandbox: (sessionId: string) => Promise<void>;
+  updateSandboxConfig: (
+    sessionId: string,
+    data: { image?: string; timeout?: number },
+  ) => Promise<void>;
 
   // UI
   setTopicSidebarCollapsed: (collapsed: boolean) => void;
   setFileExplorerOpen: (open: boolean) => void;
-  setTerminalOpen: (open: boolean) => void;
+  setSandboxPanelOpen: (open: boolean) => void;
   setLeftDrawerOpen: (open: boolean) => void;
   setRightDrawerOpen: (open: boolean) => void;
   setBoundaryState: (progress: number, direction: 'up' | 'down' | null) => void;
@@ -120,7 +127,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sessionMessages: {},
   topicSidebarCollapsed: typeof window !== 'undefined' ? window.innerWidth < 1024 : false,
   fileExplorerOpen: false,
-  terminalOpen: false,
+  sandboxPanelOpen: false,
   leftDrawerOpen: false,
   rightDrawerOpen: false,
   boundaryProgress: 0,
@@ -534,10 +541,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  createSandbox: async (sessionId: string) => {
+  createSandbox: async (sessionId: string, options?: { image?: string; timeout?: number }) => {
     set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: true } }));
     try {
-      const info = await sandboxApi.create(sessionId);
+      const info = await sandboxApi.create(sessionId, options);
       set((s) => ({
         sandboxStatus: { ...s.sandboxStatus, [sessionId]: info },
         sandboxLoading: { ...s.sandboxLoading, [sessionId]: false },
@@ -555,7 +562,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((s) => ({
         sandboxStatus: { ...s.sandboxStatus, [sessionId]: info },
         sandboxLoading: { ...s.sandboxLoading, [sessionId]: false },
-        terminalOpen: false, // 沙箱停止时关闭终端
+      }));
+    } catch (err: any) {
+      set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: false } }));
+      throw err;
+    }
+  },
+
+  updateSandboxConfig: async (sessionId, data) => {
+    set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: true } }));
+    try {
+      const info = await sandboxApi.updateConfig(sessionId, data);
+      set((s) => ({
+        sandboxStatus: { ...s.sandboxStatus, [sessionId]: info },
+        sandboxLoading: { ...s.sandboxLoading, [sessionId]: false },
       }));
     } catch (err: any) {
       set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: false } }));
@@ -565,8 +585,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ===== UI Actions =====
   setTopicSidebarCollapsed: (collapsed) => set({ topicSidebarCollapsed: collapsed }),
-  setFileExplorerOpen: (open) => set({ fileExplorerOpen: open, ...(open ? { terminalOpen: false } : {}) }),
-  setTerminalOpen: (open) => set({ terminalOpen: open, ...(open ? { fileExplorerOpen: false } : {}) }),
+  setFileExplorerOpen: (open) => set({ fileExplorerOpen: open, ...(open ? { sandboxPanelOpen: false } : {}) }),
+  setSandboxPanelOpen: (open) => set({ sandboxPanelOpen: open, ...(open ? { fileExplorerOpen: false } : {}) }),
   setLeftDrawerOpen: (open) => set({ leftDrawerOpen: open }),
   setRightDrawerOpen: (open) => set({ rightDrawerOpen: open }),
   setBoundaryState: (progress, direction) => set({ boundaryProgress: progress, boundaryDirection: direction }),

@@ -17,6 +17,7 @@ from app.db.session import get_db
 from app.deps import get_current_user
 from app.db.model.user import User
 from app.schema.sandbox import (
+    SandboxConfigUpdateRequest,
     SandboxCreateRequest,
     SandboxFileListResponse,
     SandboxFileReadResponse,
@@ -86,6 +87,28 @@ async def get_sandbox(
     record = await SandboxService.get_sandbox(db, session_id, current_user.id)
     if not record:
         return None
+    return record
+
+
+@router.put(
+    "/sessions/{session_id}/sandbox/config",
+    response_model=SandboxResponse,
+)
+async def update_sandbox_config(
+    session_id: UUID,
+    body: SandboxConfigUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Persist per-session sandbox config without starting a sandbox."""
+    _validate_session_owner(db, session_id, current_user.id)
+    record = await SandboxService.upsert_sandbox_config(
+        db,
+        session_id=session_id,
+        user_id=current_user.id,
+        image=body.image,
+        timeout=body.timeout,
+    )
     return record
 
 

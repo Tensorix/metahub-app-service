@@ -13,12 +13,18 @@ class SandboxCreateRequest(BaseModel):
     env: Optional[dict[str, str]] = None
 
 
+class SandboxConfigUpdateRequest(BaseModel):
+    image: Optional[str] = None
+    timeout: Optional[int] = None
+
+
 class SandboxResponse(BaseModel):
     id: UUID
     session_id: UUID
     sandbox_id: Optional[str] = None
     status: str
     image: str
+    timeout: Optional[int] = None
     config: Optional[dict[str, Any]] = None
     error_message: Optional[str] = None
     expires_at: Optional[datetime] = None

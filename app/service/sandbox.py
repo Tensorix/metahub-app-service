@@ -22,6 +22,52 @@ class SandboxService:
     """Sandbox lifecycle management."""
 
     @staticmethod
+    async def upsert_sandbox_config(
+        db: Session,
+        session_id: UUID,
+        user_id: UUID,
+        image: str | None = None,
+        timeout: int | None = None,
+    ) -> SessionSandbox:
+        """Persist per-session sandbox config without starting a sandbox.
+
+        Creates a stopped placeholder record if none exists. Rejects edits
+        while a sandbox is active (creating/running/stopping).
+        """
+        existing = (
+            db.query(SessionSandbox)
+            .filter(SessionSandbox.session_id == session_id)
+            .first()
+        )
+
+        if existing:
+            if existing.status in ("creating", "running", "stopping"):
+                raise HTTPException(
+                    400, "Cannot modify sandbox config while it is running"
+                )
+            if image is not None:
+                existing.image = image
+            if timeout is not None:
+                existing.timeout = timeout
+            db.commit()
+            db.refresh(existing)
+            return existing
+
+        # Create placeholder stopped record so config is persisted
+        config = get_sandbox_config(db)
+        record = SessionSandbox(
+            session_id=session_id,
+            user_id=user_id,
+            status="stopped",
+            image=image or config.default_image,
+            timeout=timeout,
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+    @staticmethod
     async def create_sandbox(
         db: Session,
         session_id: UUID,
@@ -36,15 +82,19 @@ class SandboxService:
         if not config.api_domain or not config.api_key:
             raise HTTPException(400, "Sandbox API not configured")
 
-        # Check for existing sandbox
+        # Check for existing sandbox; preserve any persisted config
         existing = (
             db.query(SessionSandbox)
             .filter(SessionSandbox.session_id == session_id)
             .first()
         )
+        persisted_image: str | None = None
+        persisted_timeout: int | None = None
         if existing:
             if existing.status not in ("stopped", "error"):
                 raise HTTPException(409, "Session already has an active sandbox")
+            persisted_image = existing.image
+            persisted_timeout = existing.timeout
             # Remove stale record so we can create a fresh one (unique constraint)
             db.delete(existing)
             db.flush()
@@ -63,14 +113,16 @@ class SandboxService:
                 429, f"Sandbox limit reached ({config.max_per_user} per user)"
             )
 
-        effective_image = image or config.default_image
-        effective_timeout = timeout or config.default_timeout
+        # Priority: explicit body → persisted record → global default
+        effective_image = image or persisted_image or config.default_image
+        effective_timeout = timeout or persisted_timeout or config.default_timeout
 
         record = SessionSandbox(
             session_id=session_id,
             user_id=user_id,
             status="creating",
             image=effective_image,
+            timeout=effective_timeout,
             config={"env": env} if env else None,
         )
         db.add(record)
