@@ -92,6 +92,11 @@ class SandboxClient:
         sandbox = await self.connect(sandbox_id)
         await sandbox.renew(timedelta(seconds=duration))
 
+    async def get_endpoint(self, sandbox_id: str, port: int) -> SandboxEndpoint:
+        """Resolve a network endpoint for an arbitrary sandbox port."""
+        sandbox = await self.connect(sandbox_id)
+        return await sandbox.get_endpoint(port)
+
     # ------------------------------------------------------------------
     # Command execution
     # ------------------------------------------------------------------
@@ -338,8 +343,40 @@ class SandboxClient:
         )
 
     async def _get_execd_endpoint(self, sandbox_id: str) -> SandboxEndpoint:
-        sandbox = await self.connect(sandbox_id)
-        return await sandbox.get_endpoint(DEFAULT_EXECD_PORT)
+        return await self.get_endpoint(sandbox_id, DEFAULT_EXECD_PORT)
+
+    async def request_endpoint(
+        self,
+        endpoint: SandboxEndpoint,
+        method: str,
+        path: str,
+        *,
+        headers: dict[str, str] | None = None,
+        params: Any = None,
+        content: bytes | None = None,
+        follow_redirects: bool = False,
+    ) -> httpx.Response:
+        """Issue an HTTP request against a resolved sandbox endpoint."""
+        timeout_seconds = self._config.request_timeout.total_seconds()
+        base_url = self._endpoint_base_url(endpoint).rstrip("/") + "/"
+        resource_path = path.lstrip("/")
+        request_headers = self._endpoint_headers(endpoint)
+        if headers:
+            request_headers.update(headers)
+
+        async with httpx.AsyncClient(
+            base_url=base_url,
+            headers=request_headers,
+            timeout=httpx.Timeout(timeout_seconds),
+            transport=self._config.transport,
+            follow_redirects=follow_redirects,
+        ) as client:
+            return await client.request(
+                method,
+                resource_path,
+                params=params,
+                content=content,
+            )
 
     async def _execd_request(
         self,
@@ -375,13 +412,19 @@ class SandboxClient:
         return response
 
     def _execd_headers(self, endpoint: SandboxEndpoint) -> dict[str, str]:
+        return self._endpoint_headers(endpoint)
+
+    def _execd_base_url(self, endpoint: SandboxEndpoint) -> str:
+        return self._endpoint_base_url(endpoint)
+
+    def _endpoint_headers(self, endpoint: SandboxEndpoint) -> dict[str, str]:
         return {
             "User-Agent": self._config.user_agent,
             **self._config.headers,
             **endpoint.headers,
         }
 
-    def _execd_base_url(self, endpoint: SandboxEndpoint) -> str:
+    def _endpoint_base_url(self, endpoint: SandboxEndpoint) -> str:
         raw = endpoint.endpoint.rstrip("/")
         if raw.startswith(("http://", "https://")):
             return raw

@@ -5,17 +5,32 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
+from jose import jwt
 from sqlalchemy.orm import Session
 
+from app.config import config
 from app.db.model import Session as SessionModel
 from app.db.model.session_sandbox import SessionSandbox
 from app.db.session import get_db
 from app.deps import get_current_user
 from app.db.model.user import User
+from app.sandbox.browser_proxy import (
+    build_current_proxy_path,
+    build_proxy_root_path,
+    build_target_url,
+    default_port_for_scheme,
+    is_local_sandbox_host,
+    rewrite_browser_location,
+    rewrite_css_stylesheet,
+    rewrite_html_document,
+    rewrite_set_cookie_header,
+)
 from app.schema.sandbox import (
     SandboxConfigUpdateRequest,
     SandboxCreateRequest,
@@ -33,6 +48,35 @@ from app.service.sandbox import SandboxService
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_BROWSER_PROXY_COOKIE = "metahub_sandbox_browser"
+_BROWSER_PROXY_TOKEN_TYPE = "sandbox_browser"
+_BROWSER_PROXY_TTL_SECONDS = 600
+_HOP_BY_HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+}
+_PROXY_STRIPPED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | {
+    "access-control-allow-credentials",
+    "access-control-allow-origin",
+    "content-encoding",
+    "content-length",
+    "content-security-policy",
+    "content-security-policy-report-only",
+    "cross-origin-embedder-policy",
+    "cross-origin-opener-policy",
+    "cross-origin-resource-policy",
+    "etag",
+    "location",
+    "set-cookie",
+    "x-frame-options",
+}
 
 
 def _validate_session_owner(db: Session, session_id: UUID, user_id: UUID) -> SessionModel:
@@ -141,6 +185,113 @@ async def renew_sandbox(
         db, session_id, current_user.id, body.duration
     )
     return record
+
+
+# ---------------------------------------------------------------------------
+# Sandbox browser
+# ---------------------------------------------------------------------------
+
+
+@router.post("/sessions/{session_id}/sandbox/browser/session")
+async def create_sandbox_browser_session(
+    session_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _validate_session_owner(db, session_id, current_user.id)
+    _require_running_sandbox(db, session_id)
+
+    token = _create_browser_proxy_token(current_user.id, session_id)
+    response = JSONResponse({"success": True})
+    response.set_cookie(
+        key=_BROWSER_PROXY_COOKIE,
+        value=token,
+        httponly=True,
+        max_age=_BROWSER_PROXY_TTL_SECONDS,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+        path=_browser_proxy_cookie_path(session_id),
+    )
+    return response
+
+
+@router.api_route(
+    "/sessions/{session_id}/sandbox/browser/{scheme}/{host_port}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+)
+@router.api_route(
+    "/sessions/{session_id}/sandbox/browser/{scheme}/{host_port}/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+)
+async def sandbox_browser_proxy(
+    session_id: UUID,
+    scheme: str,
+    host_port: str,
+    request: Request,
+    path: str = "",
+    db: Session = Depends(get_db),
+):
+    user_id = _authenticate_browser_proxy_request(request, session_id)
+    _validate_session_owner(db, session_id, user_id)
+
+    record = _get_running_sandbox_record(db, session_id)
+    if not record or not record.sandbox_id:
+        raise HTTPException(404, "No running sandbox for this session")
+
+    normalized_scheme = scheme.lower()
+    if normalized_scheme not in {"http", "https"}:
+        raise HTTPException(400, "Sandbox browser proxy only supports http(s) URLs")
+
+    target_url = build_target_url(
+        scheme=normalized_scheme,
+        host_port=host_port,
+        path=path,
+        query=request.url.query,
+    )
+
+    target = httpx.URL(target_url)
+    if not is_local_sandbox_host(target.host):
+        raise HTTPException(
+            400,
+            "Sandbox browser proxy currently supports only localhost-style targets",
+        )
+
+    from app.sandbox import get_sandbox_client
+    from app.service.system_config import get_sandbox_config
+
+    client = get_sandbox_client(get_sandbox_config(db))
+    endpoint = await client.get_endpoint(
+        record.sandbox_id,
+        target.port or default_port_for_scheme(normalized_scheme),
+    )
+
+    body = await request.body()
+    upstream_response = await client.request_endpoint(
+        endpoint,
+        request.method,
+        target.path or "/",
+        params=list(request.query_params.multi_items()),
+        headers=_build_browser_upstream_headers(request, target_url),
+        content=body or None,
+    )
+
+    try:
+        proxy_root_path = build_proxy_root_path(str(session_id), normalized_scheme, host_port)
+        current_proxy_path = build_current_proxy_path(
+            proxy_root_path,
+            path,
+            request.url.path,
+        )
+        return _build_browser_proxy_response(
+            upstream_response,
+            target_url=target_url,
+            proxy_root_path=proxy_root_path,
+            current_proxy_path=current_proxy_path,
+            proxy_cookie_path=_browser_proxy_cookie_path(session_id),
+        )
+    finally:
+        await upstream_response.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -299,6 +450,120 @@ async def transfer_file(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _browser_proxy_cookie_path(session_id: UUID) -> str:
+    return f"/api/v1/sessions/{session_id}/sandbox/browser"
+
+
+def _create_browser_proxy_token(user_id: UUID, session_id: UUID) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "sid": str(session_id),
+        "type": _BROWSER_PROXY_TOKEN_TYPE,
+        "iat": now,
+        "exp": now + timedelta(seconds=_BROWSER_PROXY_TTL_SECONDS),
+    }
+    return jwt.encode(payload, config.JWT_SECRET_KEY, algorithm=config.JWT_ALGORITHM)
+
+
+def _authenticate_browser_proxy_request(request: Request, session_id: UUID) -> UUID:
+    token = request.cookies.get(_BROWSER_PROXY_COOKIE)
+    if not token:
+        raise HTTPException(401, "Missing sandbox browser session")
+
+    from app.service.auth import TokenService
+
+    payload = TokenService.decode_token(token)
+    if not payload or payload.get("type") != _BROWSER_PROXY_TOKEN_TYPE:
+        raise HTTPException(401, "Invalid sandbox browser session")
+    if payload.get("sid") != str(session_id):
+        raise HTTPException(401, "Sandbox browser session does not match this session")
+
+    try:
+        return UUID(str(payload.get("sub")))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(401, "Invalid sandbox browser session user") from exc
+
+
+def _build_browser_upstream_headers(request: Request, target_url: str) -> dict[str, str]:
+    target = httpx.URL(target_url)
+    target_origin = f"{target.scheme}://{target.netloc}"
+    headers: dict[str, str] = {}
+
+    for name, value in request.headers.items():
+        lowered = name.lower()
+        if lowered in _HOP_BY_HOP_HEADERS or lowered in {"host", "origin", "referer"}:
+            continue
+        if lowered == "accept-encoding":
+            continue
+        headers[name] = value
+
+    headers["Host"] = target.netloc
+    headers["Accept-Encoding"] = "identity"
+
+    if request.headers.get("origin"):
+        headers["Origin"] = target_origin
+    if request.headers.get("referer"):
+        headers["Referer"] = target_url
+
+    return headers
+
+
+def _build_browser_proxy_response(
+    upstream_response: httpx.Response,
+    *,
+    target_url: str,
+    proxy_root_path: str,
+    current_proxy_path: str,
+    proxy_cookie_path: str,
+) -> Response:
+    content_type = upstream_response.headers.get("content-type", "")
+    lowered_content_type = content_type.lower()
+    body = upstream_response.content
+
+    if lowered_content_type.startswith("text/html") or lowered_content_type.startswith("application/xhtml+xml"):
+        document = upstream_response.text
+        body = rewrite_html_document(
+            document,
+            target_url=target_url,
+            proxy_root_path=proxy_root_path,
+            current_proxy_path=current_proxy_path,
+        ).encode(upstream_response.encoding or "utf-8")
+    elif lowered_content_type.startswith("text/css"):
+        stylesheet = upstream_response.text
+        body = rewrite_css_stylesheet(
+            stylesheet,
+            target_url=target_url,
+            proxy_root_path=proxy_root_path,
+        ).encode(upstream_response.encoding or "utf-8")
+
+    response = Response(content=body, status_code=upstream_response.status_code)
+
+    for name, value in upstream_response.headers.items():
+        lowered = name.lower()
+        if lowered in _PROXY_STRIPPED_RESPONSE_HEADERS:
+            continue
+        response.headers[name] = value
+
+    location = upstream_response.headers.get("location")
+    if location:
+        response.headers["Location"] = rewrite_browser_location(
+            location,
+            target_url=target_url,
+            proxy_root_path=proxy_root_path,
+        )
+
+    for raw_cookie in upstream_response.headers.get_list("set-cookie"):
+        rewritten_cookies = rewrite_set_cookie_header(
+            raw_cookie,
+            proxy_path=proxy_cookie_path,
+        )
+        for rewritten in rewritten_cookies:
+            response.raw_headers.append((b"set-cookie", rewritten.encode("latin-1")))
+
+    return response
 
 
 def _require_running_sandbox(db: Session, session_id: UUID) -> str:
