@@ -129,9 +129,14 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
         (current?.timeout != null && current.timeout > 0
           ? current.timeout
           : DEFAULT_TIMEOUT);
-      await sandboxApi.renew(sessionId, duration);
+      const info = await sandboxApi.renew(sessionId, duration);
       await useChatStore.getState().loadSandboxStatus(sessionId);
-      toast({ title: '沙箱已续期', description: `+${duration}s` });
+      toast({
+        title: '沙箱已续期',
+        description: info?.expires_at
+          ? `到期时间已重置为 ${formatDate(info.expires_at)}`
+          : `到期时间已重置为当前时间起 ${duration} 秒后`,
+      });
     } catch (err: any) {
       toast({
         title: '续期失败',
