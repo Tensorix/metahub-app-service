@@ -29,6 +29,7 @@ import {
   Save,
   Settings2,
   Square,
+  Terminal,
   Trash2,
   Variable,
 } from 'lucide-react';
@@ -316,157 +317,209 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
     <div className="h-full overflow-y-auto">
       <div className="p-3 space-y-3">
 
-        {/* ─── Section 1: Lifecycle controls ─── */}
-        <div className="rounded-lg border bg-card p-3 space-y-3">
-          {/* Primary action */}
-          {isRunning ? (
-            <div className="flex items-center gap-1.5">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handlePause}
-                disabled={loading || isTransient}
-                className="flex-1 h-8"
-              >
-                {loading ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                ) : (
-                  <Pause className="h-3.5 w-3.5 mr-1.5" />
-                )}
-                Pause
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={handleStop}
-                disabled={loading || isTransient}
-                className="flex-1 h-8"
-              >
-                {loading ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                ) : (
-                  <Square className="h-3.5 w-3.5 mr-1.5" />
-                )}
-                Stop
-              </Button>
-              {canRenew && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        onClick={handleRenew}
-                        disabled={renewing || loading}
-                        className="h-8 w-8 shrink-0"
-                      >
-                        {renewing ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Renew timeout</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-            </div>
-          ) : isPaused ? (
-            <div className="flex items-center gap-1.5">
-              <Button
-                size="sm"
-                onClick={handleResume}
-                disabled={loading || isTransient}
-                className="flex-1 h-8"
-              >
-                {loading ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                ) : (
-                  <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-                )}
-                Resume
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={handleStop}
-                disabled={loading || isTransient}
-                className="flex-1 h-8"
-              >
-                {loading ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                ) : (
-                  <Square className="h-3.5 w-3.5 mr-1.5" />
-                )}
-                Stop
-              </Button>
-            </div>
-          ) : (
-            <Button
-              size="sm"
-              onClick={handleStart}
-              disabled={loading || isTransient}
-              className="w-full h-8"
-            >
-              {loading || status === 'creating' ? (
-                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              ) : (
-                <Play className="h-3.5 w-3.5 mr-1.5" />
-              )}
-              Start Sandbox
-            </Button>
+        {/* ─── Section 1: Lifecycle & Status ─── */}
+        <div
+          className={cn(
+            'group relative overflow-hidden rounded-xl border bg-card transition-all duration-200',
+            isRunning
+              ? 'border-green-500/20 bg-green-500/[0.02] dark:bg-green-500/[0.05] shadow-[0_2px_10px_-3px_rgba(34,197,94,0.1)]'
+              : isPaused
+                ? 'border-amber-500/20 bg-amber-500/[0.02] dark:bg-amber-500/[0.05] shadow-[0_2px_10px_-3px_rgba(245,158,11,0.1)]'
+                : 'hover:border-primary/20 hover:shadow-sm shadow-sm',
           )}
-
-          {/* Status details */}
-          {current && (
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px]">
-              <div className="text-muted-foreground">Status</div>
-              <div className="text-right">
-                <span
-                  className={cn(
-                    'inline-flex px-1.5 py-0.5 rounded font-medium',
-                    isRunning
-                      ? 'bg-green-500/10 text-green-600 dark:text-green-400'
-                      : isPaused
-                        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
-                        : status === 'error'
-                          ? 'bg-destructive/10 text-destructive'
-                          : 'bg-muted text-muted-foreground',
-                  )}
-                >
-                  {status}
-                </span>
-              </div>
-
-              {current.sandbox_id && (
-                <>
-                  <div className="text-muted-foreground">ID</div>
-                  <div className="text-right font-mono truncate" title={current.sandbox_id}>
-                    {current.sandbox_id.slice(0, 12)}...
+        >
+          <div className="p-4">
+            {/* Header and Actions Row */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1.5 flex-1">
+                <div className="flex items-center gap-2">
+                  <div
+                    className={cn(
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border shadow-sm',
+                      isRunning
+                        ? 'border-green-500/20 bg-green-500/10 text-green-600 dark:text-green-500'
+                        : isPaused
+                          ? 'border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-500'
+                          : 'border-border bg-muted/40 text-muted-foreground',
+                    )}
+                  >
+                    <Terminal className="h-3.5 w-3.5" />
                   </div>
-                </>
-              )}
-
-              {current.created_at && (
-                <>
-                  <div className="text-muted-foreground">Created</div>
-                  <div className="text-right">{formatDate(current.created_at)}</div>
-                </>
-              )}
-
-              <div className="text-muted-foreground">Expires</div>
-              <div className="text-right">
-                {currentHasTimeout ? formatDate(current.expires_at) : 'Never'}
+                  <h3 className="text-sm font-semibold tracking-tight">Execution Sandbox</h3>
+                  {/* Status Badge */}
+                  {status !== 'stopped' && status !== 'creating' && (
+                    <span
+                      className={cn(
+                        'ml-1 inline-flex shrink-0 items-center justify-center rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase',
+                        isRunning
+                          ? 'bg-green-500/20 text-green-700 dark:text-green-400'
+                          : isPaused
+                            ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400'
+                            : status === 'error'
+                              ? 'bg-destructive/10 text-destructive'
+                              : 'bg-muted text-muted-foreground',
+                      )}
+                    >
+                      {status}
+                    </span>
+                  )}
+                  {(status === 'stopped' || status === 'creating') && (
+                    <span className="ml-1 inline-flex shrink-0 items-center justify-center rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                      {status}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed sm:pl-9">
+                  {isRunning
+                    ? 'Environment is running and ready for code execution.'
+                    : isPaused
+                      ? 'Environment is currently paused to save resources.'
+                      : 'Secure isolated container for safe code execution.'}
+                </p>
               </div>
 
-              {current.error_message && (
-                <div className="col-span-2 mt-1 rounded bg-destructive/10 px-2 py-1.5 text-destructive text-[11px]">
-                  {current.error_message}
-                </div>
-              )}
+              {/* Actions */}
+              <div className="flex shrink-0 items-center gap-2 sm:pl-0 pl-9">
+                {isRunning ? (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handlePause}
+                      disabled={loading || isTransient}
+                      className="h-8 shadow-xs hover:bg-muted font-medium rounded-full px-3.5"
+                    >
+                      {loading ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin text-muted-foreground" />
+                      ) : (
+                        <Pause className="h-3.5 w-3.5 mr-1.5 text-amber-500 fill-amber-500" />
+                      )}
+                      Pause
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleStop}
+                      disabled={loading || isTransient}
+                      className="h-8 shadow-xs hover:bg-destructive/10 hover:text-destructive font-medium border-destructive/20 rounded-full px-3.5"
+                    >
+                      {loading ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin text-destructive/70" />
+                      ) : (
+                        <Square className="h-3.5 w-3.5 mr-1.5 text-destructive fill-destructive" />
+                      )}
+                      Stop
+                    </Button>
+                    {canRenew && (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              onClick={handleRenew}
+                              disabled={renewing || loading}
+                              className="h-8 w-8 rounded-full shrink-0 shadow-xs"
+                            >
+                              {renewing ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                              ) : (
+                                <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+                              )}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Renew timeout</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
+                  </>
+                ) : isPaused ? (
+                  <>
+                    <Button
+                      size="sm"
+                      onClick={handleResume}
+                      disabled={loading || isTransient}
+                      className="h-8 font-medium shadow-sm rounded-full px-3.5"
+                    >
+                      {loading ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                      )}
+                      Resume
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleStop}
+                      disabled={loading || isTransient}
+                      className="h-8 shadow-xs hover:bg-destructive/10 hover:text-destructive font-medium border-destructive/20 rounded-full px-3.5"
+                    >
+                      {loading ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin text-destructive/70" />
+                      ) : (
+                        <Square className="h-3.5 w-3.5 mr-1.5 text-destructive fill-destructive" />
+                      )}
+                      Stop
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={handleStart}
+                    disabled={loading || isTransient}
+                    className="h-8 bg-primary/95 hover:bg-primary text-primary-foreground font-medium shadow-sm transition-all rounded-full px-5 hover:scale-105 active:scale-95"
+                  >
+                    {loading || status === 'creating' ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                        Starting...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-3.5 w-3.5 mr-1.5 fill-current" />
+                        Start
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
             </div>
-          )}
+
+            {/* Status details - info box style */}
+            {current && (status === 'running' || status === 'paused') && (
+              <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3 rounded-lg border border-border/40 bg-muted/40 p-3 text-[11px]">
+                {current.sandbox_id && (
+                  <div className="col-span-2 space-y-1">
+                    <div className="text-muted-foreground font-medium">Sandbox ID</div>
+                    <div className="font-mono text-foreground truncate" title={current.sandbox_id}>
+                      {current.sandbox_id}
+                    </div>
+                  </div>
+                )}
+
+                {current.created_at && (
+                  <div className="space-y-1">
+                    <div className="text-muted-foreground font-medium">Created</div>
+                    <div className="text-foreground font-medium">{formatDate(current.created_at)}</div>
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <div className="text-muted-foreground font-medium">Expires</div>
+                  <div className="text-foreground font-medium">
+                    {currentHasTimeout ? formatDate(current.expires_at) : 'Never'}
+                  </div>
+                </div>
+
+                {current.error_message && (
+                  <div className="col-span-2 lg:col-span-4 mt-1 rounded bg-destructive/10 px-2 py-1.5 text-destructive font-medium border border-destructive/20 text-[11px]">
+                    {current.error_message}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ─── Section 2: Configuration ─── */}
