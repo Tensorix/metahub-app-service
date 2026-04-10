@@ -342,16 +342,16 @@ class WebhookService:
             type=suggestion.activity_type or "notification",
             name=suggestion.activity_name or "新消息",
             priority=suggestion.priority or 3,
-            comments=suggestion.comments or suggestion.reasoning,
+            notes=suggestion.comments or suggestion.reasoning,
             tags=suggestion.tags or ["im_message", "auto-created"],
             source_type="event",
             source_id=str(event.id),
             status="pending"
         )
         
-        # 如果有截止时间提示，添加到 comments
+        # 如果有截止时间提示，添加到 notes
         if suggestion.due_date_hint:
-            activity.comments = f"{activity.comments}\n\n截止时间提示: {suggestion.due_date_hint}"
+            activity.notes = f"{activity.notes}\n\n截止时间提示: {suggestion.due_date_hint}"
         
         db.add(activity)
         db.flush()

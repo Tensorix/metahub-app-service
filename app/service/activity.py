@@ -207,7 +207,7 @@ class ActivityService:
             source_id=str(event_id),
             name=activity_name,
             priority=default_priority,
-            comments=f"Auto-created from {event_type} event {event_id}",
+            notes=f"Auto-created from {event_type} event {event_id}",
             tags=[event_type, "auto-created"]
         )
         

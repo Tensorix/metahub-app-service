@@ -200,10 +200,10 @@ export function ActivityCard({
                 </div>
               </div>
 
-              {/* Row 2: Comments */}
-              {activity.comments && (
+              {/* Row 2: Notes */}
+              {activity.notes && (
                 <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
-                  {activity.comments}
+                  {activity.notes}
                 </p>
               )}
 

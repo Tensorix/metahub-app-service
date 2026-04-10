@@ -21,7 +21,7 @@ export interface Activity {
   type: string;
   name: string;
   priority: number;
-  comments?: string;
+  notes?: string;
   tags?: string[];
   source_type?: string;
   source_id?: string;
@@ -40,7 +40,7 @@ export interface ActivityCreate {
   type: string;
   name: string;
   priority?: number;
-  comments?: string;
+  notes?: string;
   tags?: string[];
   source_type?: string;
   source_id?: string;
@@ -56,7 +56,7 @@ export interface ActivityUpdate {
   type?: string;
   name?: string;
   priority?: number;
-  comments?: string;
+  notes?: string;
   tags?: string[];
   source_type?: string;
   source_id?: string;
@@ -84,6 +84,25 @@ export interface ActivityListResponse {
   page: number;
   size: number;
   pages: number;
+}
+
+export interface ActivityComment {
+  id: string;
+  activity_id: string;
+  user_id: string;
+  content: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  is_deleted: boolean;
+}
+
+export interface ActivityCommentCreate {
+  content: string;
+}
+
+export interface ActivityCommentUpdate {
+  content: string;
 }
 
 export const activityApi = {
@@ -131,5 +150,29 @@ export const activityApi = {
   // 批量更新活动排序
   reorderActivities: async (orderedIds: string[]): Promise<void> => {
     await apiClient.patch('/api/v1/activities/reorder', { ordered_ids: orderedIds });
+  },
+
+  getActivityComments: async (activityId: string): Promise<ActivityComment[]> => {
+    const response = await apiClient.get(`/api/v1/activities/${activityId}/comments`);
+    return response.data;
+  },
+
+  createActivityComment: async (activityId: string, data: ActivityCommentCreate): Promise<ActivityComment> => {
+    const response = await apiClient.post(`/api/v1/activities/${activityId}/comments`, data);
+    return response.data;
+  },
+
+  updateActivityComment: async (commentId: string, data: ActivityCommentUpdate): Promise<ActivityComment> => {
+    const response = await apiClient.put(`/api/v1/comments/${commentId}`, data);
+    return response.data;
+  },
+
+  deleteActivityComment: async (commentId: string, hardDelete = false): Promise<void> => {
+    await apiClient.delete(`/api/v1/comments/${commentId}`, { params: { hard_delete: hardDelete } });
+  },
+
+  restoreActivityComment: async (commentId: string): Promise<ActivityComment> => {
+    const response = await apiClient.post(`/api/v1/comments/${commentId}/restore`);
+    return response.data;
   },
 };

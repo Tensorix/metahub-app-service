@@ -21,7 +21,7 @@ def test_create_activity():
         "type": "meeting",
         "name": "团队周会",
         "priority": 5,
-        "comments": "讨论本周工作进展和下周计划",
+        "notes": "讨论本周工作进展和下周计划",
         "tags": ["会议", "团队", "周会"],
         "reminder_time": (datetime.now() + timedelta(hours=1)).isoformat(),
         "due_date": (datetime.now() + timedelta(days=1)).isoformat()
@@ -64,7 +64,7 @@ def test_update_activity(activity_id):
     update_data = {
         "name": "团队周会（已更新）",
         "priority": 8,
-        "comments": "更新：增加项目进度汇报环节"
+        "notes": "更新：增加项目进度汇报环节"
     }
     
     response = requests.put(f"{BASE_URL}/{activity_id}", json=update_data)

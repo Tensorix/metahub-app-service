@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, Literal
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices
 
 
 # ============ Sync Operation Types ============
@@ -18,7 +18,12 @@ class ActivitySyncItem(BaseModel):
     type: Optional[str] = Field(None, description="活动类型", max_length=100)
     name: Optional[str] = Field(None, description="活动名称", max_length=255)
     priority: Optional[int] = Field(None, description="优先级")
-    comments: Optional[str] = Field(None, description="备注")
+    notes: Optional[str] = Field(
+        None,
+        description="备注",
+        validation_alias=AliasChoices("notes", "comments"),
+        serialization_alias="notes",
+    )
     tags: Optional[list[str]] = Field(None, description="标签列表")
     source_type: Optional[str] = Field(None, description="来源类型", max_length=50)
     source_id: Optional[str] = Field(None, description="来源ID", max_length=255)

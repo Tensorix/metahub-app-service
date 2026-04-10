@@ -1,5 +1,6 @@
 from .base import Base
 from .activity import Activity
+from .activity_comment import ActivityComment
 from .activity_relation import ActivityRelation
 from .session import Session
 from .topic import Topic

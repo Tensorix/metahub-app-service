@@ -14,9 +14,10 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
 
 if TYPE_CHECKING:
+    from app.db.model.activity_comment import ActivityComment
     from app.db.model.activity_relation import ActivityRelation
 
 
@@ -38,7 +39,7 @@ class Activity(Base):
     priority: Mapped[int] = mapped_column(
         Integer, default=0, nullable=False, comment="优先级，数字越大优先级越高"
     )
-    comments: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="备注")
+    notes: Mapped[Optional[str]] = mapped_column("comments", Text, nullable=True, comment="备注")
     tags: Mapped[Optional[list[str]]] = mapped_column(
         ARRAY(String(100)),
         nullable=True,
@@ -97,3 +98,11 @@ class Activity(Base):
         foreign_keys="ActivityRelation.activity_id",
         lazy="selectin",
     )
+    activity_comments: Mapped[list["ActivityComment"]] = relationship(
+        "ActivityComment",
+        back_populates="activity",
+        foreign_keys="ActivityComment.activity_id",
+        lazy="selectin",
+    )
+
+    comments = synonym("notes")

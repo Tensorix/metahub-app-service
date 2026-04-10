@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, AliasChoices
 
 
 class RelationRef(BaseModel):
@@ -25,7 +25,12 @@ class ActivityBase(BaseModel):
     type: str = Field(..., description="活动类型", max_length=100)
     name: str = Field(..., description="活动名称", max_length=255)
     priority: int = Field(0, description="优先级，数字越大优先级越高")
-    comments: Optional[str] = Field(None, description="备注")
+    notes: Optional[str] = Field(
+        None,
+        description="备注",
+        validation_alias=AliasChoices("notes", "comments"),
+        serialization_alias="notes",
+    )
     tags: Optional[list[str]] = Field(None, description="标签列表")
     source_type: Optional[str] = Field(None, description="来源类型，如 manual/event/topic", max_length=50)
     source_id: Optional[str] = Field(None, description="来源ID", max_length=255)
@@ -47,7 +52,12 @@ class ActivityUpdate(BaseModel):
     type: Optional[str] = Field(None, description="活动类型", max_length=100)
     name: Optional[str] = Field(None, description="活动名称", max_length=255)
     priority: Optional[int] = Field(None, description="优先级，数字越大优先级越高")
-    comments: Optional[str] = Field(None, description="备注")
+    notes: Optional[str] = Field(
+        None,
+        description="备注",
+        validation_alias=AliasChoices("notes", "comments"),
+        serialization_alias="notes",
+    )
     tags: Optional[list[str]] = Field(None, description="标签列表")
     source_type: Optional[str] = Field(None, description="来源类型，如 manual/event/topic", max_length=50)
     source_id: Optional[str] = Field(None, description="来源ID", max_length=255)

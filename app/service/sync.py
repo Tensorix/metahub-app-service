@@ -106,7 +106,7 @@ class SyncService:
             type=item.type,
             name=item.name,
             priority=item.priority or 0,
-            comments=item.comments,
+            notes=item.notes,
             tags=item.tags or [],
             source_type=item.source_type,
             source_id=item.source_id,
@@ -208,8 +208,8 @@ class SyncService:
             activity.name = item.name
         if item.priority is not None:
             activity.priority = item.priority
-        if item.comments is not None:
-            activity.comments = item.comments
+        if item.notes is not None:
+            activity.notes = item.notes
         if item.tags is not None:
             activity.tags = item.tags
         if item.source_type is not None:
@@ -934,7 +934,8 @@ class SyncService:
                     "type": a.type,
                     "name": a.name,
                     "priority": a.priority,
-                    "comments": a.comments,
+                    "comments": a.notes,
+                    "notes": a.notes,
                     "tags": a.tags,
                     "source_type": a.source_type,
                     "source_id": a.source_id,
