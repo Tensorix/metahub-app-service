@@ -32,6 +32,8 @@ class SandboxService:
         image: str | None = None,
         timeout: int | None = None,
         timeout_provided: bool = False,
+        env: dict[str, str] | None = None,
+        replace_env: bool = False,
         mounts: list[SandboxHostMount] | None = None,
         replace_mounts: bool = False,
     ) -> SessionSandbox:
@@ -57,6 +59,7 @@ class SandboxService:
                 existing.timeout = timeout
             existing.config = _merge_sandbox_config(
                 existing.config,
+                env=env if replace_env else _UNSET,
                 mounts=mounts if replace_mounts else _UNSET,
             )
             db.commit()
@@ -73,6 +76,7 @@ class SandboxService:
             timeout=timeout if timeout_provided else None,
             config=_merge_sandbox_config(
                 None,
+                env=env if replace_env else _UNSET,
                 mounts=mounts if replace_mounts else _UNSET,
             ),
         )

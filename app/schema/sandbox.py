@@ -50,6 +50,7 @@ class SandboxCreateRequest(BaseModel):
 class SandboxConfigUpdateRequest(BaseModel):
     image: Optional[str] = None
     timeout: Optional[int] = None
+    env: Optional[dict[str, str]] = None
     mounts: Optional[list[SandboxHostMount]] = None
 
     @field_validator("timeout")
@@ -74,6 +75,14 @@ class SandboxResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def env(self) -> dict[str, str]:
+        raw = self.config.get("env") if isinstance(self.config, dict) else None
+        if not isinstance(raw, dict):
+            return {}
+        return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)}
 
     @computed_field
     @property

@@ -1019,6 +1019,7 @@ export interface SandboxInfo {
   expires_at: string | null;
   created_at: string;
   updated_at: string;
+  env: Record<string, string>;
   mounts: SandboxMount[];
 }
 
@@ -1049,6 +1050,7 @@ export const sandboxApi = {
     data?: {
       image?: string;
       timeout?: number | null;
+      env?: Record<string, string>;
       mounts?: SandboxMount[];
     },
   ) => {
@@ -1064,6 +1066,7 @@ export const sandboxApi = {
     data: {
       image?: string;
       timeout?: number | null;
+      env?: Record<string, string>;
       mounts?: SandboxMount[];
     },
   ): Promise<SandboxInfo> => {

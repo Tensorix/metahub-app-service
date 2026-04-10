@@ -105,6 +105,7 @@ interface ChatState {
     options?: {
       image?: string;
       timeout?: number | null;
+      env?: Record<string, string>;
       mounts?: SandboxMount[];
     },
   ) => Promise<void>;
@@ -116,6 +117,7 @@ interface ChatState {
     data: {
       image?: string;
       timeout?: number | null;
+      env?: Record<string, string>;
       mounts?: SandboxMount[];
     },
   ) => Promise<void>;

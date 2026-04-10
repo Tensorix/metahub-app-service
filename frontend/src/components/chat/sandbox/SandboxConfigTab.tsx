@@ -73,6 +73,7 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
   const [timeoutDraft, setTimeoutDraft] = useState<string>(
     current?.timeout != null ? String(current.timeout) : '',
   );
+  const [envDrafts, setEnvDrafts] = useState<Record<string, string>>(current?.env ?? {});
   const [mountDrafts, setMountDrafts] = useState<SandboxMount[]>(current?.mounts ?? []);
   const [renewing, setRenewing] = useState(false);
 
@@ -81,8 +82,9 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
     setImageDraft(current?.image ?? '');
     setTimeoutEnabled(currentHasTimeout);
     setTimeoutDraft(current?.timeout != null ? String(current.timeout) : '');
+    setEnvDrafts(current?.env ?? {});
     setMountDrafts(current?.mounts ?? []);
-  }, [current?.image, current?.mounts, current?.timeout, currentHasTimeout]);
+  }, [current?.image, current?.env, current?.mounts, current?.timeout, currentHasTimeout]);
 
   const hasDrafts = useMemo(() => {
     const cleanImage = imageDraft.trim();
@@ -90,15 +92,18 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
     const recordedImage = current?.image ?? '';
     const recordedTimeout =
       current?.timeout != null ? String(current.timeout) : '';
+    const recordedEnv = JSON.stringify(current?.env ?? {});
+    const draftEnv = JSON.stringify(envDrafts);
     const recordedMounts = serializeMounts(current?.mounts ?? []);
     const draftMounts = serializeMounts(mountDrafts);
     return (
       cleanImage !== recordedImage ||
       timeoutEnabled !== currentHasTimeout ||
       (timeoutEnabled && cleanTimeout !== recordedTimeout) ||
+      recordedEnv !== draftEnv ||
       recordedMounts !== draftMounts
     );
-  }, [current, currentHasTimeout, imageDraft, mountDrafts, timeoutDraft, timeoutEnabled]);
+  }, [current, currentHasTimeout, envDrafts, imageDraft, mountDrafts, timeoutDraft, timeoutEnabled]);
 
   const buildPayload = () => {
     const image = imageDraft.trim();
@@ -106,9 +111,13 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
     const payload: {
       image?: string;
       timeout: number | null;
+      env: Record<string, string>;
       mounts: SandboxMount[];
     } = {
       timeout: null,
+      env: Object.fromEntries(
+        Object.entries(envDrafts).filter(([k, v]) => k.trim() && v.trim()),
+      ),
       mounts: mountDrafts.map(normalizeMount).filter((mount) => {
         if (!mount.host_path && !mount.mount_path && !mount.sub_path) {
           return false;
@@ -345,10 +354,88 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
             </Button>
             {editsLocked && (
               <span className="text-xs text-muted-foreground">
-                Stop the sandbox to change image, timeout, or mounts.
+                Stop the sandbox to change image, timeout, env, or mounts.
               </span>
             )}
           </div>
+        </div>
+
+        {/* Environment Variables */}
+        <div className="space-y-3 pt-2 border-t">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium">Environment Variables</div>
+              <div className="text-xs text-muted-foreground">
+                Key-value pairs passed to the sandbox.
+              </div>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                setEnvDrafts((prev) => ({ ...prev, '': '' }))
+              }
+              disabled={editsLocked || '' in envDrafts}
+            >
+              <Plus className="h-4 w-4 mr-1.5" />
+              Add
+            </Button>
+          </div>
+
+          {Object.keys(envDrafts).length === 0 ? (
+            <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+              No environment variables configured.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {Object.entries(envDrafts).map(([key, value], index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <Input
+                    value={key}
+                    onChange={(e) => {
+                      const newKey = e.target.value;
+                      setEnvDrafts((prev) => {
+                        const entries = Object.entries(prev);
+                        const idx = entries.findIndex(([k]) => k === key);
+                        if (idx === -1) return prev;
+                        entries[idx] = [newKey, value];
+                        return Object.fromEntries(entries);
+                      });
+                    }}
+                    placeholder="KEY"
+                    disabled={editsLocked}
+                    className="h-8 text-sm font-mono flex-1"
+                  />
+                  <Input
+                    value={value}
+                    onChange={(e) =>
+                      setEnvDrafts((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
+                    placeholder="value"
+                    disabled={editsLocked}
+                    className="h-8 text-sm font-mono flex-1"
+                  />
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() =>
+                      setEnvDrafts((prev) => {
+                        const next = { ...prev };
+                        delete next[key];
+                        return next;
+                      })
+                    }
+                    disabled={editsLocked}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="space-y-3 pt-2 border-t">

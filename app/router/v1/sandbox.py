@@ -158,6 +158,8 @@ async def update_sandbox_config(
         image=body.image,
         timeout=body.timeout,
         timeout_provided="timeout" in body.model_fields_set,
+        env=body.env,
+        replace_env="env" in body.model_fields_set,
         mounts=body.mounts,
         replace_mounts="mounts" in body.model_fields_set,
     )
