@@ -72,6 +72,11 @@ function formatDate(value?: string | null): string {
   }
 }
 
+function formatExpiry(value?: string | null): string {
+  if (!value) return 'Never';
+  return formatDate(value);
+}
+
 function shortId(id: string, length = 12): string {
   if (id.length <= length) return id;
   return `${id.slice(0, length)}…`;
@@ -419,7 +424,7 @@ export function SandboxSettings() {
                         {formatDate(sb.created_at)}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
-                        {formatDate(sb.expires_at)}
+                        {formatExpiry(sb.expires_at)}
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center justify-end gap-1">
@@ -533,7 +538,7 @@ export function SandboxSettings() {
                 <div>{formatDate(detailsData.created_at)}</div>
 
                 <div className="text-muted-foreground">过期时间</div>
-                <div>{formatDate(detailsData.expires_at)}</div>
+                <div>{formatExpiry(detailsData.expires_at)}</div>
 
                 <div className="text-muted-foreground">状态变更</div>
                 <div>{formatDate(detailsData.status.last_transition_at)}</div>

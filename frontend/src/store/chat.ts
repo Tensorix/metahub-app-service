@@ -102,14 +102,22 @@ interface ChatState {
   loadSandboxStatus: (sessionId: string) => Promise<void>;
   createSandbox: (
     sessionId: string,
-    options?: { image?: string; timeout?: number; mounts?: SandboxMount[] },
+    options?: {
+      image?: string;
+      timeout?: number | null;
+      mounts?: SandboxMount[];
+    },
   ) => Promise<void>;
   pauseSandbox: (sessionId: string) => Promise<void>;
   resumeSandbox: (sessionId: string) => Promise<void>;
   stopSandbox: (sessionId: string) => Promise<void>;
   updateSandboxConfig: (
     sessionId: string,
-    data: { image?: string; timeout?: number; mounts?: SandboxMount[] },
+    data: {
+      image?: string;
+      timeout?: number | null;
+      mounts?: SandboxMount[];
+    },
   ) => Promise<void>;
 
   // UI
@@ -554,7 +562,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   createSandbox: async (
     sessionId: string,
-    options?: { image?: string; timeout?: number; mounts?: SandboxMount[] },
+    options?: {
+      image?: string;
+      timeout?: number | null;
+      mounts?: SandboxMount[];
+    },
   ) => {
     set((s) => ({ sandboxLoading: { ...s.sandboxLoading, [sessionId]: true } }));
     try {

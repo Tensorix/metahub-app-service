@@ -1046,7 +1046,11 @@ export interface TransferRequest {
 export const sandboxApi = {
   create: async (
     sessionId: string,
-    data?: { image?: string; timeout?: number; mounts?: SandboxMount[] },
+    data?: {
+      image?: string;
+      timeout?: number | null;
+      mounts?: SandboxMount[];
+    },
   ) => {
     const resp = await api.post<SandboxInfo>(`/api/v1/sessions/${sessionId}/sandbox`, data ?? {});
     return resp.data;
@@ -1057,7 +1061,11 @@ export const sandboxApi = {
   },
   updateConfig: async (
     sessionId: string,
-    data: { image?: string; timeout?: number; mounts?: SandboxMount[] },
+    data: {
+      image?: string;
+      timeout?: number | null;
+      mounts?: SandboxMount[];
+    },
   ): Promise<SandboxInfo> => {
     const resp = await api.put<SandboxInfo>(
       `/api/v1/sessions/${sessionId}/sandbox/config`,

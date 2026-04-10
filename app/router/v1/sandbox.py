@@ -116,6 +116,7 @@ async def create_sandbox(
         user_id=current_user.id,
         image=body.image,
         timeout=body.timeout,
+        timeout_provided="timeout" in body.model_fields_set,
         env=body.env,
         mounts=body.mounts,
     )
@@ -156,6 +157,7 @@ async def update_sandbox_config(
         user_id=current_user.id,
         image=body.image,
         timeout=body.timeout,
+        timeout_provided="timeout" in body.model_fields_set,
         mounts=body.mounts,
         replace_mounts="mounts" in body.model_fields_set,
     )

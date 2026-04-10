@@ -31,6 +31,7 @@ class SandboxService:
         user_id: UUID,
         image: str | None = None,
         timeout: int | None = None,
+        timeout_provided: bool = False,
         mounts: list[SandboxHostMount] | None = None,
         replace_mounts: bool = False,
     ) -> SessionSandbox:
@@ -52,7 +53,7 @@ class SandboxService:
                 )
             if image is not None:
                 existing.image = image
-            if timeout is not None:
+            if timeout_provided:
                 existing.timeout = timeout
             existing.config = _merge_sandbox_config(
                 existing.config,
@@ -69,7 +70,7 @@ class SandboxService:
             user_id=user_id,
             status="stopped",
             image=image or config.default_image,
-            timeout=timeout,
+            timeout=timeout if timeout_provided else None,
             config=_merge_sandbox_config(
                 None,
                 mounts=mounts if replace_mounts else _UNSET,
@@ -87,6 +88,7 @@ class SandboxService:
         user_id: UUID,
         image: str | None = None,
         timeout: int | None = None,
+        timeout_provided: bool = False,
         env: dict[str, str] | None = None,
         mounts: list[SandboxHostMount] | None = None,
     ) -> SessionSandbox:
@@ -104,12 +106,18 @@ class SandboxService:
         )
         persisted_image: str | None = None
         persisted_timeout: int | None = None
+        persisted_timeout_provided: bool = False
         persisted_config: dict[str, Any] | None = None
         if existing:
             if existing.status not in ("stopped", "error"):
                 raise HTTPException(409, "Session already has an active sandbox")
             persisted_image = existing.image
             persisted_timeout = existing.timeout
+            # If an existing record has a non-default timeout (either a custom
+            # value or explicit never-expires), we treat that as the persisted
+            # preference. Stock fresh records created with defaults have
+            # timeout=None which means "fall back to global default".
+            persisted_timeout_provided = existing.timeout is not None
             persisted_config = _clone_config(existing.config)
             # Remove stale record so we can create a fresh one (unique constraint)
             db.delete(existing)
@@ -131,7 +139,12 @@ class SandboxService:
 
         # Priority: explicit body → persisted record → global default
         effective_image = image or persisted_image or config.default_image
-        effective_timeout = timeout or persisted_timeout or config.default_timeout
+        if timeout_provided:
+            effective_timeout = timeout  # may be None → never expires
+        elif persisted_timeout_provided:
+            effective_timeout = persisted_timeout  # may be None → never expires
+        else:
+            effective_timeout = config.default_timeout
         effective_env = _resolve_config_value(persisted_config, "env", env)
         effective_mounts = _resolve_config_value(persisted_config, "mounts", mounts)
         merged_config = _merge_sandbox_config(
@@ -162,8 +175,11 @@ class SandboxService:
             )
             record.sandbox_id = sandbox.id
             record.status = "running"
-            record.expires_at = datetime.now(timezone.utc) + timedelta(
-                seconds=effective_timeout
+            record.expires_at = (
+                None
+                if effective_timeout is None
+                else datetime.now(timezone.utc)
+                + timedelta(seconds=effective_timeout)
             )
             db.commit()
             db.refresh(record)
@@ -231,7 +247,9 @@ class SandboxService:
             except Exception as e:
                 logger.warning(f"Failed to kill remote sandbox: {e}")
 
+        record.sandbox_id = None
         record.status = "stopped"
+        record.expires_at = None
         record.terminal_session_id = None
         record.terminal_session_created_at = None
         record.terminal_session_last_seen_at = None
@@ -257,6 +275,9 @@ class SandboxService:
         )
         if not record or not record.sandbox_id:
             raise HTTPException(404, "No running sandbox for this session")
+
+        if record.timeout is None:
+            raise HTTPException(400, "Non-expiring sandboxes do not need renewal")
 
         config = get_sandbox_config(db)
         client = get_sandbox_client(config)
@@ -326,7 +347,9 @@ class SandboxService:
         client = get_sandbox_client(config)
         await client.resume(record.sandbox_id)
         record.status = "running"
-        if record.timeout:
+        if record.timeout is None:
+            record.expires_at = None
+        else:
             record.expires_at = datetime.now(timezone.utc) + timedelta(
                 seconds=record.timeout
             )

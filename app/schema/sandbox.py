@@ -39,11 +39,25 @@ class SandboxCreateRequest(BaseModel):
     env: Optional[dict[str, str]] = None
     mounts: Optional[list[SandboxHostMount]] = None
 
+    @field_validator("timeout")
+    @classmethod
+    def _validate_timeout(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and value <= 0:
+            raise ValueError("Timeout must be a positive number")
+        return value
+
 
 class SandboxConfigUpdateRequest(BaseModel):
     image: Optional[str] = None
     timeout: Optional[int] = None
     mounts: Optional[list[SandboxHostMount]] = None
+
+    @field_validator("timeout")
+    @classmethod
+    def _validate_timeout(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and value <= 0:
+            raise ValueError("Timeout must be a positive number")
+        return value
 
 
 class SandboxResponse(BaseModel):

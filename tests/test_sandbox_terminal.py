@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from opensandbox.models.sandboxes import SandboxEndpoint
 
 from app.db.model.session import Session as SessionModel
@@ -53,6 +54,7 @@ class _FakeSandboxClient:
         self.killed_sandboxes: list[str] = []
         self.paused_sandboxes: list[str] = []
         self.resumed_sandboxes: list[str] = []
+        self.renewed_sandboxes: list[tuple[str, int]] = []
 
     async def delete_pty_session(self, sandbox_id: str, terminal_session_id: str) -> None:
         self.deleted_sessions.append((sandbox_id, terminal_session_id))
@@ -65,6 +67,71 @@ class _FakeSandboxClient:
 
     async def resume(self, sandbox_id: str) -> None:
         self.resumed_sandboxes.append(sandbox_id)
+
+    async def renew(self, sandbox_id: str, duration: int) -> None:
+        self.renewed_sandboxes.append((sandbox_id, duration))
+
+
+class _FakeCreateQuery:
+    def __init__(self, db: "_FakeCreateDB"):
+        self._db = db
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def first(self):
+        return self._db.existing_record
+
+    def count(self):
+        return self._db.active_count
+
+
+class _FakeCreateDB:
+    def __init__(self, existing_record: SessionSandbox | None = None, active_count: int = 0):
+        self.existing_record = existing_record
+        self.active_count = active_count
+        self.added_records: list[SessionSandbox] = []
+        self.deleted_records: list[SessionSandbox] = []
+        self.commits = 0
+        self.refreshes = 0
+        self.flushed = 0
+
+    def query(self, model):
+        if model is SessionSandbox:
+            return _FakeCreateQuery(self)
+        raise AssertionError(f"Unexpected query model: {model!r}")
+
+    def add(self, obj):
+        self.added_records.append(obj)
+        self.existing_record = obj
+
+    def delete(self, obj):
+        self.deleted_records.append(obj)
+        if self.existing_record is obj:
+            self.existing_record = None
+
+    def flush(self):
+        self.flushed += 1
+
+    def commit(self):
+        self.commits += 1
+
+    def refresh(self, _obj):
+        self.refreshes += 1
+
+
+class _FakeCreatedSandbox:
+    def __init__(self, sandbox_id: str):
+        self.id = sandbox_id
+
+
+class _FakeProvisioningClient:
+    def __init__(self):
+        self.create_calls: list[dict[str, object]] = []
+
+    async def create(self, **kwargs):
+        self.create_calls.append(kwargs)
+        return _FakeCreatedSandbox("sandbox-created")
 
 
 @pytest.mark.asyncio
@@ -106,11 +173,144 @@ async def test_stop_sandbox_cleans_up_terminal_session(monkeypatch):
     record = await SandboxService.stop_sandbox(db, session_id, user_id)
 
     assert record.status == "stopped"
+    assert record.sandbox_id is None
+    assert record.expires_at is None
     assert record.terminal_session_id is None
     assert record.terminal_session_created_at is None
     assert record.terminal_session_last_seen_at is None
     assert fake_client.deleted_sessions == [("sandbox-123", "pty-123")]
     assert fake_client.killed_sandboxes == ["sandbox-123"]
+
+
+@pytest.mark.asyncio
+async def test_create_sandbox_passes_none_timeout_for_non_expiring_sandbox(monkeypatch):
+    user_id = uuid4()
+    session_id = uuid4()
+    db = _FakeCreateDB()
+    fake_client = _FakeProvisioningClient()
+
+    monkeypatch.setattr(
+        sandbox_service_module,
+        "get_sandbox_config",
+        lambda _db: SandboxConfigValue(
+            enabled=True,
+            api_domain="api.example.com",
+            api_key="secret",
+            default_timeout=600,
+        ),
+    )
+    monkeypatch.setattr(
+        sandbox_service_module,
+        "get_sandbox_client",
+        lambda _cfg: fake_client,
+    )
+    monkeypatch.setattr(
+        sandbox_service_module,
+        "_clear_agent_cache_for_session",
+        lambda *_args, **_kwargs: None,
+    )
+
+    record = await SandboxService.create_sandbox(
+        db,
+        session_id=session_id,
+        user_id=user_id,
+        timeout=None,
+        timeout_provided=True,
+    )
+
+    assert fake_client.create_calls == [
+        {
+            "image": "ubuntu",
+            "timeout": None,
+            "env": None,
+            "mounts": [],
+        }
+    ]
+    assert record.timeout is None
+    assert record.expires_at is None
+
+
+@pytest.mark.asyncio
+async def test_create_sandbox_uses_default_timeout_when_persisted_timeout_is_none(monkeypatch):
+    user_id = uuid4()
+    session_id = uuid4()
+    existing_record = SessionSandbox(
+        session_id=session_id,
+        user_id=user_id,
+        status="stopped",
+        image="ubuntu",
+        timeout=None,
+        config=None,
+    )
+    db = _FakeCreateDB(existing_record=existing_record)
+    fake_client = _FakeProvisioningClient()
+
+    monkeypatch.setattr(
+        sandbox_service_module,
+        "get_sandbox_config",
+        lambda _db: SandboxConfigValue(
+            enabled=True,
+            api_domain="api.example.com",
+            api_key="secret",
+            default_timeout=900,
+        ),
+    )
+    monkeypatch.setattr(
+        sandbox_service_module,
+        "get_sandbox_client",
+        lambda _cfg: fake_client,
+    )
+    monkeypatch.setattr(
+        sandbox_service_module,
+        "_clear_agent_cache_for_session",
+        lambda *_args, **_kwargs: None,
+    )
+
+    record = await SandboxService.create_sandbox(
+        db,
+        session_id=session_id,
+        user_id=user_id,
+    )
+
+    assert fake_client.create_calls[0]["timeout"] == 900
+    assert record.timeout == 900
+    assert record.expires_at is not None
+
+
+@pytest.mark.asyncio
+async def test_renew_rejects_non_expiring_sandbox(monkeypatch):
+    user_id = uuid4()
+    session_id = uuid4()
+    sandbox_record = SessionSandbox(
+        session_id=session_id,
+        user_id=user_id,
+        sandbox_id="sandbox-123",
+        status="running",
+        image="ubuntu",
+        timeout=None,
+    )
+    db = _FakeDB(
+        sandbox_record,
+        SessionModel(id=session_id, user_id=user_id, type="ai", is_deleted=False),
+    )
+    fake_client = _FakeSandboxClient()
+
+    monkeypatch.setattr(
+        sandbox_service_module,
+        "get_sandbox_config",
+        lambda _db: SandboxConfigValue(enabled=True, api_domain="api.example.com", api_key="secret"),
+    )
+    monkeypatch.setattr(
+        sandbox_service_module,
+        "get_sandbox_client",
+        lambda _cfg: fake_client,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await SandboxService.renew_sandbox(db, session_id, user_id, 600)
+
+    assert "Non-expiring sandboxes do not need renewal" in str(exc_info.value)
+    assert fake_client.renewed_sandboxes == []
 
 
 @pytest.mark.asyncio
@@ -257,6 +457,36 @@ async def test_sandbox_client_create_passes_host_volumes(monkeypatch):
     assert volumes[0].mount_path == "/workspace/data"
     assert volumes[0].read_only is True
     assert volumes[0].sub_path == "nested"
+
+
+@pytest.mark.asyncio
+async def test_sandbox_client_create_passes_none_timeout(monkeypatch):
+    client = SandboxClient(
+        SandboxConfigValue(
+            enabled=True,
+            api_domain="api.example.com",
+            api_key="secret",
+        )
+    )
+
+    captured: dict[str, object] = {}
+
+    class _FakeSandboxHandle:
+        id = "sandbox-123"
+
+    async def _fake_create(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return _FakeSandboxHandle()
+
+    monkeypatch.setattr("app.sandbox.client.Sandbox.create", _fake_create)
+
+    sandbox = await client.create(
+        image="ubuntu",
+        timeout=None,
+    )
+
+    assert sandbox.id == "sandbox-123"
+    assert captured["kwargs"]["timeout"] is None
 
 
 @pytest.mark.asyncio

@@ -50,7 +50,7 @@ class SandboxClient:
     async def create(
         self,
         image: str = "ubuntu",
-        timeout: int = 600,
+        timeout: int | None = 600,
         env: Optional[dict[str, str]] = None,
         mounts: Optional[list[dict[str, Any]]] = None,
     ) -> Sandbox:
@@ -58,7 +58,7 @@ class SandboxClient:
         sandbox = await Sandbox.create(
             image,
             connection_config=self._config,
-            timeout=timedelta(seconds=timeout),
+            timeout=None if timeout is None else timedelta(seconds=timeout),
             env=env or {},
             volumes=self._build_volumes(mounts),
         )

@@ -59,14 +59,17 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
 
   const current = sandboxStatus[sessionId] ?? null;
   const loading = sandboxLoading[sessionId] ?? false;
+  const currentHasTimeout = current?.timeout != null;
 
   const status = current?.status ?? 'stopped';
   const isRunning = status === 'running';
   const isPaused = status === 'paused';
   const isTransient = status === 'creating' || status === 'stopping';
   const editsLocked = isRunning || isPaused || isTransient;
+  const canRenew = currentHasTimeout;
 
   const [imageDraft, setImageDraft] = useState<string>(current?.image ?? '');
+  const [timeoutEnabled, setTimeoutEnabled] = useState<boolean>(currentHasTimeout);
   const [timeoutDraft, setTimeoutDraft] = useState<string>(
     current?.timeout != null ? String(current.timeout) : '',
   );
@@ -76,28 +79,36 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
   // Sync drafts when the underlying record changes (e.g. status update)
   useEffect(() => {
     setImageDraft(current?.image ?? '');
+    setTimeoutEnabled(currentHasTimeout);
     setTimeoutDraft(current?.timeout != null ? String(current.timeout) : '');
     setMountDrafts(current?.mounts ?? []);
-  }, [current?.image, current?.timeout, current?.mounts]);
+  }, [current?.image, current?.mounts, current?.timeout, currentHasTimeout]);
 
   const hasDrafts = useMemo(() => {
     const cleanImage = imageDraft.trim();
     const cleanTimeout = timeoutDraft.trim();
     const recordedImage = current?.image ?? '';
-    const recordedTimeout = current?.timeout != null ? String(current.timeout) : '';
+    const recordedTimeout =
+      current?.timeout != null ? String(current.timeout) : '';
     const recordedMounts = serializeMounts(current?.mounts ?? []);
     const draftMounts = serializeMounts(mountDrafts);
     return (
       cleanImage !== recordedImage ||
-      cleanTimeout !== recordedTimeout ||
+      timeoutEnabled !== currentHasTimeout ||
+      (timeoutEnabled && cleanTimeout !== recordedTimeout) ||
       recordedMounts !== draftMounts
     );
-  }, [imageDraft, timeoutDraft, mountDrafts, current]);
+  }, [current, currentHasTimeout, imageDraft, mountDrafts, timeoutDraft, timeoutEnabled]);
 
   const buildPayload = () => {
     const image = imageDraft.trim();
     const timeout = timeoutDraft.trim();
-    const payload: { image?: string; timeout?: number; mounts: SandboxMount[] } = {
+    const payload: {
+      image?: string;
+      timeout: number | null;
+      mounts: SandboxMount[];
+    } = {
+      timeout: null,
       mounts: mountDrafts.map(normalizeMount).filter((mount) => {
         if (!mount.host_path && !mount.mount_path && !mount.sub_path) {
           return false;
@@ -112,7 +123,10 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
       }),
     };
     if (image) payload.image = image;
-    if (timeout) {
+    if (timeoutEnabled) {
+      if (!timeout) {
+        throw new Error('Timeout is required when enabled');
+      }
       const n = Number(timeout);
       if (!Number.isFinite(n) || n <= 0) {
         throw new Error('Timeout must be a positive number');
@@ -193,6 +207,10 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
   };
 
   const handleRenew = async () => {
+    if (!canRenew) {
+      toast({ title: '当前沙箱不会自动过期，无需续期' });
+      return;
+    }
     setRenewing(true);
     try {
       const duration =
@@ -210,7 +228,7 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
     } catch (err: any) {
       toast({
         title: '续期失败',
-        description: err?.response?.data?.detail || String(err),
+        description: err?.response?.data?.detail || err?.message || String(err),
         variant: 'destructive',
       });
     } finally {
@@ -254,10 +272,16 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
               <span>{formatDate(current.created_at)}</span>
             </div>
           )}
-          {current?.expires_at && (
+          {current && (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Timeout</span>
+              <span>{currentHasTimeout ? `${current.timeout}s` : 'Never expires'}</span>
+            </div>
+          )}
+          {current && (
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Expires</span>
-              <span>{formatDate(current.expires_at)}</span>
+              <span>{currentHasTimeout ? formatDate(current.expires_at) : 'Never expires'}</span>
             </div>
           )}
           {current?.error_message && (
@@ -285,19 +309,28 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="sandbox-timeout" className="text-xs">
-              Timeout (seconds)
-            </Label>
-            <Input
-              id="sandbox-timeout"
-              type="number"
-              min={1}
-              value={timeoutDraft}
-              onChange={(e) => setTimeoutDraft(e.target.value)}
-              placeholder="e.g. 600 (leave empty for global default)"
-              disabled={editsLocked}
-              className="h-8 text-sm"
-            />
+            <div className="flex items-center justify-between">
+              <Label htmlFor="sandbox-timeout" className="text-xs">
+                Timeout (seconds)
+              </Label>
+              <Switch
+                checked={timeoutEnabled}
+                onCheckedChange={setTimeoutEnabled}
+                disabled={editsLocked}
+              />
+            </div>
+            {timeoutEnabled && (
+              <Input
+                id="sandbox-timeout"
+                type="number"
+                min={1}
+                value={timeoutDraft}
+                onChange={(e) => setTimeoutDraft(e.target.value)}
+                placeholder="e.g. 600"
+                disabled={editsLocked}
+                className="h-8 text-sm"
+              />
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -476,7 +509,7 @@ export function SandboxConfigTab({ sessionId }: SandboxConfigTabProps) {
                 size="sm"
                 variant="outline"
                 onClick={handleRenew}
-                disabled={renewing || loading}
+                disabled={renewing || loading || !canRenew}
                 className="w-full"
               >
                 {renewing ? (
