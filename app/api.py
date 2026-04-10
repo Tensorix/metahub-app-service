@@ -24,7 +24,15 @@ async def lifespan(app: FastAPI):
         logger.info("AgentFactory store initialized")
     except Exception as e:
         logger.warning(f"Failed to pre-initialize AgentFactory store: {e}")
-    
+
+    # Start stream session cleanup loop
+    try:
+        from app.agent.stream_session import stream_session_manager
+        stream_session_manager.start_cleanup_loop()
+        logger.info("Stream session cleanup loop started")
+    except Exception as e:
+        logger.warning(f"Failed to start stream session cleanup loop: {e}")
+
     # Start the scheduled-task scheduler
     try:
         from app.scheduler import SchedulerService
@@ -38,6 +46,13 @@ async def lifespan(app: FastAPI):
     
     yield
     
+    # Shutdown stream session manager
+    try:
+        from app.agent.stream_session import stream_session_manager
+        await stream_session_manager.shutdown()
+    except Exception as e:
+        logger.warning(f"Failed to shutdown stream session manager: {e}")
+
     # Shutdown the scheduler
     try:
         from app.scheduler import SchedulerService

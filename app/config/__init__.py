@@ -90,6 +90,10 @@ class Settings(BaseSettings):
     MCP_TOOL_CACHE_TTL: int = 300          # MCP 工具列表缓存时间（秒）
     MCP_MAX_SERVERS_PER_AGENT: int = 10    # 每个 Agent 最多连接的 MCP Server 数
 
+    # ============ SSE Stream Reconnect 配置 ============
+    STREAM_BUFFER_SIZE: int = 1000         # 每个 stream session 的事件 ring buffer 大小
+    STREAM_SESSION_TTL: int = 300          # stream session 完成后保留时间（秒）
+
     @computed_field
     @property
     def sqlalchemy_database_uri(self) -> str:

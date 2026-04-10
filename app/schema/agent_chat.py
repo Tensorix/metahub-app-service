@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional, Literal
 from uuid import UUID
 from pydantic import BaseModel, Field
@@ -78,6 +79,18 @@ class ChatResumeRequest(BaseModel):
         ...,
         description="User decisions: [{type: 'approve'|'edit'|'reject'}, edited_action?: {name, args}}]",
     )
+
+
+class StreamStatusResponse(BaseModel):
+    """Stream session status for reconnection."""
+
+    status: Literal["streaming", "completed", "error", "cancelled", "none"] = Field(
+        ..., description="Current stream status"
+    )
+    last_event_id: int = Field(0, description="Last event ID in the buffer")
+    message_id: Optional[UUID] = Field(None, description="Saved message ID (when completed)")
+    started_at: Optional[datetime] = Field(None, description="Stream start time")
+    completed_at: Optional[datetime] = Field(None, description="Stream completion time")
 
 
 class StopRequest(BaseModel):

@@ -4,11 +4,15 @@ Agent Chat API endpoints.
 Provides:
 - POST /sessions/{session_id}/chat - SSE streaming chat
 - POST /sessions/{session_id}/chat/stop - Stop generation
+- GET /sessions/{session_id}/topics/{topic_id}/stream/status - Stream status
+- GET /sessions/{session_id}/topics/{topic_id}/stream/reconnect - Reconnect SSE
+- POST /sessions/{session_id}/chat/resume - Resume after HITL
 - WS /sessions/{session_id}/chat/ws - WebSocket chat
 """
 
 import asyncio
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -29,9 +33,11 @@ from app.schema.agent_chat import (
     ChatResumeRequest,
     StopRequest,
     StopResponse,
+    StreamStatusResponse,
     WSIncomingMessage,
 )
 from app.agent import AgentFactory
+from app.agent.stream_session import StreamSession, StreamStatus, stream_session_manager
 from app.service.session import TopicService, MessageService
 from app.service.auth import TokenService
 from app.constants.message import MessagePartType
@@ -42,11 +48,9 @@ from app.utils.chat_metrics import (
     normalize_usage_metadata,
 )
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# Store active generation tasks for cancellation
-_active_tasks: dict[str, asyncio.Task] = {}
 
 _SANDBOX_TOOL_NAMES = [
     "sandbox_execute",
@@ -301,7 +305,7 @@ class StreamingCollector:
         """
         # 先 flush 最后剩余的文本
         self.flush_current_text()
-        
+
         parts = []
 
         # 添加思考内容（如果有，放在最前面）
@@ -541,6 +545,231 @@ def _build_resume_estimated_input(decisions: list[dict]) -> str:
         return str(decisions)
 
 
+# ---------------------------------------------------------------------------
+# Agent runner coroutine — runs inside a StreamSession's independent Task
+# ---------------------------------------------------------------------------
+
+async def _run_agent_stream(
+    stream_session: StreamSession,
+    *,
+    agent_service,
+    message: str,
+    thread_id: str,
+    user_id: UUID,
+    session_id: UUID,
+    topic_id: UUID,
+    metrics_context: dict,
+) -> None:
+    """Execute agent chat_stream, buffer events via *stream_session*, persist to DB."""
+    from app.db.session import SessionLocal
+
+    db_stream = SessionLocal()
+    collector = StreamingCollector()
+    task_key = stream_session.key
+    request_started_at = time.perf_counter()
+    first_token_at: Optional[float] = None
+    reported_usage = None
+    final_status = "complete"
+
+    try:
+        logger.info("Starting chat stream for %s", task_key)
+
+        async for event in agent_service.chat_stream(
+            message,
+            thread_id=thread_id,
+            user_id=user_id,
+            session_id=session_id,
+        ):
+            event_type = event.get("event")
+            event_data = event.get("data", {})
+
+            logger.debug("Agent event: %s, data: %s", event_type, event_data)
+            if event_type in {"operation_start", "operation_end"}:
+                logger.debug(
+                    "OP_TRACE source=agent_chat phase=ingress "
+                    "event=%s op_id=%s op_type=%s name=%s",
+                    event_type,
+                    event_data.get("op_id"),
+                    event_data.get("op_type"),
+                    event_data.get("name"),
+                )
+
+            # Route events — child events go to subagent collector
+            parent_op_id = event_data.get("parent_op_id")
+
+            if event_type == "metrics":
+                reported_usage = add_usage_summaries(
+                    reported_usage,
+                    normalize_usage_metadata(event_data),
+                )
+                continue
+
+            if event_type == "done":
+                final_status = event_data.get("status", "complete")
+                continue
+
+            if parent_op_id:
+                collector.add_subagent_child_event(parent_op_id, {
+                    "type": event_type,
+                    **{k: v for k, v in event_data.items() if k != "parent_op_id"},
+                })
+
+            elif event_type == "message":
+                content = event_data.get("content", "")
+                if content and first_token_at is None:
+                    first_token_at = time.perf_counter()
+                collector.add_text(content)
+
+            elif event_type == "thinking":
+                content = event_data.get("content", "")
+                collector.add_thinking(content)
+
+            elif event_type == "operation_start":
+                collector.add_operation_start(
+                    op_id=event_data.get("op_id", ""),
+                    op_type=event_data.get("op_type", "tool"),
+                    name=event_data.get("name", "unknown"),
+                    args=event_data.get("args", {}),
+                    description=event_data.get("description", ""),
+                    started_at=event_data.get("started_at"),
+                )
+
+            elif event_type == "operation_end":
+                end_payload = collector.add_operation_end(
+                    op_id=event_data.get("op_id", ""),
+                    op_type=event_data.get("op_type"),
+                    name=event_data.get("name"),
+                    result=event_data.get("result", ""),
+                    success=event_data.get("success", True),
+                    ended_at=event_data.get("ended_at"),
+                    status=event_data.get("status"),
+                )
+                event_data.update(end_payload)
+
+            elif event_type == "error":
+                error_msg = event_data.get("error", "Unknown error")
+                final_status = "error"
+                collector.add_error(error_msg, context="streaming")
+
+            if event_type == "interrupt":
+                collector.flush_current_text()
+
+            # Skip empty text/thinking events
+            if event_type in {"message", "thinking"} and not event_data.get("content"):
+                continue
+
+            # Emit through StreamSession (assigns id, buffers, broadcasts)
+            stream_session._emit({
+                "event": event_type,
+                "data": json.dumps(event_data),
+            })
+
+        logger.info("Chat stream completed for %s, saving message", task_key)
+
+        # Build metrics
+        metrics_payload = None
+        if final_status == "complete":
+            completed_at = time.perf_counter()
+            metrics_payload = build_chat_performance_metrics(
+                request_started_at=request_started_at,
+                completed_at=completed_at,
+                first_token_at=first_token_at,
+                reported_usage=reported_usage,
+                estimated_input_text=metrics_context.get("estimated_input_text", ""),
+                estimated_output_text=collector.get_full_text(),
+                model_name=metrics_context.get("model_name") or None,
+                provider=metrics_context.get("provider") or None,
+            )
+            collector.set_metrics(metrics_payload)
+
+        # Persist to DB
+        saved_message = None
+        if collector.has_content():
+            parts_data = collector.to_parts_data()
+            logger.info("Parts to save: %s", [p["type"] for p in parts_data])
+            saved_message = await _save_message_with_parts(
+                db_stream,
+                user_id,
+                topic_id,
+                "assistant",
+                parts_data,
+            )
+            stream_session.message_id = saved_message.id
+            logger.info("Message saved with %d parts for %s", len(parts_data), task_key)
+
+        # Emit trailing metrics + done events
+        if metrics_payload is not None:
+            stream_session._emit({
+                "event": "metrics",
+                "data": json.dumps(metrics_payload),
+            })
+
+        done_data: dict = {"status": final_status}
+        if saved_message is not None:
+            done_data["message_id"] = str(saved_message.id)
+        stream_session._emit({
+            "event": "done",
+            "data": json.dumps(done_data),
+        })
+
+    except asyncio.CancelledError:
+        logger.info("Chat generation cancelled for %s", task_key)
+        stream_session.status = StreamStatus.CANCELLED
+
+        collector.flush_active_operations("[已取消]")
+
+        if collector.has_content():
+            if collector.text_chunks:
+                collector.text_chunks.append(" [已取消]")
+            parts_data = collector.to_parts_data()
+            if parts_data:
+                parts_data[-1]["metadata_"]["cancelled"] = True
+            saved_message = await _save_message_with_parts(
+                db_stream,
+                user_id,
+                topic_id,
+                "assistant",
+                parts_data,
+            )
+            stream_session.message_id = saved_message.id
+
+        stream_session._emit({
+            "event": "done",
+            "data": json.dumps({"status": "cancelled"}),
+        })
+        raise  # Re-raise so StreamSession._run_wrapper sets status
+
+    except Exception as e:
+        logger.error("Error in chat stream for %s: %s", task_key, e, exc_info=True)
+        stream_session.status = StreamStatus.ERROR
+
+        collector.add_error(str(e), context="fatal")
+        if collector.has_content():
+            parts_data = collector.to_parts_data()
+            saved_message = await _save_message_with_parts(
+                db_stream,
+                user_id,
+                topic_id,
+                "assistant",
+                parts_data,
+            )
+            stream_session.message_id = saved_message.id
+
+        stream_session._emit({
+            "event": "error",
+            "data": json.dumps({"error": str(e)}),
+        })
+        raise  # Re-raise so StreamSession._run_wrapper sets status
+
+    finally:
+        db_stream.close()
+        logger.info("Chat stream cleanup completed for %s", task_key)
+
+
+# ---------------------------------------------------------------------------
+# HTTP endpoints
+# ---------------------------------------------------------------------------
+
 @router.post("/sessions/{session_id}/chat")
 async def chat_with_agent(
     session_id: UUID,
@@ -553,42 +782,35 @@ async def chat_with_agent(
 
     Supports both streaming (SSE) and non-streaming responses.
 
-    SSE Events:
+    SSE Events (each with an ``id`` field for reconnection):
     - message: Text content chunk
     - operation_start: Tool/SubAgent invocation started
     - operation_end: Tool/SubAgent invocation completed
-    - done: Stream complete
+    - done: Stream complete (includes ``message_id``)
     - error: Error occurred
     """
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    logger.info(f"Chat request received for session {session_id}")
-    
+    logger.info("Chat request received for session %s", session_id)
+
     # Validate session and get agent
     session, agent = await _validate_session_for_agent(
         session_id, db, current_user.id
     )
-    
-    logger.info(f"Session validated, agent_id: {agent.id}")
+    logger.info("Session validated, agent_id: %s", agent.id)
 
     # Get or create topic
     topic = await _get_or_create_topic(
         db, current_user.id, session_id, request.topic_id, request.message
     )
-    
-    logger.info(f"Topic ready: {topic.id}")
+    logger.info("Topic ready: %s", topic.id)
 
     # Save user message
     await _save_message(
         db, current_user.id, topic.id, "user", request.message
     )
-    
     logger.info("User message saved")
 
     # Get agent service with proper config
     agent_config = AgentFactory.build_agent_config(agent, db=db)
-    logger.info(f"Getting agent service with config: {agent_config}")
 
     # Inject sandbox tools if sandbox is active
     cache_key_suffix = _inject_sandbox_tools(db, session_id, agent_config)
@@ -596,7 +818,6 @@ async def chat_with_agent(
     agent_service = await AgentFactory.get_agent(
         agent.id, agent_config, cache_key_suffix=cache_key_suffix,
     )
-
     logger.info("Agent service obtained")
 
     # Thread ID for conversation continuity
@@ -653,244 +874,118 @@ async def chat_with_agent(
             metrics=metrics,
         )
 
-    # Streaming response - need to create new db session for async generator
-    logger.info("Streaming mode - creating generator")
-    
-    async def generate_events():
-        from app.db.session import SessionLocal
-        import logging
-        
-        logger = logging.getLogger(__name__)
-        task_key = f"{session_id}:{topic.id}"
-        metrics_context = await agent_service.prepare_metrics_context(
-            request.message,
+    # ------------------------------------------------------------------
+    # Streaming response — decoupled via StreamSession
+    # ------------------------------------------------------------------
+    logger.info("Streaming mode - creating StreamSession")
+
+    task_key = f"{session_id}:{topic.id}"
+
+    metrics_context = await agent_service.prepare_metrics_context(
+        request.message,
+        thread_id=thread_id,
+        user_id=current_user.id,
+        session_id=session_id,
+    )
+
+    # Create a StreamSession and start the agent in a background Task
+    ss = stream_session_manager.create(task_key)
+
+    async def _run(session: StreamSession) -> None:
+        await _run_agent_stream(
+            session,
+            agent_service=agent_service,
+            message=request.message,
             thread_id=thread_id,
             user_id=current_user.id,
             session_id=session_id,
+            topic_id=topic.id,
+            metrics_context=metrics_context,
         )
-        request_started_at = time.perf_counter()
-        first_token_at: Optional[float] = None
-        reported_usage = None
-        final_status = "complete"
-        
-        # 使用 StreamingCollector 收集事件
-        collector = StreamingCollector()
-        
-        # Create a new db session for the generator
-        db_stream = SessionLocal()
 
-        try:
-            # Store task for potential cancellation
-            current_task = asyncio.current_task()
-            _active_tasks[task_key] = current_task
+    ss.start(_run)
 
-            logger.info(f"Starting chat stream for {task_key}")
+    # Thin subscriber generator — just forwards events from the session
+    async def generate_events():
+        async for event in ss.subscribe(last_event_id=0):
+            yield event
 
-            async for event in agent_service.chat_stream(
-                request.message,
-                thread_id=thread_id,
-                user_id=current_user.id,
-                session_id=session_id,
-            ):
-                event_type = event.get("event")
-                event_data = event.get("data", {})
-                event_loop_ms = int(time.perf_counter() * 1000)
-
-                logger.debug(f"Agent event: {event_type}, data: {event_data}")
-                if event_type in {"operation_start", "operation_end"}:
-                    logger.debug(
-                        "OP_TRACE source=agent_chat phase=ingress "
-                        f"event={event_type} op_id={event_data.get('op_id')} "
-                        f"op_type={event_data.get('op_type')} name={event_data.get('name')} "
-                        f"event_loop_ms={event_loop_ms}"
-                    )
-
-                # Route events — child events go to subagent collector
-                parent_op_id = event_data.get("parent_op_id")
-
-                if event_type == "metrics":
-                    reported_usage = add_usage_summaries(
-                        reported_usage,
-                        normalize_usage_metadata(event_data),
-                    )
-                    continue
-
-                if event_type == "done":
-                    final_status = event_data.get("status", "complete")
-                    continue
-
-                if parent_op_id:
-                    # Subagent child event — accumulate for DB persistence
-                    collector.add_subagent_child_event(parent_op_id, {
-                        "type": event_type,
-                        **{k: v for k, v in event_data.items() if k != "parent_op_id"},
-                    })
-
-                elif event_type == "message":
-                    content = event_data.get("content", "")
-                    if content and first_token_at is None:
-                        first_token_at = time.perf_counter()
-                    collector.add_text(content)
-
-                elif event_type == "thinking":
-                    content = event_data.get("content", "")
-                    collector.add_thinking(content)
-
-                elif event_type == "operation_start":
-                    collector.add_operation_start(
-                        op_id=event_data.get("op_id", ""),
-                        op_type=event_data.get("op_type", "tool"),
-                        name=event_data.get("name", "unknown"),
-                        args=event_data.get("args", {}),
-                        description=event_data.get("description", ""),
-                        started_at=event_data.get("started_at"),
-                    )
-
-                elif event_type == "operation_end":
-                    end_payload = collector.add_operation_end(
-                        op_id=event_data.get("op_id", ""),
-                        op_type=event_data.get("op_type"),
-                        name=event_data.get("name"),
-                        result=event_data.get("result", ""),
-                        success=event_data.get("success", True),
-                        ended_at=event_data.get("ended_at"),
-                        status=event_data.get("status"),
-                    )
-                    event_data.update(end_payload)
-
-                elif event_type == "error":
-                    error_msg = event_data.get("error", "Unknown error")
-                    final_status = "error"
-                    collector.add_error(error_msg, context="streaming")
-
-                # Yield SSE event - must be a dict with 'data' key for sse-starlette
-                if event_type in {"operation_start", "operation_end"}:
-                    logger.debug(
-                        "OP_TRACE source=agent_chat phase=egress_sse "
-                        f"event={event_type} op_id={event_data.get('op_id')} "
-                        f"op_type={event_data.get('op_type')} name={event_data.get('name')} "
-                        f"event_loop_ms={int(time.perf_counter() * 1000)}"
-                    )
-                if event_type == "interrupt":
-                    collector.flush_current_text()
-
-                # 跳过空文本/思考事件，避免前端创建空白 parts
-                if event_type in {"message", "thinking"} and not event_data.get("content"):
-                    continue
-
-                yield {
-                    "event": event_type,
-                    "data": json.dumps(event_data),
-                }
-
-            logger.info(f"Chat stream completed for {task_key}, saving message")
-
-            metrics_payload = None
-            if final_status == "complete":
-                completed_at = time.perf_counter()
-                metrics_payload = build_chat_performance_metrics(
-                    request_started_at=request_started_at,
-                    completed_at=completed_at,
-                    first_token_at=first_token_at,
-                    reported_usage=reported_usage,
-                    estimated_input_text=metrics_context.get("estimated_input_text", ""),
-                    estimated_output_text=collector.get_full_text(),
-                    model_name=metrics_context.get("model_name") or None,
-                    provider=metrics_context.get("provider") or None,
-                )
-                collector.set_metrics(metrics_payload)
-
-            # 保存完整的 AI 消息（包含所有 Parts）
-            if collector.has_content():
-                logger.info(f"Collector state: text_parts={len(collector.text_parts)}, "
-                           f"tool_calls={len(collector.tool_calls)}, "
-                           f"tool_results={len(collector.tool_results)}, "
-                           f"subagent_calls={len(collector.subagent_calls)}")
-                
-                parts_data = collector.to_parts_data()
-                
-                # 调试：打印 parts 类型
-                part_types = [p["type"] for p in parts_data]
-                logger.info(f"Parts to save: {part_types}")
-                
-                await _save_message_with_parts(
-                    db_stream,
-                    current_user.id,
-                    topic.id,
-                    "assistant",
-                    parts_data,
-                )
-                logger.info(f"Message saved with {len(parts_data)} parts for {task_key}")
-
-            if metrics_payload is not None:
-                yield {
-                    "event": "metrics",
-                    "data": json.dumps(metrics_payload),
-                }
-
-            yield {
-                "event": "done",
-                "data": json.dumps({"status": final_status}),
-            }
-
-        except asyncio.CancelledError:
-            logger.info(f"Chat generation cancelled for {task_key}")
-            
-            # 关闭所有未完成操作
-            collector.flush_active_operations("[已取消]")
-            
-            # 保存已收集的内容（标记为已取消）
-            if collector.has_content():
-                # 添加取消标记到文本
-                if collector.text_chunks:
-                    collector.text_chunks.append(" [已取消]")
-
-                parts_data = collector.to_parts_data()
-                # 在最后一个 part 的 metadata 中添加 cancelled 标记
-                if parts_data:
-                    parts_data[-1]["metadata_"]["cancelled"] = True
-
-                await _save_message_with_parts(
-                    db_stream,
-                    current_user.id,
-                    topic.id,
-                    "assistant",
-                    parts_data,
-                )
-
-            yield {
-                "event": "done",
-                "data": json.dumps({"status": "cancelled"}),
-            }
-
-        except Exception as e:
-            logger.error(f"Error in chat stream for {task_key}: {str(e)}", exc_info=True)
-            
-            # 保存已收集的内容 + 错误信息
-            collector.add_error(str(e), context="fatal")
-
-            if collector.has_content():
-                parts_data = collector.to_parts_data()
-                await _save_message_with_parts(
-                    db_stream,
-                    current_user.id,
-                    topic.id,
-                    "assistant",
-                    parts_data,
-                )
-
-            yield {
-                "event": "error",
-                "data": json.dumps({"error": str(e)}),
-            }
-
-        finally:
-            _active_tasks.pop(task_key, None)
-            db_stream.close()
-            logger.info(f"Chat stream cleanup completed for {task_key}")
-
-    logger.info("Returning EventSourceResponse")
     return EventSourceResponse(generate_events())
+
+
+@router.get("/sessions/{session_id}/topics/{topic_id}/stream/status")
+async def stream_status(
+    session_id: UUID,
+    topic_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the status of an active or recently-completed stream session."""
+    # Validate session ownership
+    session = db.query(SessionModel).filter(
+        SessionModel.id == session_id,
+        SessionModel.user_id == current_user.id,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    task_key = f"{session_id}:{topic_id}"
+    ss = stream_session_manager.get(task_key)
+
+    if ss is None:
+        return StreamStatusResponse(status="none")
+
+    return StreamStatusResponse(
+        status=ss.status.value,
+        last_event_id=ss.last_event_id,
+        message_id=ss.message_id,
+        started_at=ss.started_at,
+        completed_at=ss.completed_at,
+    )
+
+
+@router.get("/sessions/{session_id}/topics/{topic_id}/stream/reconnect")
+async def stream_reconnect(
+    session_id: UUID,
+    topic_id: UUID,
+    last_event_id: int = Query(0, description="Last event ID received by the client"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Reconnect to an active or recently-completed stream session.
+
+    Replays buffered events with ``id > last_event_id``, then streams
+    live events until the session completes.
+
+    If the session has expired (TTL exceeded), returns a single
+    ``stream_expired`` event so the frontend can fall back to DB query.
+    """
+    # Validate session ownership
+    session = db.query(SessionModel).filter(
+        SessionModel.id == session_id,
+        SessionModel.user_id == current_user.id,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    task_key = f"{session_id}:{topic_id}"
+    ss = stream_session_manager.get(task_key)
+
+    if ss is None:
+        # Session expired or never existed — tell client to fall back
+        async def _expired():
+            yield {
+                "event": "stream_expired",
+                "data": json.dumps({"reason": "session_not_found"}),
+                "id": "0",
+            }
+        return EventSourceResponse(_expired())
+
+    async def _reconnect():
+        async for event in ss.subscribe(last_event_id=last_event_id):
+            yield event
+
+    return EventSourceResponse(_reconnect())
 
 
 @router.post("/sessions/{session_id}/chat/resume")
@@ -906,9 +1001,6 @@ async def chat_resume(
     Call this when the chat stream emitted an "interrupt" event with action_requests.
     Provide the user's decisions to continue execution.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     session, agent = await _validate_session_for_agent(session_id, db, current_user.id)
     topic = db.query(Topic).filter(
         Topic.id == request.topic_id,
@@ -1021,7 +1113,7 @@ async def chat_resume(
                 yield {"event": "metrics", "data": json.dumps(metrics_payload)}
             yield {"event": "done", "data": json.dumps({"status": final_status})}
         except Exception as e:
-            logger.error(f"Resume stream error for {task_key}: {e}", exc_info=True)
+            logger.error("Resume stream error for %s: %s", task_key, e, exc_info=True)
             yield {"event": "error", "data": json.dumps({"error": str(e)})}
         finally:
             db_stream.close()
@@ -1049,10 +1141,10 @@ async def stop_generation(
         raise HTTPException(status_code=404, detail="Session not found")
 
     task_key = f"{session_id}:{topic_id}"
-    task = _active_tasks.get(task_key)
+    ss = stream_session_manager.get(task_key)
 
-    if task and not task.done():
-        task.cancel()
+    if ss and ss.is_alive:
+        ss.cancel()
         return StopResponse(success=True, message="Generation stopped")
 
     return StopResponse(success=False, message="No active generation found")
@@ -1079,7 +1171,7 @@ async def chat_websocket(
     - {"type": "stopped"}
     """
     from app.db.session import SessionLocal
-    
+
     await websocket.accept()
     db = SessionLocal()
 
@@ -1137,7 +1229,7 @@ async def chat_websocket(
                 )
 
                 thread_id = f"topic_{topic.id}"
-                
+
                 # 使用 StreamingCollector
                 collector = StreamingCollector()
                 metrics_context = await agent_service.prepare_metrics_context(
@@ -1150,8 +1242,6 @@ async def chat_websocket(
                 async def stream_to_ws():
                     nonlocal collector
                     try:
-                        import logging
-                        logger = logging.getLogger(__name__)
                         request_started_at = time.perf_counter()
                         first_token_at: Optional[float] = None
                         reported_usage = None
@@ -1165,13 +1255,14 @@ async def chat_websocket(
                         ):
                             event_type = event.get("event")
                             event_data = event.get("data", {})
-                            event_loop_ms = int(time.perf_counter() * 1000)
                             if event_type in {"operation_start", "operation_end"}:
                                 logger.debug(
                                     "OP_TRACE source=agent_chat_ws phase=ingress "
-                                    f"event={event_type} op_id={event_data.get('op_id')} "
-                                    f"op_type={event_data.get('op_type')} name={event_data.get('name')} "
-                                    f"event_loop_ms={event_loop_ms}"
+                                    "event=%s op_id=%s op_type=%s name=%s",
+                                    event_type,
+                                    event_data.get("op_id"),
+                                    event_data.get("op_type"),
+                                    event_data.get("name"),
                                 )
 
                             if event_type == "metrics":
@@ -1212,12 +1303,6 @@ async def chat_websocket(
                                     description=event_data.get("description", ""),
                                     started_at=event_data.get("started_at"),
                                 )
-                                logger.debug(
-                                    "OP_TRACE source=agent_chat_ws phase=egress "
-                                    f"event=operation_start op_id={event_data.get('op_id')} "
-                                    f"op_type={event_data.get('op_type')} name={event_data.get('name')} "
-                                    f"event_loop_ms={int(time.perf_counter() * 1000)}"
-                                )
                                 await websocket.send_json({
                                     "type": "operation_start",
                                     **event_data,
@@ -1232,12 +1317,6 @@ async def chat_websocket(
                                     success=event_data.get("success", True),
                                     ended_at=event_data.get("ended_at"),
                                     status=event_data.get("status"),
-                                )
-                                logger.debug(
-                                    "OP_TRACE source=agent_chat_ws phase=egress "
-                                    f"event=operation_end op_id={event_data.get('op_id')} "
-                                    f"op_type={event_data.get('op_type')} name={event_data.get('name')} "
-                                    f"event_loop_ms={int(time.perf_counter() * 1000)}"
                                 )
                                 await websocket.send_json({
                                     "type": "operation_end",
@@ -1290,7 +1369,7 @@ async def chat_websocket(
                     except asyncio.CancelledError:
                         # 关闭所有未完成操作
                         collector.flush_active_operations("[已取消]")
-                        
+
                         if collector.has_content():
                             if collector.text_chunks:
                                 collector.text_chunks.append(" [已取消]")
