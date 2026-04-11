@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { create, type StoreApi } from 'zustand';
 import {
   sessionApi,
   sandboxApi,
@@ -10,8 +10,155 @@ import {
   type SandboxMount,
 } from '@/lib/api';
 import { computeVirtualTopics, type VirtualTopic } from '@/lib/virtualTopic';
-import { chatWithAgentStream, chatResumeStream, stopGeneration as apiStopGeneration } from '@/lib/agentApi';
+import { chatWithAgentStream, chatResumeStream, stopGeneration as apiStopGeneration, getStreamStatus, reconnectStream } from '@/lib/agentApi';
 import { processStreamEvent, createInitialState } from '@/lib/streamEventProcessor';
+import type { ChatEvent } from '@/types/agent';
+
+const STREAM_SNAPSHOT_KEY = 'chat.activeStreamSnapshot.v1';
+type StoreSet = StoreApi<ChatState>['setState'];
+
+interface ActiveStreamSnapshot {
+  sessionId: string;
+  topicId: string;
+  assistantTempMessageId: string;
+  lastEventId: number;
+  startedAt: string;
+  status: 'streaming' | 'completed' | 'error' | 'cancelled' | 'interrupt';
+}
+
+function readStreamSnapshot(): ActiveStreamSnapshot | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(STREAM_SNAPSHOT_KEY);
+    return raw ? (JSON.parse(raw) as ActiveStreamSnapshot) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStreamSnapshot(snapshot: ActiveStreamSnapshot): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(STREAM_SNAPSHOT_KEY, JSON.stringify(snapshot));
+}
+
+function clearStreamSnapshot(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(STREAM_SNAPSHOT_KEY);
+}
+
+async function consumeStreamEvents(params: {
+  eventSource: AsyncGenerator<ChatEvent & { _eventId?: number }>;
+  initialMessage: Message;
+  initialState: ReturnType<typeof createInitialState>;
+  aiMessageId: string;
+  topicKey: string;
+  topicId: string;
+  sessionId: string;
+  set: StoreSet;
+  get: () => ChatState;
+  onSnapshotEventId?: (eventId: number) => void;
+}): Promise<{ receivedDone: boolean }> {
+  const {
+    eventSource,
+    initialMessage,
+    initialState,
+    aiMessageId,
+    topicKey,
+    topicId,
+    sessionId,
+    set,
+    get,
+    onSnapshotEventId,
+  } = params;
+
+  let currentMsg = initialMessage;
+  let proc = initialState;
+  let receivedDone = false;
+  let rafPending = false;
+
+  const updateMsg = (msg: Message) => {
+    set((state) => {
+      const msgs = state.messages[topicKey] || [];
+      const idx = msgs.findIndex((m) => m.id === aiMessageId);
+      if (idx === -1) {
+        return { messages: { ...state.messages, [topicKey]: [...msgs, msg] } };
+      }
+      const updated = [...msgs];
+      updated[idx] = msg;
+      return { messages: { ...state.messages, [topicKey]: updated } };
+    });
+  };
+
+  for await (const event of eventSource) {
+    if (event._eventId !== undefined) {
+      onSnapshotEventId?.(event._eventId);
+    }
+
+    if (event.event === 'stream_expired') {
+      clearStreamSnapshot();
+      receivedDone = true;
+      set({ isStreaming: false, streamingMessageId: null, abortController: null, isRecoveringStream: false });
+      await get().loadMessages(sessionId, topicId);
+      break;
+    }
+
+    const result = processStreamEvent(currentMsg, event, proc);
+    currentMsg = result.message;
+    proc = result.state;
+
+    if (event.event === 'message' || event.event === 'thinking') {
+      if (!rafPending) {
+        rafPending = true;
+        requestAnimationFrame(() => {
+          updateMsg(currentMsg);
+          rafPending = false;
+        });
+      }
+    } else {
+      updateMsg(currentMsg);
+    }
+
+    if (result.effects.isThinking !== undefined) {
+      set({ isThinking: result.effects.isThinking });
+    }
+    if (result.effects.interrupt) {
+      set({
+        pendingInterrupt: result.effects.interrupt,
+        isStreaming: false,
+        streamingMessageId: null,
+        abortController: null,
+        isRecoveringStream: false,
+      });
+      writeStreamSnapshot({
+        sessionId,
+        topicId,
+        assistantTempMessageId: aiMessageId,
+        lastEventId: readStreamSnapshot()?.lastEventId ?? 0,
+        startedAt: readStreamSnapshot()?.startedAt ?? new Date().toISOString(),
+        status: 'interrupt',
+      });
+      receivedDone = true;
+    }
+    if (result.effects.error) {
+      set({ streamError: result.effects.error });
+      clearStreamSnapshot();
+    }
+    if (result.effects.done) {
+      receivedDone = true;
+      clearStreamSnapshot();
+      set({
+        isStreaming: false,
+        streamingMessageId: null,
+        abortController: null,
+        pendingInterrupt: null,
+        isRecoveringStream: false,
+      });
+      await get().loadMessages(sessionId, topicId);
+    }
+  }
+
+  return { receivedDone };
+}
 
 interface ChatState {
   // ===== 会话列表 =====
@@ -52,6 +199,7 @@ interface ChatState {
   isThinking: boolean;
   abortController: AbortController | null;
   streamError: string | null;
+  isRecoveringStream: boolean;
 
   /** 人机协作：待批准的工具调用 */
   pendingInterrupt: {
@@ -93,6 +241,7 @@ interface ChatState {
 
   // AI 对话
   sendAIMessage: (content: string) => Promise<void>;
+  recoverActiveStream: () => Promise<void>;
   stopGeneration: () => void;
   regenerateMessage: (messageId: string) => Promise<void>;
   clearStreamState: () => void;
@@ -160,6 +309,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isThinking: false,
   abortController: null,
   streamError: null,
+  isRecoveringStream: false,
   pendingInterrupt: null,
 
   // Sandbox 初始状态
@@ -242,6 +392,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const latestTopic = sessionTopics[sessionTopics.length - 1];
         set({ currentTopicId: latestTopic.id });
         await loadMessages(sessionId, latestTopic.id);
+        await get().recoverActiveStream();
       }
     } else {
       await loadMessages(sessionId);
@@ -346,6 +497,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } else {
       // 真实话题：从 API 加载
       await loadMessages(currentSessionId, topicId);
+      await get().recoverActiveStream();
     }
   },
 
@@ -651,7 +803,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ===== AI 对话 Actions =====
   sendAIMessage: async (content: string) => {
-    const { currentSessionId, currentTopicId, sessions } = get();
+    const { currentSessionId, currentTopicId, sessions, isRecoveringStream } = get();
 
     if (!currentSessionId) {
       set({ streamError: 'No session selected' });
@@ -662,6 +814,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!session || session.type !== 'ai') {
       set({ streamError: 'Not an AI session' });
       return;
+    }
+
+    if (isRecoveringStream) {
+      const recoveringController = get().abortController;
+      recoveringController?.abort();
+      clearStreamSnapshot();
+      set({ isRecoveringStream: false });
     }
 
     const controller = new AbortController();
@@ -710,142 +869,236 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isThinking: false,
       abortController: controller,
       streamError: null,
+      isRecoveringStream: false,
     }));
 
-    // Helper to update the AI message in store
-    const updateMsg = (msg: Message) => {
-      set((state) => {
-        const msgs = state.messages[topicKey] || [];
-        const idx = msgs.findIndex((m) => m.id === aiMessageId);
-        if (idx === -1) {
-          console.warn('[updateMsg] Message not found in store', { aiMessageId, topicKey, msgCount: msgs.length, msgIds: msgs.map(m => m.id) });
-          return state;
+    writeStreamSnapshot({
+      sessionId: currentSessionId,
+      topicId: topicId as string,
+      assistantTempMessageId: aiMessageId,
+      lastEventId: 0,
+      startedAt: new Date().toISOString(),
+      status: 'streaming',
+    });
+
+    let lastEventId = 0;
+    let receivedDone = false;
+    let wasAborted = false;
+
+    // Reconnection with exponential backoff
+    const attemptReconnect = async (): Promise<boolean> => {
+      if (!topicId) return false;
+
+      const MAX_RETRIES = 3;
+      const BASE_DELAY_MS = 1000;
+      const MAX_DELAY_MS = 30000;
+
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        if (controller.signal.aborted) return false;
+
+        const delay = Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_DELAY_MS);
+        console.info(`[reconnect] Attempt ${attempt + 1}/${MAX_RETRIES} in ${delay}ms (lastEventId=${lastEventId})`);
+        await new Promise((r) => setTimeout(r, delay));
+
+        if (controller.signal.aborted) return false;
+
+        try {
+          // Check stream status first
+          const status = await getStreamStatus(currentSessionId, topicId);
+          console.info('[reconnect] Stream status:', status.status);
+
+          if (status.status === 'none') {
+            // Session expired — fall back to DB
+            if (topicId) await get().loadMessages(currentSessionId, topicId);
+            clearStreamSnapshot();
+            return true; // Handled
+          }
+
+          if (status.status === 'streaming' || status.status === 'completed') {
+            // Reconnect and replay missed events
+            const stream = reconnectStream(
+              currentSessionId,
+              topicId,
+              lastEventId,
+              { signal: controller.signal },
+            );
+            const consumed = await consumeStreamEvents({
+              eventSource: stream,
+              initialMessage: aiMessage,
+              initialState: createInitialState(),
+              aiMessageId,
+              topicKey,
+              topicId,
+              sessionId: currentSessionId,
+              set,
+              get,
+              onSnapshotEventId: (eventId) => {
+                lastEventId = eventId;
+                const snapshot = readStreamSnapshot();
+                if (snapshot) {
+                  writeStreamSnapshot({ ...snapshot, lastEventId: eventId, status: 'streaming' });
+                }
+              },
+            });
+            receivedDone = consumed.receivedDone;
+            return true; // Successfully reconnected
+          }
+
+          // error/cancelled — just load from DB
+          if (topicId) await get().loadMessages(currentSessionId, topicId);
+          return true;
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') return false;
+          console.warn(`[reconnect] Attempt ${attempt + 1} failed:`, err);
         }
-        const updated = [...msgs];
-        updated[idx] = msg;
-        return { messages: { ...state.messages, [topicKey]: updated } };
-      });
+      }
+
+      // All retries exhausted — fall back to DB
+      console.warn('[reconnect] All retries exhausted, falling back to DB');
+      if (topicId) {
+        try { await get().loadMessages(currentSessionId, topicId); } catch { /* ignore */ }
+      }
+      return true;
     };
 
-    let receivedDone = false;
-
     try {
-      let proc = createInitialState();
-      let currentMsg = aiMessage;
-      let rafPending = false;
-
-      for await (const event of chatWithAgentStream(
-        currentSessionId,
-        content,
-        { topicId: topicId || undefined, signal: controller.signal }
-      )) {
-        console.debug('[stream] event:', event.event, 'content' in event.data ? (event.data as any).content?.slice?.(0, 50) : '');
-        const result = processStreamEvent(currentMsg, event, proc);
-        currentMsg = result.message;
-        proc = result.state;
-        console.debug('[stream] parts after process:', currentMsg.parts.length, currentMsg.parts.map(p => `${p.type}:${p.content?.slice?.(0, 30) ?? ''}`));
-
-        // Text/thinking events: batch with RAF
-        if (event.event === 'message' || event.event === 'thinking') {
-          if (!rafPending) {
-            rafPending = true;
-            requestAnimationFrame(() => {
-              updateMsg(currentMsg);
-              rafPending = false;
-            });
+      const consumed = await consumeStreamEvents({
+        eventSource: chatWithAgentStream(currentSessionId, content, {
+          topicId: topicId || undefined,
+          signal: controller.signal,
+        }),
+        initialMessage: aiMessage,
+        initialState: createInitialState(),
+        aiMessageId,
+        topicKey,
+        topicId,
+        sessionId: currentSessionId,
+        set,
+        get,
+        onSnapshotEventId: (eventId) => {
+          lastEventId = eventId;
+          const snapshot = readStreamSnapshot();
+          if (snapshot) {
+            writeStreamSnapshot({ ...snapshot, lastEventId: eventId, status: 'streaming' });
           }
-        } else {
-          // Non-text events: immediate update
-          updateMsg(currentMsg);
-        }
-
-        // Process side effects
-        if (result.effects.isThinking !== undefined) {
-          set({ isThinking: result.effects.isThinking });
-        }
-        if (result.effects.interrupt) {
-          const hasRenderableParts = currentMsg.parts.some((part) => {
-            if (part.type === 'text') return !!part.content?.trim();
-            return true;
-          });
-
-          // If interrupt arrives before any visible part, remove temp placeholder.
-          if (!hasRenderableParts) {
-            set((state) => {
-              const msgs = state.messages[topicKey] || [];
-              return {
-                messages: {
-                  ...state.messages,
-                  [topicKey]: msgs.filter((m) => m.id !== aiMessageId),
-                },
-              };
-            });
-          }
-
-          set({
-            pendingInterrupt: result.effects.interrupt,
-            isStreaming: false,
-            streamingMessageId: null,
-            abortController: null,
-          });
-          receivedDone = true;
-        }
-        if (result.effects.error) {
-          set({ streamError: result.effects.error });
-        }
-        if (result.effects.done) {
-          receivedDone = true;
-          if (result.effects.doneStatus === 'interrupt') {
-            set({
-              isStreaming: false,
-              streamingMessageId: null,
-              abortController: null,
-            });
-            break;
-          }
-          set({
-            isStreaming: false,
-            streamingMessageId: null,
-            abortController: null,
-            pendingInterrupt: null,
-          });
-          if (topicId) {
-            await get().loadMessages(currentSessionId, topicId);
-          }
-        }
-      }
+        },
+      });
+      receivedDone = consumed.receivedDone;
     } catch (error) {
-      receivedDone = true;
       if ((error as Error).name === 'AbortError') {
-        set({
-          isStreaming: false,
-          abortController: null,
-          streamingMessageId: null,
-        });
-      } else {
-        set({
-          isStreaming: false,
-          streamError: (error as Error).message,
-          abortController: null,
-          streamingMessageId: null,
-        });
+        wasAborted = true;
+        receivedDone = true;
+        set({ isStreaming: false, abortController: null, streamingMessageId: null });
+      } else if (!receivedDone) {
+        // Connection error — attempt reconnect
+        console.warn('[sendAIMessage] Stream disconnected, attempting reconnect...', (error as Error).message);
+        const handled = await attemptReconnect();
+        if (handled) {
+          receivedDone = true;
+        } else {
+          set({
+            isStreaming: false,
+            streamError: (error as Error).message,
+            abortController: null,
+            streamingMessageId: null,
+          });
+          receivedDone = true;
+        }
       }
     } finally {
-      // Safety net: if stream ended without done/error event, clean up state
-      if (!receivedDone) {
-        console.warn('[sendAIMessage] Stream ended without done event, cleaning up');
-        set({
-          isStreaming: false,
-          streamingMessageId: null,
-          abortController: null,
-        });
-        // Load final messages from DB
-        if (topicId) {
-          try {
-            await get().loadMessages(currentSessionId, topicId);
-          } catch { /* ignore */ }
+      if (!receivedDone && !wasAborted) {
+        // Stream ended without done event and wasn't aborted — try reconnect
+        console.warn('[sendAIMessage] Stream ended without done event, attempting reconnect');
+        const handled = await attemptReconnect();
+        if (!handled) {
+          set({ isStreaming: false, streamingMessageId: null, abortController: null });
+          if (topicId) {
+            try { await get().loadMessages(currentSessionId, topicId); } catch { /* ignore */ }
+          }
         }
       }
+    }
+  },
+
+  recoverActiveStream: async () => {
+    const snapshot = readStreamSnapshot();
+    const { currentSessionId, currentTopicId, isStreaming, isRecoveringStream } = get();
+    if (!snapshot || !currentSessionId || !currentTopicId) return;
+    if (isStreaming || isRecoveringStream) return;
+    if (snapshot.sessionId !== currentSessionId || snapshot.topicId !== currentTopicId) return;
+
+    const topicKey = currentTopicId;
+    const controller = new AbortController();
+    const aiMessageId = snapshot.assistantTempMessageId || `streaming:${currentSessionId}:${currentTopicId}`;
+
+    const existing = (get().messages[topicKey] || []).find((m) => m.id === aiMessageId);
+    const baseMessage: Message = existing || {
+      id: aiMessageId,
+      session_id: currentSessionId,
+      topic_id: currentTopicId,
+      role: 'assistant',
+      created_at: snapshot.startedAt,
+      updated_at: new Date().toISOString(),
+      is_deleted: false,
+      parts: [],
+    };
+
+    if (!existing) {
+      set((state) => ({
+        messages: {
+          ...state.messages,
+          [topicKey]: [...(state.messages[topicKey] || []), baseMessage],
+        },
+      }));
+    }
+
+    set({
+      isStreaming: true,
+      isRecoveringStream: true,
+      streamingMessageId: aiMessageId,
+      abortController: controller,
+      streamError: null,
+    });
+
+    try {
+      const status = await getStreamStatus(currentSessionId, currentTopicId);
+      if (status.status === 'none' || status.status === 'error' || status.status === 'cancelled') {
+        clearStreamSnapshot();
+        set({ isStreaming: false, isRecoveringStream: false, streamingMessageId: null, abortController: null });
+        await get().loadMessages(currentSessionId, currentTopicId);
+        return;
+      }
+
+      const stream = reconnectStream(
+        currentSessionId,
+        currentTopicId,
+        // If we cannot find the previous temp message in memory (e.g. after refresh),
+        // replay from 0 to rebuild full assistant content.
+        existing ? (snapshot.lastEventId || 0) : 0,
+        { signal: controller.signal },
+      );
+      await consumeStreamEvents({
+        eventSource: stream,
+        initialMessage: baseMessage,
+        initialState: createInitialState(),
+        aiMessageId,
+        topicKey,
+        topicId: currentTopicId,
+        sessionId: currentSessionId,
+        set,
+        get,
+        onSnapshotEventId: (eventId) => {
+          const prev = readStreamSnapshot();
+          if (prev) writeStreamSnapshot({ ...prev, lastEventId: eventId, status: 'streaming' });
+        },
+      });
+    } catch (error) {
+      if ((error as Error).name !== 'AbortError') {
+        set({ streamError: (error as Error).message });
+      }
+      set({ isStreaming: false, isRecoveringStream: false, streamingMessageId: null, abortController: null });
+      await get().loadMessages(currentSessionId, currentTopicId);
+      clearStreamSnapshot();
     }
   },
 
@@ -862,7 +1115,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     }
 
-    set({ isStreaming: false, abortController: null });
+    clearStreamSnapshot();
+    set({ isStreaming: false, abortController: null, isRecoveringStream: false });
   },
 
   regenerateMessage: async (messageId: string) => {
@@ -911,6 +1165,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   clearStreamState: () => {
+    clearStreamSnapshot();
     set({
       isStreaming: false,
       streamingMessageId: null,
@@ -918,6 +1173,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       abortController: null,
       streamError: null,
       pendingInterrupt: null,
+      isRecoveringStream: false,
     });
   },
 

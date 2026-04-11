@@ -11,7 +11,8 @@ export type ChatEventType =
   | 'metrics'
   | 'done'
   | 'error'
-  | 'interrupt';
+  | 'interrupt'
+  | 'stream_expired';
 
 export interface ChatPerformanceMetrics {
   first_token_latency_ms: number | null;
@@ -86,6 +87,14 @@ export interface ChatEventDone {
   event: 'done';
   data: {
     status: 'complete' | 'cancelled' | 'interrupt';
+    message_id?: string;
+  };
+}
+
+export interface ChatEventStreamExpired {
+  event: 'stream_expired';
+  data: {
+    reason: string;
   };
 }
 
@@ -105,7 +114,17 @@ export type ChatEvent =
   | ChatEventMetrics
   | ChatEventDone
   | ChatEventError
-  | ChatEventInterrupt;
+  | ChatEventInterrupt
+  | ChatEventStreamExpired;
+
+// Stream reconnection
+export interface StreamStatusResponse {
+  status: 'streaming' | 'completed' | 'error' | 'cancelled' | 'none';
+  last_event_id: number;
+  message_id?: string;
+  started_at?: string;
+  completed_at?: string;
+}
 
 // Request/Response types
 export interface ChatRequest {

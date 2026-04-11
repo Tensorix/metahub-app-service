@@ -2,7 +2,8 @@
  * Agent Chat API client
  *
  * Provides:
- * - SSE streaming chat
+ * - SSE streaming chat (with event id for reconnection)
+ * - Stream status / reconnect endpoints
  * - WebSocket chat (optional)
  * - Non-streaming chat
  */
@@ -12,6 +13,7 @@ import type {
   ChatEvent,
   ChatRequest,
   ChatResponse,
+  StreamStatusResponse,
   WSOutgoingMessage,
   WSIncomingMessage,
 } from '@/types/agent';
@@ -22,31 +24,85 @@ function getToken(): string | null {
   return localStorage.getItem('access_token');
 }
 
+// ---------------------------------------------------------------------------
+// Shared SSE parser — extracts event, data, and id fields
+// ---------------------------------------------------------------------------
+
 /**
- * Chat with agent using SSE streaming
+ * Parse SSE-formatted text from a ReadableStream into ChatEvent objects.
+ * Each yielded event includes an optional numeric `_eventId` field from the
+ * server-assigned `id:` line, which callers can use for reconnection.
+ */
+async function* parseSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): AsyncGenerator<ChatEvent & { _eventId?: number }> {
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Normalize line endings to simplify mixed \r\n and \n streams
+      buffer = buffer.replace(/\r\n/g, '\n');
+
+      while (buffer.includes('\n\n')) {
+        const separatorIndex = buffer.indexOf('\n\n');
+        const eventText = buffer.substring(0, separatorIndex);
+        buffer = buffer.substring(separatorIndex + 2);
+
+        const lines = eventText.split('\n');
+        let currentEvent = '';
+        const dataLines: string[] = [];
+        let currentId = '';
+
+        for (const rawLine of lines) {
+          const line = rawLine.trimEnd();
+          if (!line || line.startsWith(':')) continue; // comment/heartbeat
+          if (line.startsWith('event:')) {
+            currentEvent = line.slice(6).trim();
+            continue;
+          }
+          if (line.startsWith('data:')) {
+            dataLines.push(line.slice(5).trimStart());
+            continue;
+          }
+          if (line.startsWith('id:')) {
+            currentId = line.slice(3).trim();
+          }
+        }
+
+        const currentData = dataLines.join('\n');
+        if (currentEvent && currentData) {
+          try {
+            const data = JSON.parse(currentData);
+            const chatEvent = { event: currentEvent, data } as ChatEvent;
+            const eventId = currentId ? parseInt(currentId, 10) : undefined;
+            yield { ...chatEvent, _eventId: Number.isNaN(eventId) ? undefined : eventId };
+          } catch {
+            console.warn('Failed to parse SSE data:', currentData);
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SSE streaming chat
+// ---------------------------------------------------------------------------
+
+/**
+ * Chat with agent using SSE streaming.
  *
- * @param sessionId - Session ID
- * @param message - User message
- * @param options - Optional parameters
- * @yields ChatEvent objects
- *
- * @example
- * ```typescript
- * const controller = new AbortController();
- *
- * for await (const event of chatWithAgentStream(sessionId, "Hello", {
- *   signal: controller.signal,
- * })) {
- *   if (event.event === 'message') {
- *     console.log(event.data.content);
- *   } else if (event.event === 'done') {
- *     console.log('Done!');
- *   }
- * }
- *
- * // To stop generation:
- * controller.abort();
- * ```
+ * Each yielded event has an optional `_eventId` field (server-assigned,
+ * incrementing integer). Track this value and pass it to `reconnectStream()`
+ * if the connection drops.
  */
 export async function* chatWithAgentStream(
   sessionId: string,
@@ -55,7 +111,7 @@ export async function* chatWithAgentStream(
     topicId?: string;
     signal?: AbortSignal;
   }
-): AsyncGenerator<ChatEvent> {
+): AsyncGenerator<ChatEvent & { _eventId?: number }> {
   const token = getToken();
   if (!token) {
     throw new Error('Not authenticated');
@@ -92,62 +148,82 @@ export async function* chatWithAgentStream(
     throw new Error('No response body');
   }
 
-  const decoder = new TextDecoder();
-  let buffer = '';
+  yield* parseSSEStream(reader);
+}
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
+// ---------------------------------------------------------------------------
+// Stream status & reconnect
+// ---------------------------------------------------------------------------
 
-      if (done) {
-        break;
-      }
+/**
+ * Get the status of an active or recently-completed stream session.
+ */
+export async function getStreamStatus(
+  sessionId: string,
+  topicId: string,
+): Promise<StreamStatusResponse> {
+  const token = getToken();
+  if (!token) throw new Error('Not authenticated');
 
-      buffer += decoder.decode(value, { stream: true });
+  const response = await fetch(
+    `${API_BASE}/api/v1/sessions/${sessionId}/topics/${topicId}/stream/status`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
 
-      // Parse SSE events - handle both \r\n\r\n and \n\n separators
-      const separator = buffer.includes('\r\n') ? '\r\n\r\n' : '\n\n';
-      const lineSeparator = buffer.includes('\r\n') ? '\r\n' : '\n';
-      
-      while (buffer.includes(separator)) {
-        const separatorIndex = buffer.indexOf(separator);
-        const event_text = buffer.substring(0, separatorIndex);
-        buffer = buffer.substring(separatorIndex + separator.length);
-
-        const lines = event_text.split(lineSeparator);
-        let currentEvent = '';
-        let currentData = '';
-
-        for (const line of lines) {
-          if (line.startsWith('event:')) {
-            currentEvent = line.slice(6).trim();
-          } else if (line.startsWith('data:')) {
-            currentData = line.slice(5).trim();
-          }
-        }
-
-        if (currentEvent && currentData) {
-          try {
-            const data = JSON.parse(currentData);
-            yield { event: currentEvent, data } as ChatEvent;
-          } catch {
-            console.warn('Failed to parse SSE data:', currentData);
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${response.status}`);
   }
+
+  return response.json();
 }
 
 /**
- * Chat with agent (non-streaming)
+ * Reconnect to an active or recently-completed stream session.
  *
- * @param sessionId - Session ID
- * @param message - User message
- * @param topicId - Optional topic ID
- * @returns ChatResponse
+ * Replays buffered events with id > lastEventId, then continues with
+ * live events. If the session has expired, yields a single
+ * `stream_expired` event.
+ */
+export async function* reconnectStream(
+  sessionId: string,
+  topicId: string,
+  lastEventId: number,
+  options?: { signal?: AbortSignal },
+): AsyncGenerator<ChatEvent & { _eventId?: number }> {
+  const token = getToken();
+  if (!token) throw new Error('Not authenticated');
+
+  const response = await fetch(
+    `${API_BASE}/api/v1/sessions/${sessionId}/topics/${topicId}/stream/reconnect?last_event_id=${lastEventId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'text/event-stream',
+      },
+      signal: options?.signal,
+    },
+  );
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${response.status}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('No response body');
+
+  yield* parseSSEStream(reader);
+}
+
+// ---------------------------------------------------------------------------
+// Non-streaming chat
+// ---------------------------------------------------------------------------
+
+/**
+ * Chat with agent (non-streaming)
  */
 export async function chatWithAgent(
   sessionId: string,
@@ -183,19 +259,19 @@ export async function chatWithAgent(
   return response.json();
 }
 
+// ---------------------------------------------------------------------------
+// Resume (HITL)
+// ---------------------------------------------------------------------------
+
 /**
  * Resume chat after human-in-the-loop approval
- *
- * @param sessionId - Session ID
- * @param topicId - Topic ID
- * @param decisions - User decisions per action_request: [{type: 'approve'|'edit'|'reject'}, edited_action?: {name, args}}]
  */
 export async function* chatResumeStream(
   sessionId: string,
   topicId: string,
   decisions: Array<{ type: string; edited_action?: { name: string; args: Record<string, unknown> } }>,
   options?: { signal?: AbortSignal }
-): AsyncGenerator<import('@/types/agent').ChatEvent> {
+): AsyncGenerator<ChatEvent & { _eventId?: number }> {
   const token = getToken();
   if (!token) throw new Error('Not authenticated');
 
@@ -221,46 +297,15 @@ export async function* chatResumeStream(
   const reader = response.body?.getReader();
   if (!reader) throw new Error('No response body');
 
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const separator = buffer.includes('\r\n') ? '\r\n\r\n' : '\n\n';
-      const lineSep = buffer.includes('\r\n') ? '\r\n' : '\n';
-
-      while (buffer.includes(separator)) {
-        const idx = buffer.indexOf(separator);
-        const block = buffer.substring(0, idx);
-        buffer = buffer.substring(idx + separator.length);
-        let ev = '';
-        let data = '';
-        for (const line of block.split(lineSep)) {
-          if (line.startsWith('event:')) ev = line.slice(6).trim();
-          else if (line.startsWith('data:')) data = line.slice(5).trim();
-        }
-        if (ev && data) {
-          try {
-            yield { event: ev, data: JSON.parse(data) } as import('@/types/agent').ChatEvent;
-          } catch {
-            console.warn('Failed to parse resume SSE:', data);
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
+  yield* parseSSEStream(reader);
 }
+
+// ---------------------------------------------------------------------------
+// Stop generation
+// ---------------------------------------------------------------------------
 
 /**
  * Stop ongoing generation
- *
- * @param sessionId - Session ID
- * @param topicId - Topic ID
  */
 export async function stopGeneration(
   sessionId: string,
@@ -286,28 +331,12 @@ export async function stopGeneration(
   return response.json();
 }
 
+// ---------------------------------------------------------------------------
+// WebSocket client
+// ---------------------------------------------------------------------------
+
 /**
  * WebSocket chat client class
- *
- * @example
- * ```typescript
- * const client = new AgentWSClient(sessionId);
- *
- * client.onMessage = (event) => {
- *   if (event.type === 'chunk') {
- *     console.log(event.content);
- *   }
- * };
- *
- * await client.connect();
- * client.send("Hello");
- *
- * // To stop:
- * client.stop();
- *
- * // To disconnect:
- * client.disconnect();
- * ```
  */
 export class AgentWSClient {
   private ws: WebSocket | null = null;
@@ -322,9 +351,6 @@ export class AgentWSClient {
     this.sessionId = sessionId;
   }
 
-  /**
-   * Connect to WebSocket
-   */
   async connect(): Promise<void> {
     const token = getToken();
     if (!token) {
@@ -364,9 +390,6 @@ export class AgentWSClient {
     });
   }
 
-  /**
-   * Send a message
-   */
   send(content: string, topicId?: string): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected');
@@ -381,9 +404,6 @@ export class AgentWSClient {
     this.ws.send(JSON.stringify(message));
   }
 
-  /**
-   * Stop current generation
-   */
   stop(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return;
@@ -393,9 +413,6 @@ export class AgentWSClient {
     this.ws.send(JSON.stringify(message));
   }
 
-  /**
-   * Disconnect WebSocket
-   */
   disconnect(): void {
     if (this.ws) {
       this.ws.close();
@@ -403,21 +420,17 @@ export class AgentWSClient {
     }
   }
 
-  /**
-   * Check if connected
-   */
   get isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 }
 
+// ---------------------------------------------------------------------------
+// Convenience helper
+// ---------------------------------------------------------------------------
+
 /**
  * Helper to collect full response from stream
- *
- * @param sessionId - Session ID
- * @param message - User message
- * @param options - Optional parameters
- * @returns Full response text
  */
 export async function chatWithAgentFull(
   sessionId: string,
