@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Loader2 } from 'lucide-react';
@@ -7,6 +7,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { useAuthStore } from '../store/auth';
+import { authApi } from '../lib/api';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { fadeUpIndexed as fadeUp } from '@/lib/motion';
 
@@ -17,6 +18,14 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [registrationDisabled, setRegistrationDisabled] = useState(false);
+
+  useEffect(() => {
+    authApi
+      .getRegistrationStatus()
+      .then((s) => setRegistrationDisabled(s.registration_disabled))
+      .catch(() => {});
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,19 +128,21 @@ export function Login() {
           </div>
         </motion.form>
 
-        <motion.p
-          custom={2}
-          variants={fadeUp}
-          className="mt-6 text-center text-sm text-muted-foreground"
-        >
-          还没有账户？{' '}
-          <Link
-            to="/register"
-            className="font-medium text-foreground underline-offset-4 hover:underline"
+        {!registrationDisabled && (
+          <motion.p
+            custom={2}
+            variants={fadeUp}
+            className="mt-6 text-center text-sm text-muted-foreground"
           >
-            立即注册
-          </Link>
-        </motion.p>
+            还没有账户？{' '}
+            <Link
+              to="/register"
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              立即注册
+            </Link>
+          </motion.p>
+        )}
       </motion.div>
     </div>
   );

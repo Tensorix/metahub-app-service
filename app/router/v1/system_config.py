@@ -5,6 +5,7 @@ import copy
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.db.model.user import User
 from app.db.session import get_db
 from app.deps import get_current_user
 from app.schema.system_config import (
@@ -22,9 +23,12 @@ router = APIRouter(prefix="/system-config", tags=["system-config"])
 def get_system_config(
     key: str,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Get a system config by key. Masks api_key for providers."""
+    if key == svc.AUTH_CONFIG_KEY and not current_user.is_superuser:
+        raise HTTPException(403, "权限不足")
+
     row = svc.get_config(db, key)
     if not row:
         raise HTTPException(404, f"Config key '{key}' not found")
@@ -42,11 +46,16 @@ def update_system_config(
     key: str,
     body: SystemConfigUpdate,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Upsert a system config. Triggers side-effects for known keys."""
+    if key == svc.AUTH_CONFIG_KEY and not current_user.is_superuser:
+        raise HTTPException(403, "权限不足")
+
     value = body.value
-    if key == "providers":
+    if key == svc.AUTH_CONFIG_KEY:
+        value = svc.normalize_auth_config(body.value)
+    elif key == "providers":
         existing = svc.get_config(db, key)
         existing_value = existing.value if existing else {}
         value = svc.normalize_provider_registry(value, existing_value)

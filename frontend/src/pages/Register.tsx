@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Loader2 } from 'lucide-react';
@@ -7,6 +7,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { useAuthStore } from '../store/auth';
+import { authApi } from '../lib/api';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { isPasswordStrengthCheckEnabled } from '@/config/env';
 import { fadeUpIndexed as fadeUp } from '@/lib/motion';
@@ -25,6 +26,17 @@ export function Register() {
   const [loading, setLoading] = useState(false);
 
   const enablePasswordStrengthCheck = isPasswordStrengthCheckEnabled();
+
+  useEffect(() => {
+    authApi
+      .getRegistrationStatus()
+      .then((s) => {
+        if (s.registration_disabled) {
+          navigate('/login', { replace: true });
+        }
+      })
+      .catch(() => {});
+  }, [navigate]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -82,7 +94,9 @@ export function Register() {
       );
       navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.message || '注册失败，请稍后重试');
+      const detail = err.response?.data?.detail;
+      const msg = Array.isArray(detail) ? detail[0]?.msg : detail;
+      setError(msg || err.response?.data?.message || '注册失败，请稍后重试');
     } finally {
       setLoading(false);
     }

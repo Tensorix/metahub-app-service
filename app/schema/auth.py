@@ -31,6 +31,10 @@ class RefreshRequest(BaseModel):
     refresh_token: str = Field(..., description="刷新令牌")
 
 
+class RegistrationStatusResponse(BaseModel):
+    registration_disabled: bool = Field(..., description="是否已关闭新用户注册")
+
+
 # ============ 用户信息 ============
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

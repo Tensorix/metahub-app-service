@@ -107,8 +107,17 @@ export interface TokenResponse {
   expires_in: number;
 }
 
+export interface RegistrationStatus {
+  registration_disabled: boolean;
+}
+
 // Auth API
 export const authApi = {
+  async getRegistrationStatus(): Promise<RegistrationStatus> {
+    const response = await api.get('/api/v1/auth/registration-status');
+    return response.data;
+  },
+
   async register(data: RegisterData): Promise<User> {
     const hashedPassword = await sha256(data.password);
     const response = await api.post('/api/v1/auth/register', {

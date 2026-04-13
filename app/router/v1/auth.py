@@ -12,14 +12,32 @@ from app.schema.auth import (
     RefreshRequest,
     UserResponse,
     LogoutRequest,
+    RegistrationStatusResponse,
 )
+from app.service import system_config as system_config_svc
 from app.config import config
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+@router.get(
+    "/registration-status",
+    response_model=RegistrationStatusResponse,
+    summary="注册是否开放（无需登录）",
+)
+def registration_status(db: Session = Depends(get_db)):
+    return RegistrationStatusResponse(
+        registration_disabled=system_config_svc.is_registration_disabled(db),
+    )
+
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED, summary="用户注册")
 def register(data: RegisterRequest, db: Session = Depends(get_db)):
+    if system_config_svc.is_registration_disabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="注册已关闭",
+        )
     user = AuthService.register(db, data)
     if not user:
         raise HTTPException(

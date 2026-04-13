@@ -1,24 +1,59 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Label } from '../../components/ui/label';
+import { Switch } from '../../components/ui/switch';
 import { useThemeStore } from '../../store/theme';
+import { useAuthStore } from '../../store/auth';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { apiKeyApi, authApi } from '../../lib/api';
-import { Copy, RefreshCw, Eye, EyeOff, Key } from 'lucide-react';
+import { getSystemConfig, updateSystemConfig } from '../../lib/systemConfigApi';
+import { Copy, RefreshCw, Eye, EyeOff, Key, UserPlus } from 'lucide-react';
 import { useToast } from '../../hooks/use-toast';
 
 export function GeneralSettings() {
   const { theme, setTheme } = useThemeStore();
+  const { user } = useAuthStore();
   const { toast } = useToast();
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
+  const [registrationDisabled, setRegistrationDisabled] = useState(false);
+  const [authConfigLoading, setAuthConfigLoading] = useState(false);
+  const [authConfigSaving, setAuthConfigSaving] = useState(false);
 
   useEffect(() => {
     loadApiKey();
   }, []);
+
+  useEffect(() => {
+    if (!user?.is_superuser) return;
+    let cancelled = false;
+    const load = async () => {
+      setAuthConfigLoading(true);
+      try {
+        const res = await getSystemConfig<{ registration_disabled?: boolean }>('auth');
+        if (!cancelled) setRegistrationDisabled(!!res.value?.registration_disabled);
+      } catch (error: any) {
+        if (error.response?.status === 404 && !cancelled) {
+          setRegistrationDisabled(false);
+        } else if (!cancelled) {
+          toast({
+            title: '加载失败',
+            description: error.response?.data?.detail || '无法读取注册设置',
+            variant: 'destructive',
+          });
+        }
+      } finally {
+        if (!cancelled) setAuthConfigLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.is_superuser]);
 
   const loadApiKey = async () => {
     try {
@@ -83,8 +118,58 @@ export function GeneralSettings() {
     return `${key.substring(0, 10)}${'*'.repeat(key.length - 10)}`;
   };
 
+  const handleRegistrationDisabledChange = async (checked: boolean) => {
+    setAuthConfigSaving(true);
+    try {
+      await updateSystemConfig('auth', { registration_disabled: checked });
+      setRegistrationDisabled(checked);
+      toast({
+        title: '已保存',
+        description: checked ? '已禁止新用户注册' : '已允许新用户注册',
+      });
+    } catch (error: any) {
+      toast({
+        title: '保存失败',
+        description: error.response?.data?.detail || '更新注册设置失败',
+        variant: 'destructive',
+      });
+    } finally {
+      setAuthConfigSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {user?.is_superuser && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <UserPlus className="h-5 w-5" />
+              用户注册
+            </CardTitle>
+            <CardDescription>控制是否允许新用户在登录页自助注册账号</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="registration-disabled" className="text-base">
+                  禁用注册
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  开启后，新用户将无法注册；已登录用户不受影响。
+                </p>
+              </div>
+              <Switch
+                id="registration-disabled"
+                checked={registrationDisabled}
+                onCheckedChange={handleRegistrationDisabledChange}
+                disabled={authConfigLoading || authConfigSaving}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

@@ -17,6 +17,25 @@ from app.schema.system_config import (
     UpstreamModel,
 )
 
+AUTH_CONFIG_KEY = "auth"
+
+
+def normalize_auth_config(incoming: dict[str, Any]) -> dict[str, Any]:
+    """Persist only known auth-related flags."""
+    return {"registration_disabled": bool(incoming.get("registration_disabled", False))}
+
+
+def get_auth_config_value(db: Session) -> dict[str, Any]:
+    """Return auth system config with defaults when missing."""
+    row = get_config(db, AUTH_CONFIG_KEY)
+    if not row or not row.value or not isinstance(row.value, dict):
+        return {"registration_disabled": False}
+    return normalize_auth_config(row.value)
+
+
+def is_registration_disabled(db: Session) -> bool:
+    return bool(get_auth_config_value(db).get("registration_disabled"))
+
 
 def get_config(db: Session, key: str) -> Optional[SystemConfig]:
     """Get a system config row by key."""
