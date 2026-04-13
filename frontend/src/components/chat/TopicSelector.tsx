@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { Topic } from '@/lib/api';
 import type { VirtualTopic } from '@/lib/virtualTopic';
 import { useChatStore } from '@/store/chat';
@@ -13,8 +13,14 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
+import { cn, formatRelativeTime } from '@/lib/utils';
+import { computeBoundaryPreview } from '@/lib/topicBoundaryPreview';
 import { ChevronDown, Hash, Plus, Check, X, ChevronUp } from 'lucide-react';
+
+function topicRowPreviewStyle(isPreview: boolean, boundaryProgress: number) {
+  if (!isPreview) return undefined;
+  return { opacity: Math.min(1, 0.72 + boundaryProgress / 350) } as const;
+}
 
 export function TopicSelector() {
   const [isCreating, setIsCreating] = useState(false);
@@ -34,19 +40,21 @@ export function TopicSelector() {
   const currentTopic = getCurrentTopic();
   const topics = getAllTopicsForSession(currentSessionId);
 
-  // 计算预览目标话题
-  // 话题按 created_at 升序排列（最旧在 index 0，最新在末尾）
-  // up = 向上滚动 = 查看更旧的话题 = index - 1
-  // down = 向下滚动 = 查看更新的话题 = index + 1
-  const currentIndex = topics.findIndex(t => t.id === currentTopicId);
-  const previewIndex = boundaryDirection === 'up'
-    ? currentIndex - 1
-    : boundaryDirection === 'down'
-      ? currentIndex + 1
-      : -1;
-  const previewTopicId = previewIndex >= 0 && previewIndex < topics.length
-    ? topics[previewIndex]?.id
-    : null;
+  const { previewTopicId, highlightAnchorDown } = computeBoundaryPreview(
+    topics,
+    currentTopicId,
+    boundaryDirection,
+  );
+
+  const isCurrentPreview =
+    highlightAnchorDown && boundaryProgress > 0 && !!currentTopicId;
+
+  const selectedRowRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    requestAnimationFrame(() => {
+      node.scrollIntoView({ block: 'end' });
+    });
+  }, []);
 
   const handleCreateTopic = async () => {
     if (!currentSessionId || !newTopicName.trim()) return;
@@ -64,6 +72,53 @@ export function TopicSelector() {
     return null;
   }
 
+  const renderTopicRow = (topic: Topic | VirtualTopic) => {
+    const t = topic as Topic | VirtualTopic;
+    const isVirtual = (t as VirtualTopic).is_virtual === true;
+    const isSelected = topic.id === currentTopicId;
+    const isPreview =
+      (topic.id === previewTopicId && boundaryProgress > 0) ||
+      (isSelected && isCurrentPreview);
+    const showUp = isPreview && boundaryDirection === 'up';
+    const showDown = isPreview && boundaryDirection === 'down';
+
+    return (
+      <DropdownMenuItem
+        ref={isSelected ? selectedRowRef : undefined}
+        className={cn(
+          'relative flex min-h-10 cursor-pointer items-center justify-between gap-2 px-2 py-2',
+          isSelected && 'bg-surface-hover',
+          isPreview && 'border border-brand/35 bg-brand/5 shadow-sm',
+        )}
+        style={topicRowPreviewStyle(!!isPreview, boundaryProgress)}
+        onClick={() => {
+          void selectTopic(topic.id);
+        }}
+      >
+        {isSelected && !isPreview && (
+          <div className="absolute left-0.5 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-brand" />
+        )}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {showUp && <ChevronUp className="h-3 w-3 shrink-0 text-brand" aria-hidden />}
+          {showDown && <ChevronDown className="h-3 w-3 shrink-0 text-brand" aria-hidden />}
+          {isSelected && !isPreview && <Check className="h-3 w-3 shrink-0" />}
+          <span className="line-clamp-1 text-xs">{t.name || '未命名话题'}</span>
+          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+            {formatRelativeTime(t.created_at)}
+          </span>
+          {isVirtual && (
+            <Badge
+              variant="outline"
+              className="h-4 border-muted-foreground/25 px-1 text-[8px] font-normal text-muted-foreground"
+            >
+              历史
+            </Badge>
+          )}
+        </div>
+      </DropdownMenuItem>
+    );
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger>
@@ -77,60 +132,21 @@ export function TopicSelector() {
           <ChevronDown className="ml-1 h-3 w-3" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-72 p-0" align="start">
-        <ScrollArea className="max-h-[300px]">
+      <DropdownMenuContent className="w-80 p-0" align="start">
+        <ScrollArea className="max-h-[min(320px,70vh)]">
           <div className="p-1">
             {topics.length === 0 && !isCreating ? (
               <div className="px-2 py-4 text-center text-xs text-muted-foreground">
                 暂无话题，发送第一条消息将自动创建
               </div>
             ) : (
-              topics.map((topic) => {
-                const t = topic as Topic | VirtualTopic;
-                const isVirtual = (t as VirtualTopic).is_virtual === true;
-                const isSelected = topic.id === currentTopicId;
-                const isPreview = topic.id === previewTopicId && boundaryProgress > 0;
-
-                return (
-                  <DropdownMenuItem
-                    key={topic.id}
-                    className={cn(
-                      'flex items-center justify-between px-2 py-1.5',
-                      isSelected && 'bg-surface-hover',
-                      isPreview && 'ring-2 ring-brand/50 bg-brand/8',
-                    )}
-                    style={isPreview ? { opacity: 0.5 + (boundaryProgress / 200) } : undefined}
-                    onClick={() => {
-                      void selectTopic(topic.id);
-                    }}
-                  >
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      {isPreview && boundaryDirection === 'up' && (
-                        <ChevronUp className="h-3 w-3 text-brand animate-bounce shrink-0" />
-                      )}
-                      {isPreview && boundaryDirection === 'down' && (
-                        <ChevronDown className="h-3 w-3 text-brand animate-bounce shrink-0" />
-                      )}
-                      {isSelected && !isPreview && <Check className="h-3 w-3 shrink-0" />}
-                      <span className="line-clamp-1 text-xs">
-                        {t.name || '未命名话题'}
-                      </span>
-                      {isVirtual && (
-                        <Badge
-                          variant="outline"
-                          className="h-4 px-1 text-[9px] shrink-0"
-                        >
-                          历史
-                        </Badge>
-                      )}
-                    </div>
-                  </DropdownMenuItem>
-                );
-              })
+              <div className="space-y-0.5">
+                {topics.map((topic) => renderTopicRow(topic as Topic | VirtualTopic))}
+              </div>
             )}
 
             {isCreating && (
-              <div className="space-y-2 p-2 border-t mt-1">
+              <div className="mt-1 space-y-2 border-t p-2">
                 <Input
                   placeholder="输入话题名称..."
                   value={newTopicName}
@@ -150,7 +166,7 @@ export function TopicSelector() {
                   <Button
                     size="sm"
                     variant="default"
-                    className="h-7 flex-1 text-xs"
+                    className="h-8 min-h-10 flex-1 text-xs"
                     onClick={handleCreateTopic}
                     disabled={!newTopicName.trim()}
                   >
@@ -159,7 +175,7 @@ export function TopicSelector() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-7 text-xs"
+                    className="h-8 min-h-10 text-xs"
                     onClick={() => {
                       setIsCreating(false);
                       setNewTopicName('');
@@ -176,10 +192,7 @@ export function TopicSelector() {
           <>
             <DropdownMenuSeparator />
             <div className="p-1">
-              <DropdownMenuItem
-                onClick={() => setIsCreating(true)}
-                className="px-2 py-1.5"
-              >
+              <DropdownMenuItem onClick={() => setIsCreating(true)} className="min-h-10 px-2 py-2">
                 <Plus className="mr-2 h-3 w-3" />
                 <span className="text-xs">新建话题</span>
               </DropdownMenuItem>
