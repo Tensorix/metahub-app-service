@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SessionDialog } from '@/components/SessionDialog';
-import { cn } from '@/lib/utils';
+import { cn, formatRelativeTime } from '@/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Menu,
@@ -81,43 +81,6 @@ type SessionType = keyof typeof TYPE_CONFIG;
 
 function getTypeConfig(type: string) {
   return TYPE_CONFIG[type as SessionType] ?? TYPE_CONFIG.ai;
-}
-
-/* ─── Relative time ─── */
-
-function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60_000);
-  const diffDays = Math.floor(diffMs / 86_400_000);
-
-  if (diffMin < 1) return '刚刚';
-  if (diffMin < 60) return `${diffMin}分钟前`;
-
-  // Same calendar day
-  if (
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
-  ) {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  }
-
-  // Yesterday
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (
-    date.getFullYear() === yesterday.getFullYear() &&
-    date.getMonth() === yesterday.getMonth() &&
-    date.getDate() === yesterday.getDate()
-  ) {
-    return '昨天';
-  }
-
-  if (diffDays < 7) return `${diffDays}天前`;
-
-  return `${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
 /* ─── Component ─── */

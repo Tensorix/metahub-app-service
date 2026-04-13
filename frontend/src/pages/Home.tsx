@@ -17,6 +17,7 @@ import { sessionApi, type Session } from '@/lib/api';
 import { activityApi, type Activity } from '@/lib/activityApi';
 import { Skeleton } from '@/components/ui/skeleton';
 import { staggerContainer, fadeUp } from '@/lib/motion';
+import { formatRelativeTime } from '@/lib/utils';
 
 /* ─── Quick-action definitions ─── */
 
@@ -56,37 +57,6 @@ const QUICK_ACTIONS = [
 /* ─── Helpers ─── */
 
 const MAX_ITEMS = 5;
-
-function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60_000);
-
-  if (diffMin < 1) return '刚刚';
-  if (diffMin < 60) return `${diffMin}分钟前`;
-
-  if (
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
-  ) {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  }
-
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (
-    date.getFullYear() === yesterday.getFullYear() &&
-    date.getMonth() === yesterday.getMonth() &&
-    date.getDate() === yesterday.getDate()
-  ) {
-    return '昨天';
-  }
-
-  if (Math.floor(diffMs / 86_400_000) < 7) return `${Math.floor(diffMs / 86_400_000)}天前`;
-  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-}
 
 function formatDueDate(dateStr: string): { text: string; urgent: boolean } {
   const due = new Date(dateStr);

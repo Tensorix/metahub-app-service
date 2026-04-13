@@ -73,3 +73,42 @@ export function getSessionTypeLabel(type: string): string {
 export function formatDateForInput(date: Date): string {
   return date.toISOString().slice(0, 16);
 }
+
+/**
+ * 格式化相对时间（中文）
+ * e.g. "刚刚", "5分钟前", "14:30", "昨天", "3天前", "3月15日"
+ */
+export function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  const diffDays = Math.floor(diffMs / 86_400_000);
+
+  if (diffMin < 1) return '刚刚';
+  if (diffMin < 60) return `${diffMin}分钟前`;
+
+  // Same calendar day
+  if (
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  ) {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Yesterday
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (
+    date.getFullYear() === yesterday.getFullYear() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getDate() === yesterday.getDate()
+  ) {
+    return '昨天';
+  }
+
+  if (diffDays < 7) return `${diffDays}天前`;
+
+  return `${date.getMonth() + 1}月${date.getDate()}日`;
+}
