@@ -29,6 +29,64 @@ interface TopicSidebarProps {
   style?: React.CSSProperties;
 }
 
+const TOPIC_LIST_FULL_ANIMATION_LIMIT = 24;
+const TOPIC_LIST_PARTIAL_ANIMATION_COUNT = 12;
+const TOPIC_LIST_SMOOTH_SCROLL_SCREENS = 1.25;
+const TOPIC_LIST_FINAL_SMOOTH_SCROLL_SCREENS = 0.75;
+
+function smartScrollIntoView(
+  container: HTMLDivElement | null,
+  target: HTMLElement | null,
+  block: 'end' | 'nearest',
+) {
+  if (!container || !target) return;
+
+  const containerRect = container.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+  let nextScrollTop = container.scrollTop;
+
+  if (block === 'end') {
+    nextScrollTop += targetRect.bottom - containerRect.bottom;
+  } else if (targetRect.top < containerRect.top) {
+    nextScrollTop += targetRect.top - containerRect.top;
+  } else if (targetRect.bottom > containerRect.bottom) {
+    nextScrollTop += targetRect.bottom - containerRect.bottom;
+  } else {
+    return;
+  }
+
+  nextScrollTop = Math.max(0, Math.min(maxScrollTop, nextScrollTop));
+  const distance = Math.abs(nextScrollTop - container.scrollTop);
+  const smoothThreshold = container.clientHeight * TOPIC_LIST_SMOOTH_SCROLL_SCREENS;
+
+  if (distance <= smoothThreshold) {
+    container.scrollTo({
+      top: nextScrollTop,
+      behavior: 'smooth',
+    });
+    return;
+  }
+
+  const finalSmoothDistance = container.clientHeight * TOPIC_LIST_FINAL_SMOOTH_SCROLL_SCREENS;
+  const direction = nextScrollTop > container.scrollTop ? 1 : -1;
+  const preScrollTop = Math.max(
+    0,
+    Math.min(maxScrollTop, nextScrollTop - direction * finalSmoothDistance),
+  );
+
+  container.scrollTo({ top: preScrollTop, behavior: 'auto' });
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      container.scrollTo({
+        top: nextScrollTop,
+        behavior: 'smooth',
+      });
+    });
+  });
+}
+
 function SearchResultRow({
   topic,
   isSelected,
@@ -161,6 +219,7 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const topicRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const createFormRef = useRef<HTMLDivElement>(null);
 
@@ -202,7 +261,7 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
   useEffect(() => {
     if (isCreating) {
       const timer = setTimeout(() => {
-        createFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        smartScrollIntoView(scrollAreaRef.current, createFormRef.current, 'nearest');
       }, 100);
       return () => clearTimeout(timer);
     }
@@ -213,10 +272,7 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
       return;
     }
     const timer = setTimeout(() => {
-      topicRefs.current[currentTopicId]?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'end',
-      });
+      smartScrollIntoView(scrollAreaRef.current, topicRefs.current[currentTopicId], 'end');
     }, 0);
     return () => clearTimeout(timer);
   }, [allTopics.length, currentSession, currentTopicId, isSearching]);
@@ -276,6 +332,66 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
 
   const searchMode = isSearching;
   const showTopicList = currentSession && !searchMode;
+
+  const renderTopicRows = (
+    topics: (Topic | VirtualTopic)[],
+    options: { withRefs?: boolean },
+  ) => {
+    const animatedRows =
+      topics.length <= TOPIC_LIST_FULL_ANIMATION_LIMIT
+        ? topics.length
+        : TOPIC_LIST_PARTIAL_ANIMATION_COUNT;
+    const rows = topics.map((topic, index) => {
+      const t = topic as Topic | VirtualTopic;
+      const isSelected = topic.id === currentTopicId;
+      const isPreview =
+        (topic.id === previewTopicId || (highlightAnchorDown && isSelected)) &&
+        boundaryProgress > 0;
+      const row = (
+        <SearchResultRow
+          topic={t}
+          isSelected={isSelected}
+          isPreview={!!isPreview}
+          boundaryDirection={boundaryDirection}
+          boundaryProgress={boundaryProgress}
+          editingTopicId={editingTopicId}
+          editName={editName}
+          setEditName={setEditName}
+          onSelect={() => handleSelectTopic(topic.id)}
+          onSaveRename={handleSaveRename}
+          onCancelEdit={() => setEditingTopicId(null)}
+          onStartRename={handleStartRename}
+          onDelete={handleDeleteTopic}
+        />
+      );
+      const ref = options.withRefs
+        ? (el: HTMLDivElement | null) => {
+            topicRefs.current[topic.id] = el;
+          }
+        : undefined;
+      const shouldAnimateRow = index < animatedRows;
+
+      if (shouldAnimateRow) {
+        return (
+          <motion.div key={topic.id} variants={listItem} ref={ref}>
+            {row}
+          </motion.div>
+        );
+      }
+
+      return (
+        <div key={topic.id} ref={ref}>
+          {row}
+        </div>
+      );
+    });
+
+    return (
+      <motion.div variants={sidebarStagger} initial="hidden" animate="visible" className="space-y-0.5">
+        {rows}
+      </motion.div>
+    );
+  };
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -348,7 +464,7 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
         </div>
 
         {/* Scroll: search = filtered list; 默认 = 全量升序列表 */}
-        <ScrollArea className="min-h-0 flex-1">
+        <ScrollArea ref={scrollAreaRef} className="min-h-0 flex-1">
           <div className="px-1.5 py-1.5">
             {!currentSession && (
               <p className="py-6 text-center text-xs text-muted-foreground">先选择一个会话</p>
@@ -357,34 +473,7 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
             {currentSession && searchMode && (
               <>
                 {searchFiltered.length > 0 ? (
-                  <motion.div variants={sidebarStagger} initial="hidden" animate="visible" className="space-y-0.5">
-                    {searchFiltered.map((topic) => {
-                      const t = topic as Topic | VirtualTopic;
-                      const isSelected = topic.id === currentTopicId;
-                      const isPreview =
-                        (topic.id === previewTopicId || (highlightAnchorDown && isSelected)) &&
-                        boundaryProgress > 0;
-                      return (
-                        <motion.div key={topic.id} variants={listItem}>
-                          <SearchResultRow
-                            topic={t}
-                            isSelected={isSelected}
-                            isPreview={!!isPreview}
-                            boundaryDirection={boundaryDirection}
-                            boundaryProgress={boundaryProgress}
-                            editingTopicId={editingTopicId}
-                            editName={editName}
-                            setEditName={setEditName}
-                            onSelect={() => handleSelectTopic(topic.id)}
-                            onSaveRename={handleSaveRename}
-                            onCancelEdit={() => setEditingTopicId(null)}
-                            onStartRename={handleStartRename}
-                            onDelete={handleDeleteTopic}
-                          />
-                        </motion.div>
-                      );
-                    })}
-                  </motion.div>
+                  renderTopicRows(searchFiltered, {})
                 ) : (
                   <div className="flex flex-col items-center gap-2 py-12 text-center">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
@@ -397,40 +486,7 @@ export function TopicSidebar({ className, style }: TopicSidebarProps) {
             )}
 
             {showTopicList && allTopics.length > 0 && (
-              <motion.div variants={sidebarStagger} initial="hidden" animate="visible" className="space-y-0.5">
-                {allTopics.map((topic) => {
-                  const t = topic as Topic | VirtualTopic;
-                  const isSelected = topic.id === currentTopicId;
-                  const isPreview =
-                    (topic.id === previewTopicId || (highlightAnchorDown && isSelected)) &&
-                    boundaryProgress > 0;
-                  return (
-                    <motion.div
-                      key={topic.id}
-                      variants={listItem}
-                      ref={(el) => {
-                        topicRefs.current[topic.id] = el;
-                      }}
-                    >
-                      <SearchResultRow
-                        topic={t}
-                        isSelected={isSelected}
-                        isPreview={!!isPreview}
-                        boundaryDirection={boundaryDirection}
-                        boundaryProgress={boundaryProgress}
-                        editingTopicId={editingTopicId}
-                        editName={editName}
-                        setEditName={setEditName}
-                        onSelect={() => handleSelectTopic(topic.id)}
-                        onSaveRename={handleSaveRename}
-                        onCancelEdit={() => setEditingTopicId(null)}
-                        onStartRename={handleStartRename}
-                        onDelete={handleDeleteTopic}
-                      />
-                    </motion.div>
-                  );
-                })}
-              </motion.div>
+              renderTopicRows(allTopics, { withRefs: true })
             )}
 
             {showTopicList && allTopics.length === 0 && !isCreating && (
